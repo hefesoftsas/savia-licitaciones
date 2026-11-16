@@ -27,19 +27,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: Web, suite: web }
-          - { name: API 1 of 12, suite: api, shard: '1/12' }
-          - { name: API 2 of 12, suite: api, shard: '2/12' }
-          - { name: API 3 of 12, suite: api, shard: '3/12' }
-          - { name: API 4 of 12, suite: api, shard: '4/12' }
-          - { name: API 5 of 12, suite: api, shard: '5/12' }
-          - { name: API 6 of 12, suite: api, shard: '6/12' }
-          - { name: API 7 of 12, suite: api, shard: '7/12' }
-          - { name: API 8 of 12, suite: api, shard: '8/12' }
-          - { name: API 9 of 12, suite: api, shard: '9/12' }
-          - { name: API 10 of 12, suite: api, shard: '10/12' }
-          - { name: API 11 of 12, suite: api, shard: '11/12' }
-          - { name: API 12 of 12, suite: api, shard: '12/12' }
+          - { name: Web Build, suite: web-build }
+          - { name: Web Tests 1 of 3, suite: web-test, shard: '1/3' }
+          - { name: Web Tests 2 of 3, suite: web-test, shard: '2/3' }
+          - { name: Web Tests 3 of 3, suite: web-test, shard: '3/3' }
+          - { name: API 1 of 16, suite: api, shard: '1/16' }
+          - { name: API 2 of 16, suite: api, shard: '2/16' }
+          - { name: API 3 of 16, suite: api, shard: '3/16' }
+          - { name: API 4 of 16, suite: api, shard: '4/16' }
+          - { name: API 5 of 16, suite: api, shard: '5/16' }
+          - { name: API 6 of 16, suite: api, shard: '6/16' }
+          - { name: API 7 of 16, suite: api, shard: '7/16' }
+          - { name: API 8 of 16, suite: api, shard: '8/16' }
+          - { name: API 9 of 16, suite: api, shard: '9/16' }
+          - { name: API 10 of 16, suite: api, shard: '10/16' }
+          - { name: API 11 of 16, suite: api, shard: '11/16' }
+          - { name: API 12 of 16, suite: api, shard: '12/16' }
+          - { name: API 13 of 16, suite: api, shard: '13/16' }
+          - { name: API 14 of 16, suite: api, shard: '14/16' }
+          - { name: API 15 of 16, suite: api, shard: '15/16' }
+          - { name: API 16 of 16, suite: api, shard: '16/16' }
           - { name: Runner, suite: runner }
           - { name: Connector, suite: connector }
           - { name: Maintenance, suite: maintenance }
@@ -78,22 +85,24 @@ jobs:
         if: matrix.suite == 'api'
         run: pnpm run build:web
       - name: Typecheck client
-        if: matrix.suite == 'web'
+        if: matrix.suite == 'web-build'
         run: pnpm run typecheck
-      - name: Test client
-        if: matrix.suite == 'web'
-        run: pnpm run test:client
       - name: Build web and verify assets
-        if: matrix.suite == 'web'
+        if: matrix.suite == 'web-build'
         run: pnpm run test:web-assets
       - name: Upload built web assets for deploy
-        if: matrix.suite == 'web' && ((github.event_name == 'push' && github.ref == 'refs/heads/develop') || github.event_name == 'workflow_dispatch')
+        if: matrix.suite == 'web-build' && ((github.event_name == 'push' && github.ref == 'refs/heads/develop') || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: web-dist
           path: web-api/dist
           if-no-files-found: error
           retention-days: 1
+      - name: Test client
+        if: matrix.suite == 'web-test'
+        env:
+          TEST_SHARD: ${{ matrix.shard }}
+        run: node --test --test-concurrency=1 --test-shard="$TEST_SHARD" 'client/src/**/*.test.mjs' 'client/test/*.test.*'
       - name: Test web API
         if: matrix.suite == 'api'
         working-directory: web-api
