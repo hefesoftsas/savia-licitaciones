@@ -28,14 +28,18 @@ jobs:
       matrix:
         include:
           - { name: Web, suite: web }
-          - { name: API 1 of 8, suite: api, shard: '1/8' }
-          - { name: API 2 of 8, suite: api, shard: '2/8' }
-          - { name: API 3 of 8, suite: api, shard: '3/8' }
-          - { name: API 4 of 8, suite: api, shard: '4/8' }
-          - { name: API 5 of 8, suite: api, shard: '5/8' }
-          - { name: API 6 of 8, suite: api, shard: '6/8' }
-          - { name: API 7 of 8, suite: api, shard: '7/8' }
-          - { name: API 8 of 8, suite: api, shard: '8/8' }
+          - { name: API 1 of 12, suite: api, shard: '1/12' }
+          - { name: API 2 of 12, suite: api, shard: '2/12' }
+          - { name: API 3 of 12, suite: api, shard: '3/12' }
+          - { name: API 4 of 12, suite: api, shard: '4/12' }
+          - { name: API 5 of 12, suite: api, shard: '5/12' }
+          - { name: API 6 of 12, suite: api, shard: '6/12' }
+          - { name: API 7 of 12, suite: api, shard: '7/12' }
+          - { name: API 8 of 12, suite: api, shard: '8/12' }
+          - { name: API 9 of 12, suite: api, shard: '9/12' }
+          - { name: API 10 of 12, suite: api, shard: '10/12' }
+          - { name: API 11 of 12, suite: api, shard: '11/12' }
+          - { name: API 12 of 12, suite: api, shard: '12/12' }
           - { name: Runner, suite: runner }
           - { name: Connector, suite: connector }
           - { name: Maintenance, suite: maintenance }
@@ -46,8 +50,15 @@ jobs:
         with:
           node-version: 22.23.2
           cache: 'pnpm'
-      - uses: actions/setup-dotnet@v4
+      - name: Restore Word helper cache
+        id: openxml-cache
         if: matrix.suite == 'api' || matrix.suite == 'runner'
+        uses: actions/cache@v4
+        with:
+          path: client/vendor/openxml-tools
+          key: openxml-helper-linux-x64-${{ hashFiles('openxmlhelper/**', 'client/scripts/prepare-openxml-helper.cjs') }}
+      - uses: actions/setup-dotnet@v4
+        if: (matrix.suite == 'api' || matrix.suite == 'runner') && steps.openxml-cache.outputs.cache-hit != 'true'
         with:
           dotnet-version: '10.0.x'
       - name: Install verified dependencies
@@ -61,7 +72,7 @@ jobs:
           done
           exit 1
       - name: Prepare Word helper
-        if: matrix.suite == 'api' || matrix.suite == 'runner'
+        if: (matrix.suite == 'api' || matrix.suite == 'runner') && steps.openxml-cache.outputs.cache-hit != 'true'
         run: node client/scripts/prepare-openxml-helper.cjs --platform linux --arch x64
       - name: Build web assets for API tests
         if: matrix.suite == 'api'
@@ -88,7 +99,7 @@ jobs:
         working-directory: web-api
         env:
           TEST_SHARD: ${{ matrix.shard }}
-        run: node --test --test-concurrency=2 --test-shard="$TEST_SHARD" test/*.test.mjs
+        run: node --test --test-concurrency=3 --test-shard="$TEST_SHARD" test/*.test.mjs
       - name: Test runner
         if: matrix.suite == 'runner'
         run: |
