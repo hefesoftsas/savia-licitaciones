@@ -1,0 +1,6 @@
+export async function runnerExportFormatCapture(request,env,runner){
+ if(request.method!=='GET')return new Response('Method not allowed',{status:405});
+ const [settings,templates]=await env.DB.batch([env.DB.prepare('SELECT format_json,version,updated_at FROM export_format_settings WHERE owner_id=?').bind(runner.ownerId),env.DB.prepare('SELECT id,name,format_json,version,created_at,updated_at FROM export_format_templates WHERE owner_id=? ORDER BY id LIMIT 1001').bind(runner.ownerId)]);
+ if(templates.results.length>1000)return Response.json({error:'snapshot_limit_exceeded'},{status:409});
+ try{const row=settings.results[0],data={format:row?JSON.parse(row.format_json):null,templates:templates.results.map(x=>({sourceId:x.id,name:x.name,config:JSON.parse(x.format_json),createdAt:x.created_at,updatedAt:x.updated_at}))};const encoded=new TextEncoder().encode(JSON.stringify(data));if(encoded.length>4_500_000)return Response.json({error:'snapshot_limit_exceeded'},{status:409});const revision=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify({settings:settings.results,templates:templates.results})))),b=>b.toString(16).padStart(2,'0')).join('');return Response.json({...data,revision});}catch{return Response.json({error:'snapshot_data_unavailable'},{status:503});}
+}

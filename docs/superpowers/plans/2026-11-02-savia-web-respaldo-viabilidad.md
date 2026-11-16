@@ -1,0 +1,9 @@
+# Captura y recuperación de viabilidad
+
+El informe web de cuenta usa estado versionado, originales, fuentes históricas, textos e imágenes de extracción y recursos de capítulos. Capturar esos componentes autenticando al runner propietario, con revisión D1 y ETags de R2 y verificación de hashes disponibles. Las extracciones terminadas deben conservar su relación con fuente y trabajo; las tareas activas no se reanudan. Las bibliotecas de conocimiento e imágenes compartidas, credenciales y otras áreas deben declararse aparte.
+
+La recuperación deberá verificar antes de escribir, remapear identidades y referencias, preservar los originales y recursos, reutilizar recibos idempotentes, rechazar conflictos y no sobrescribir un informe existente. Probar con Miniflare cambios concurrentes, objetos ausentes, eliminación, cuentas cruzadas e interrupciones. No desplegar ni habilitar un runner alojado. D1 y R2 no brindan instantánea atómica conjunta.
+
+**Avance:** captura parcial y restauración de informe, originales, fuentes históricas disponibles, recursos y extracciones terminadas. La restauración valida metadatos y hashes, prepara los objetos sin publicar el informe y confirma las filas en una transacción D1; rechaza conflictos, permite reintentos y ofrece descartar una preparación incompleta. Los trabajos de extracción se crean con nuevas identidades y se conservan las referencias antiguas de imágenes mediante alias por cuenta. Las bibliotecas compartidas, credenciales e historial completo de tareas quedan fuera; las tareas activas no se reanudan.
+
+Miniflare prueba aislamiento, cambios, fuentes faltantes, integridad, restauración y reintentos, y limpieza de una preparación. El runner empaquetado de macOS ARM64 también se ha comprobado. D1 y R2 no proporcionan una instantánea conjunta y el material capturado no está cifrado; no es un respaldo completo. No se ha validado en Cloudflare real ni en Windows/Linux.

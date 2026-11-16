@@ -1,0 +1,162 @@
+/* [1-25] root vars + universal box-sizing reset */
+:root {
+  --savia-primary: #2174fd;
+  --savia-primary-hover: #4098fc;
+  --savia-primary-deep: #155bd7;
+  --savia-violet: #5b54d3;
+  --savia-bg: #fafcff;
+  --savia-surface: #ffffff;
+  --savia-border: #e6e9f0;
+  --savia-border-soft: #eef2f9;
+  --savia-text: #1c2536;
+  --savia-text-soft: #66707f;
+  --savia-text-muted: #98a2b3;
+
+  /* Semantic colors: success, warning, danger; each has primary, dark text, light background, and border variants. */
+  --savia-success: #168a4a;
+  --savia-success-deep: #0f6f3b;
+  --savia-success-soft: #e9f7ef;
+  --savia-success-border: #bfe5cd;
+  --savia-warning: #f28a00;
+  --savia-warning-deep: #9a5b00;
+  --savia-warning-soft: #fdf3e4;
+  --savia-warning-border: #f2d8ab;
+  --savia-danger: #c83220;
+  --savia-danger-deep: #a32619;
+  --savia-danger-soft: #fdeeeb;
+  --savia-danger-border: #f3c8c0;
+
+  /* Radius scale: pill for capsules, xl for cards, lg/md for panel content, sm for small controls. */
+  --savia-radius-sm: 8px;
+  --savia-radius-md: 12px;
+  --savia-radius-lg: 16px;
+  --savia-radius-xl: 24px;
+  --savia-radius-pill: 999px;
+
+  /* Layered shadows from subtle to strong; higher layers and stronger emphasis use heavier shadows. */
+  --savia-shadow-xs: 0 2px 8px rgba(23, 32, 51, 0.04);
+  --savia-shadow-sm: 0 8px 20px rgba(33, 116, 253, 0.05);
+  --savia-shadow: 0 18px 40px rgba(33, 116, 253, 0.07);
+  --savia-shadow-lg: 0 30px 64px rgba(33, 116, 253, 0.11), 0 10px 26px rgba(23, 32, 51, 0.06);
+  --savia-shadow-hover: 0 22px 46px rgba(33, 116, 253, 0.16), 0 8px 18px rgba(23, 32, 51, 0.08);
+  --savia-shadow-modal: 0 28px 72px rgba(23, 32, 51, 0.16);
+
+  /* Shared keyboard focus ring. */
+  --savia-focus-ring: 0 0 0 3px rgba(33, 116, 253, 0.22);
+
+  /* Shared transition timing: faster ease-out for interaction feedback and softer curves for state changes. */
+  --savia-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --savia-duration-fast: 140ms;
+  --savia-duration: 220ms;
+
+  /* Toast always stays above all application dialogs, overlays, and fullscreen previews. */
+  --savia-z-toast: 2147483647;
+  --savia-z-agent-question: 2000;
+
+  color: var(--savia-text);
+  background: var(--savia-bg);
+  font-family: Inter, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* [27-37] html/body/#root reset + body overflow hidden */
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+/* [159-188] sr-only + button/input/select font inherit + select arrow + button cursor */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+select {
+  appearance: none;
+  padding-right: 42px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23536176' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 18px 18px;
+}
+
+button {
+  cursor: pointer;
+}
+
+/*
+ * Global keyboard focus: buttons/links use outline rings; text inputs use a consistent blue ring. Show only
+ * on :focus-visible for keyboard navigation, without affecting mouse clicks; features may override with
+ * greater specificity.
+ */
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgba(33, 116, 253, 0.55);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--savia-focus-ring);
+}
+
+/* Shared thin scrollbars using standard properties, which override private WebKit styling in recent Chromium. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(102, 112, 127, 0.32) transparent;
+}
+
+/*
+ * Reduced motion disables dialog entrances and decorative infinite animations (pulse/shimmer), while
+ * retaining loading spinners (savia-spin / workspace-database-spin) to communicate ongoing work.
+ */
+@media (prefers-reduced-motion: reduce) {
+  [class*='-modal'][data-state='open'],
+  [class*='-overlay'][data-state='open'],
+  [class*='-card'][data-state='open'],
+  [class*='-dialog'][data-state='open'],
+  .agent-runtime-status-bar.is-running .agent-runtime-status-dot,
+  .savia-progress-track.is-active::after,
+  .content-outline-item.is-running .content-outline-dot,
+  .content-outline-item.is-planning .content-outline-dot,
+  .plugin-status-pill.is-updating {
+    animation: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}

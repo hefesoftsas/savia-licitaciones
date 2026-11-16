@@ -1,0 +1,143 @@
+name: Deploy Savia Web
+
+on:
+  workflow_run:
+    workflows: ["Savia web CI"]
+    types: [completed]
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare Workers
+    environment: production
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check Cloudflare credentials
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::error::Missing CLOUDFLARE_API_TOKEN repository secret."
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "::error::Missing CLOUDFLARE_ACCOUNT_ID repository secret."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+          cache: 'pnpm'
+
+      - name: Install verified dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if node scripts/install-dependencies.mjs; then exit 0; fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Dependency verification failed; retrying ($attempt/3)."
+              sleep $((attempt * 5))
+            fi
+          done
+          exit 1
+
+      - name: Build web assets
+        run: pnpm run build:web
+
+      - name: Generate Wrangler deploy config
+        env:
+          WORKER_NAME: ${{ vars.WORKER_NAME }}
+          D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
+          BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
+          AUTH_EMAIL_FROM: ${{ vars.AUTH_EMAIL_FROM }}
+          CREDENTIAL_KEY_ID: ${{ vars.CREDENTIAL_KEY_ID }}
+          RUNNER_DOWNLOAD_WINDOWS_URL: ${{ vars.RUNNER_DOWNLOAD_WINDOWS_URL }}
+          RUNNER_DOWNLOAD_MACOS_X64_URL: ${{ vars.RUNNER_DOWNLOAD_MACOS_X64_URL }}
+          RUNNER_DOWNLOAD_MACOS_ARM64_URL: ${{ vars.RUNNER_DOWNLOAD_MACOS_ARM64_URL }}
+          RUNNER_DOWNLOAD_LINUX_ARM64_URL: ${{ vars.RUNNER_DOWNLOAD_LINUX_ARM64_URL }}
+        run: |
+          node --input-type=module << 'EOF'
+          import fs from 'node:fs';
+
+          const required = [
+            'WORKER_NAME',
+            'D1_DATABASE_NAME',
+            'D1_DATABASE_ID',
+            'R2_BUCKET_NAME',
+            'BETTER_AUTH_URL',
+            'AUTH_EMAIL_FROM',
+            'CREDENTIAL_KEY_ID',
+          ];
+          for (const key of required) {
+            if (!process.env[key]) {
+              throw new Error(`Missing required repository variable or secret: ${key}`);
+            }
+          }
+
+          const template = JSON.parse(fs.readFileSync('web-api/wrangler.web.template.jsonc', 'utf8'));
+          const config = {
+            ...template,
+            name: process.env.WORKER_NAME,
+            account_id: process.env.CLOUDFLARE_ACCOUNT_ID,
+            r2_buckets: [{ binding: 'FILES', bucket_name: process.env.R2_BUCKET_NAME }],
+            d1_databases: [
+              {
+                binding: 'DB',
+                database_name: process.env.D1_DATABASE_NAME,
+                database_id: process.env.D1_DATABASE_ID,
+                migrations_dir: 'migrations',
+              },
+            ],
+            vars: {
+              ...template.vars,
+              BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
+              AUTH_EMAIL_FROM: process.env.AUTH_EMAIL_FROM,
+              CREDENTIAL_KEY_ID: process.env.CREDENTIAL_KEY_ID,
+              RUNNER_DOWNLOAD_WINDOWS_URL: process.env.RUNNER_DOWNLOAD_WINDOWS_URL ?? '',
+              RUNNER_DOWNLOAD_MACOS_X64_URL: process.env.RUNNER_DOWNLOAD_MACOS_X64_URL ?? '',
+              RUNNER_DOWNLOAD_MACOS_ARM64_URL: process.env.RUNNER_DOWNLOAD_MACOS_ARM64_URL ?? '',
+              RUNNER_DOWNLOAD_LINUX_ARM64_URL: process.env.RUNNER_DOWNLOAD_LINUX_ARM64_URL ?? '',
+            },
+            send_email: [
+              {
+                name: 'EMAIL',
+                allowed_sender_addresses: [process.env.AUTH_EMAIL_FROM],
+              },
+            ],
+          };
+
+          fs.writeFileSync('web-api/wrangler.web.deploy.json', JSON.stringify(config, null, 2));
+          EOF
+
+      - name: Apply D1 migrations
+        working-directory: web-api
+        run: ./node_modules/.bin/wrangler d1 migrations apply DB --remote --config wrangler.web.deploy.json
+
+      - name: Deploy Worker and assets
+        working-directory: web-api
+        run: ./node_modules/.bin/wrangler deploy --config wrangler.web.deploy.json
+
+      - name: Remove generated deploy config
+        if: always()
+        run: rm -f web-api/wrangler.web.deploy.json

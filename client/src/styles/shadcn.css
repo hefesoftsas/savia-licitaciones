@@ -1,0 +1,167 @@
+/* Utilities only: document previews retain their existing HTML defaults. */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import 'tw-animate-css';
+@source '../';
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--secondary);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--savia-danger);
+  --color-destructive-foreground: #fff;
+  --color-border: var(--savia-border);
+  --color-input: var(--savia-border);
+  --color-ring: var(--primary);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+}
+
+:root {
+  --overlay-ink: #0f172a;
+  --inverse-foreground: #f8fafc;
+  --background: #f8fafc;
+  --foreground: #172033;
+  --card: #fff;
+  --primary: #2563eb;
+  --primary-foreground: #fff;
+  --secondary: #edf1f7;
+  --accent: #e4ecfb;
+  --muted-foreground: #526176;
+  --savia-bg: var(--background);
+  --savia-surface: var(--card);
+  --savia-text: var(--foreground);
+  --savia-text-soft: var(--muted-foreground);
+  --savia-text-muted: #64748b;
+  --savia-primary: var(--primary);
+  --savia-radius-sm: 6px;
+  --savia-radius-md: 8px;
+  --savia-radius-lg: 10px;
+  --savia-radius-xl: 12px;
+}
+
+:root.dark {
+  --background: #111827;
+  --foreground: #e5eaf3;
+  --card: #192335;
+  --primary: #8bb5ff;
+  --primary-foreground: #102044;
+  --secondary: #253248;
+  --accent: #2c3d59;
+  --muted-foreground: #b0bfd3;
+  --savia-text-muted: #a4b3c8;
+  --savia-primary-hover: #b2ceff;
+  --savia-primary-deep: #a9caff;
+  --savia-violet: #b2a4ff;
+  --savia-border: #39485e;
+  --savia-border-soft: #2c394e;
+  --savia-success: #67d69b;
+  --savia-success-deep: #89e5b0;
+  --savia-success-soft: #15372a;
+  --savia-success-border: #2b6550;
+  --savia-warning: #ffc46a;
+  --savia-warning-deep: #ffd292;
+  --savia-warning-soft: #3b2d19;
+  --savia-warning-border: #6b512c;
+  --savia-danger: #ff9c90;
+  --savia-danger-deep: #ffb0a6;
+  --savia-danger-soft: #442722;
+  --savia-danger-border: #744137;
+  --savia-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  --savia-shadow-modal: 0 24px 64px rgb(0 0 0 / 40%);
+}
+
+/* A local reset for imported primitives, never for rendered documents. */
+@layer base {
+  [data-ui] { border-style: solid; border-width: 0; font-family: inherit; color: inherit; }
+  [data-ui='toast-close'], [data-ui='dialog-close'], [data-ui='button'], [data-ui='switch'], [data-ui='tabs-trigger'] { background-color: transparent; }
+}
+[data-ui='switch'] { padding: 0; }
+[data-ui='checkbox'], [data-ui='radio'] { padding: 0; background-color: transparent; }
+[data-ui='checkbox'][data-state='checked'] { background-color: var(--primary); color: var(--primary-foreground); }
+[data-ui='dialog-surface'] { color: var(--foreground); }
+.app-tab-bar { min-width: 0; max-width: 100%; }
+.app-tab-bar > [role='tablist'] { display: flex; width: 100%; max-width: 100%; height: auto; min-height: 36px; overflow-x: auto; justify-content: flex-start; }
+.app-tab-bar [role='tab'] { flex-shrink: 0; }
+.app-tab-bar [role='tab'][data-state='active'] { background: var(--card); color: var(--foreground); }
+.credential-library-shell { grid-template-columns: minmax(0, 1fr); }
+.markdown-viewer pre, .restricted-html-document pre { background: var(--overlay-ink); color: var(--inverse-foreground); }
+.markdown-viewer pre code, .restricted-html-document pre code { color: var(--inverse-foreground); }
+.export-format-preview { --savia-text: #172033; --savia-text-soft: #526176; --card: #fff; --foreground: #172033; color: #172033; background: #fff; }
+.changelog-content pre code, .remote-notice-content pre code, .remote-notice-preview-close { color: var(--inverse-foreground); }
+.token-stats-page { color: var(--foreground); }
+.token-stats-shell { background: var(--card); color: var(--foreground); border-color: var(--savia-border); box-shadow: var(--savia-shadow); }
+.token-stats-shell :is(span, small, dt) { color: var(--muted-foreground); }
+.token-stats-shell :is(strong, dd, h1, h2, button) { color: var(--foreground); }
+[data-ui='dialog'] { border-color: var(--savia-border); border-radius: 10px; color: var(--foreground); transform: none; }
+.app-shadcn-dialog { display: flex; flex-direction: column; max-width: calc(100vw - 32px); }
+.app-shadcn-dialog-default { width: 560px; }
+.app-shadcn-dialog .app-dialog-card-head { padding-right: 16px; }
+.app-shadcn-dialog .app-dialog-card-head h2 { font-size: 18px; }
+.app-shadcn-dialog .app-dialog-card-head p { font-size: 14px; }
+[data-ui='input'], [data-ui='textarea'] { color: var(--foreground); background: var(--card); }
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.settings-page-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 4px 8px 12px; }
+.settings-page > .floating-toolbar.is-docked { padding: 10px 8px 0; }
+.settings-page .settings-tabs { position: sticky; top: 0; z-index: 2; width: 100%; height: auto; max-width: 100%; flex-wrap: wrap; gap: 2px; justify-content: flex-start; justify-self: start; margin-bottom: 8px; }
+.settings-page .settings-page-section { background: var(--card); border-color: var(--savia-border); border-radius: 10px; box-shadow: none; }
+.settings-page .settings-group-title { padding-top: 20px; padding-bottom: 10px; font-size: 13px; letter-spacing: normal; text-transform: none; color: var(--foreground); }
+.settings-page .settings-row { grid-template-columns: minmax(180px, 1fr) minmax(200px, 390px); }
+.settings-page .settings-row [data-ui='input'],
+.settings-page .settings-row [data-ui='native-select'],
+.settings-page .settings-row [data-ui='textarea'] { border-radius: 6px; border-color: var(--savia-border); background-color: var(--card); color: var(--foreground); font-weight: 400; }
+.settings-page .settings-row [data-ui='input']:not([type='range']),
+.settings-page .settings-row [data-ui='native-select'] { min-height: 36px; }
+.settings-page .settings-row [data-ui='switch'] { width: 36px; min-height: 0; padding: 0; }
+.settings-page [data-ui='tabs-trigger'] { font-weight: 500; white-space: nowrap; color: var(--muted-foreground); }
+.settings-page [data-ui='tabs-trigger'][data-state='active'] { background: var(--card); color: var(--foreground); }
+
+/* Shared chrome and overlays follow the same palette as the migrated controls. */
+.dark .app-shell { background: var(--background); }
+.dark .sidebar { background: var(--card); border-color: var(--savia-border); box-shadow: none; }
+.dark .sidebar-surface { background: none; }
+.dark :is(.app-dialog-card, .app-toast, .floating-toolbar, .settings-readonly-value) { background: var(--card); color: var(--foreground); border-color: var(--savia-border); }
+.dark :is(.secondary-action, .inline-action, .collapse-button, .sidebar-item, .sidebar-footer-button) { background-color: var(--secondary); color: var(--foreground); border-color: var(--savia-border); }
+.dark .primary-action { background: var(--primary); color: var(--primary-foreground); }
+.dark :is(.settings-page, .app-dialog-card) :is(input, select, textarea) { background-color: var(--card); color: var(--foreground); border-color: var(--savia-border); }
+.dark :is(.settings-page, .app-dialog-card) option { background: var(--card); color: var(--foreground); }
+.dark .app-toast-title, .dark .app-toast-description { color: var(--foreground); }
+.dark .settings-page :is(.parser-help-table, .agent-self-check-summary, .agent-self-check-item, .settings-info-note, .image-model-status) { background: var(--secondary); color: var(--foreground); border-color: var(--savia-border); }
+.dark :is(.storage-space-group, .storage-space-group-toggle, .storage-space-status, .detail-help-card) { background: var(--card); color: var(--foreground); border-color: var(--savia-border); }
+.dark :is(.about-update-card, .privacy-statement, .privacy-item) { background: var(--card); border-color: var(--savia-border); }
+.dark .privacy-item > span { color: var(--primary-foreground); }
+
+/* The shared component system owns control shape and selected navigation. */
+[data-ui='button']:is(.primary-action, .secondary-action, .inline-action, .text-button, .floating-toolbar-button) { border-radius: var(--radius-md); }
+.app-shell { background: var(--background); }
+.sidebar { background: var(--card); box-shadow: none; }
+.sidebar-surface { background: none; }
+.nav-item.is-active, .settings-trigger.is-active { background: var(--accent); color: var(--foreground); border-color: var(--savia-border); box-shadow: none; }
+.nav-item.is-active .nav-copy small, .settings-trigger.is-active .settings-copy small { color: var(--muted-foreground); }
+.primary-action, .floating-toolbar-button.is-primary, .floating-toolbar-button.is-ai:not(:disabled) { background: var(--primary); color: var(--primary-foreground); box-shadow: none; }
+.primary-action:hover:not(:disabled), .floating-toolbar-button.is-primary:hover:not(:disabled), .floating-toolbar-button.is-ai:hover:not(:disabled) { background: var(--savia-primary-hover); color: var(--primary-foreground); }
+
+@media (max-width: 760px) {
+  .settings-page .settings-row { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px 16px; }
+}

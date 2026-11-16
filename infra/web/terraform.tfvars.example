@@ -1,0 +1,11 @@
+account_id        = "replace-with-account-id"
+database_name     = "savia-web-production"
+bucket_name       = "savia-web-production-files"
+worker_name       = "savia-web-production"
+site_url          = "https://savia.example.com"
+email_from        = "savia@example.com"
+credential_key_id = "key-1"
+# After publishing the Worker:
+# enable_custom_domain = true
+# zone_id              = "replace-with-zone-id"
+# hostname             = "savia.example.com"

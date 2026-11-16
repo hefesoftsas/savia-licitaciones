@@ -1,0 +1,424 @@
+/* secop-*: Oportunidades SECOP (SecopOpportunitiesPage.tsx).
+   Mismo patrón que .settings-page: la página fluye en vertical y el scroll
+   lo pone el contenedor (.content-shell:has(.secop-page)), nunca un alto
+   calculado a mano. */
+.secop-page {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 100%;
+  overflow: visible;
+}
+
+.secop-panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 12px 0;
+  background:
+    transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.secop-head h3 {
+  margin: 7px 0 0;
+  color: var(--savia-text);
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+  font-weight: 600;
+}
+
+.secop-subtitle {
+  margin: 6px 0 0;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+}
+
+.secop-library-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.secop-library-controls label { display: grid; gap: 6px; color: var(--savia-text-soft); font-size: 13px; font-weight: 500; }
+.secop-library-controls input, .secop-library-controls select { min-width: 220px; min-height: 40px; padding: 8px 10px; color: var(--savia-text); background: var(--card); border: 1px solid var(--savia-border-soft); border-radius: var(--ui-radius); }
+.secop-library-layout { display: grid; grid-template-columns: minmax(200px, min(320px, 40%)) minmax(0, 1fr); grid-auto-rows: max-content; align-content: start; gap: 20px; align-items: start; }
+.secop-library-list { display: grid; align-content: start; gap: 2px; max-height: 65vh; overflow: auto; }
+.secop-library-item { display: grid; gap: 5px; width: 100%; padding: 10px 12px; color: var(--savia-text); text-align: left; background: var(--card); border: 1px solid transparent; border-radius: var(--ui-radius); cursor: pointer; border-bottom: 1px solid var(--savia-border-soft); justify-content: stretch; justify-items: start; }
+.secop-library-item.is-selected { border-color: var(--savia-border); background: var(--secondary); }
+.secop-library-item span, .secop-library-item small, .secop-library-note { color: var(--savia-text-soft); }
+.secop-library-item small { font-size: 12px; }
+.secop-library-detail { min-width: 0; display: grid; align-content: start; gap: 14px; }
+.secop-library-detail h4:focus-visible { outline: 2px solid var(--savia-primary); outline-offset: 2px; }
+.secop-library-detail h4 { margin: 6px 0; font-size: 20px; font-weight: 600; }
+.secop-library-detail h5 { margin: 0 0 7px; font-size: 15px; }
+.secop-library-detail p { margin: 6px 0; }
+.secop-library-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.secop-library-facts { display: flex; flex-wrap: wrap; gap: 18px; margin: 0; }
+.secop-library-facts div { display: grid; gap: 4px; }
+.secop-library-facts dt { color: var(--savia-text-soft); font-size: 12px; }
+.secop-library-facts dd { margin: 0; color: var(--savia-text); font-weight: 500; }
+.secop-library-note { font-size: 12px; line-height: 1.5; }
+.secop-library-text { max-height: 320px; min-height: 0; overflow: auto; padding: 14px; border: 1px solid var(--savia-border-soft); border-radius: var(--ui-radius); }
+.secop-library-disclosure { padding: 10px 12px; background: var(--card); border: 1px solid var(--savia-border-soft); border-radius: var(--ui-radius); }
+.secop-library-disclosure summary { cursor: pointer; font-weight: 500; }
+.secop-library-disclosure .secop-library-text, .secop-library-document { margin: 10px 0 0; }
+.secop-library-document { max-height: 360px; overflow: auto; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; background: var(--card); }
+.secop-library-documents { padding-left: 20px; }
+.secop-library-empty { padding: 16px 0; color: var(--savia-text-soft); }
+@media (min-width: 901px) {
+  .secop-library-list { position: sticky; top: 0; z-index: 1; background: var(--background); }
+}
+@media (max-width: 900px) { .secop-library-layout { grid-template-columns: 1fr; } .secop-library-list { max-height: 280px; gap: 2px; } }
+
+.secop-filters {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.secop-filter-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px;
+}
+
+.secop-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--savia-text-soft);
+}
+
+.secop-field-wide {
+  grid-column: span 2;
+}
+
+.secop-category { align-content: start; min-width: 0; }
+.secop-category-trigger { width: 100%; min-height: 38px; justify-content: space-between; font-weight: 400; }
+.secop-category-popover { width: 320px; max-width: calc(100vw - 32px); padding: 12px; }
+.secop-category-options { max-height: 240px; overflow-y: auto; margin: 8px 0; }
+.secop-category-options p { margin: 12px 4px; font-size: 13px; color: var(--muted-foreground); }
+.secop-category-option { display: flex; align-items: center; gap: 10px; padding: 9px 6px; border-radius: var(--ui-radius); cursor: pointer; font-size: 13px; overflow-wrap: anywhere; }
+.secop-category-option:hover, .secop-category-option:focus-within { background: var(--accent); color: var(--accent-foreground); }
+.secop-category-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.secop-category-tags button { height: auto; min-height: 28px; max-width: 100%; padding: 4px 8px; font-size: 12px; font-weight: 400; }
+.secop-category-tags button span { white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.secop-category-tags button svg { flex-shrink: 0; }
+
+.secop-field input,
+.secop-field select {
+  height: 38px;
+  padding: 0 12px;
+  color: var(--savia-text);
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+  outline: none;
+}
+
+.secop-field input:focus,
+.secop-field select:focus {
+  border-color: color-mix(in srgb, var(--savia-border) 50%, transparent);
+  box-shadow: var(--savia-focus-ring);
+}
+
+.secop-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--savia-border-soft);
+}
+
+.secop-statusline {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--savia-text);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+  padding: 8px 12px;
+}
+
+.secop-results {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  overflow: visible;
+  padding: 2px 4px 8px;
+}
+
+.secop-loading {
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  padding: 12px 4px;
+}
+
+.secop-truncated {
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.secop-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+  background: var(--card);
+}
+
+.secop-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.secop-table thead th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  padding: 10px 12px;
+  color: var(--savia-text-soft);
+  font-weight: 600;
+  background: var(--card);
+  border-bottom: 1px solid color-mix(in srgb, var(--savia-border) 90%, transparent);
+  white-space: nowrap;
+}
+
+.secop-table tbody td {
+  padding: 10px 12px;
+  color: var(--savia-text);
+  border-bottom: 1px solid color-mix(in srgb, var(--savia-border) 60%, transparent);
+  vertical-align: top;
+}
+
+.secop-row {
+  cursor: pointer;
+}
+
+.secop-row:hover {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.secop-cell-title {
+  max-width: 340px;
+}
+
+.secop-cell-number {
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.secop-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--savia-text-soft);
+}
+
+.secop-detail-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 101;
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(80vh, 720px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--card);
+  border-radius: var(--ui-card-radius);
+  box-shadow: none;
+  padding: 22px;
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+}
+
+.secop-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.secop-detail-head span {
+  color: var(--savia-text-soft);
+  font-size: 12px;
+}
+
+.secop-detail-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+  margin: 0;
+  padding-right: 4px;
+}
+
+.secop-detail-scroll { overflow: auto; min-height: 0; padding-right: 4px; }
+.secop-documents { margin-top: 20px; border-top: 1px solid var(--savia-border); padding-top: 14px; }
+.secop-documents h4 { margin: 0 0 8px; font-weight: 600; }
+.secop-documents p { margin: 7px 0; font-size: 13px; color: var(--savia-text-soft); }
+.secop-document-list { list-style: none; margin: 0; padding: 0; }
+.secop-document-list li { padding: 9px 0; border-bottom: 1px solid var(--savia-border); overflow-wrap: anywhere; }
+.secop-document-list label { display: flex; gap: 8px; align-items: flex-start; }
+.secop-document-list [data-ui="checkbox"] { margin-top: 3px; flex: none; }
+.secop-document-list small { display: block; margin: 3px 0 0 21px; color: var(--savia-text-soft); }
+
+
+.secop-detail-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 13px;
+  margin: 0;
+}
+
+.secop-detail-row dt {
+  color: var(--savia-text-soft);
+}
+
+.secop-detail-row dd {
+  margin: 0;
+  color: var(--savia-text);
+  overflow-wrap: anywhere;
+}
+
+.secop-detail-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.secop-detail-secondary, .secop-detail-primary, .secop-document-selection-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.secop-detail-primary { justify-content: flex-end; }
+.secop-detail-actions [data-ui="button"] { height: auto; min-height: 36px; white-space: normal; }
+.secop-detail-head > div { min-width: 0; overflow-wrap: anywhere; }
+.secop-detail-head > button { flex-shrink: 0; }
+.secop-document-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; font-size: 13px; }
+.secop-document-selection > span { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+@media (max-height: 700px) {
+  .secop-detail-card { max-height: calc(100dvh - 32px); padding: 16px; }
+  .secop-detail-head { margin-bottom: 8px; }
+  .secop-detail-body { gap: 4px 16px; }
+  .secop-documents { margin-top: 10px; padding-top: 10px; }
+  .secop-detail-actions { gap: 8px; margin-top: 8px; padding-top: 8px; }
+}
+@media (max-width: 540px) {
+  .secop-detail-card { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); padding: 16px; }
+  .secop-detail-secondary > button, .secop-detail-primary > button { flex: 1 1 auto; }
+  .secop-detail-body { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 1100px) {
+  .secop-filter-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .secop-field-wide {
+    grid-column: span 2;
+  }
+}
+
+/* Opportunity workbench: bounded scroll, compact rows and theme-native controls. */
+.workspace-content .secop-page { display:flex; flex-direction:column; overflow:hidden; min-height:0; height:100%; }
+.secop-page .secop-panel { display:flex; flex-direction:column; min-height:0; height:100%; padding:0; gap:12px; }
+.secop-filter-toggle { align-self:flex-start; flex-shrink:0; }
+.secop-page .secop-filters { max-height:45vh; min-height:100px; overflow:hidden; flex-shrink:1; }
+.secop-page .secop-results { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; padding:0; }
+.opportunity-grid { display:flex; flex-direction:column; min-height:0; flex:1; gap:12px; }
+.opportunity-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; }
+.opportunity-toolbar small { display:block; color:var(--muted-foreground); font-size:12px; margin-top:4px; }
+.opportunity-tools { display:flex; flex-wrap:wrap; gap:6px; }
+.opportunity-column-option { display:flex; align-items:center; font-size:13px; gap:4px; }
+.opportunity-column-option span { flex:1; }
+.opportunity-column-filters { display:flex; flex-wrap:wrap; align-items:end; gap:10px; max-height:32vh; overflow:auto; padding:2px; }
+.opportunity-column-filters label { width:155px; font-size:12px; display:grid; gap:4px; }
+.opportunity-scroll { flex:1; min-height:0; overflow:auto; border:1px solid var(--savia-border); border-radius:8px; }
+.opportunity-table { border-collapse:collapse; table-layout:fixed; min-width:1440px; width:100%; font-size:13px; }
+.opportunity-table thead { position:sticky; top:0; z-index:1; background:var(--secondary); }
+.opportunity-table th { width:170px; padding:4px 8px; height:44px; border-bottom:1px solid var(--savia-border); }
+.opportunity-table th[data-column=title] { width:320px; }
+.opportunity-table th[data-column=entity] { width:240px; }
+.opportunity-table th[data-column=value] { width:160px; }
+.opportunity-table td { padding:10px 14px; vertical-align:top; height:54px; border-bottom:1px solid var(--savia-border); }
+.opportunity-table td[data-column=value] { text-align:right; font-variant-numeric:tabular-nums; }
+.opportunity-cell { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.5; overflow-wrap:anywhere; }
+.opportunity-table td[data-column=title] .opportunity-cell { font-weight:500; }
+.opportunity-table td small { display:block; margin-top:4px; color:var(--muted-foreground); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.opportunity-status { display:inline-block; max-width:100%; border:1px solid var(--savia-border); background:var(--secondary); padding:2px 7px; border-radius:4px; font-size:12px; }
+.opportunity-end { display:flex; justify-content:center; align-items:center; gap:12px; padding:16px; min-height:60px; font-size:13px; color:var(--muted-foreground); }
+
+/* Same accessible Radix dialog, with a full-height right-side presentation. */
+.secop-detail-card[data-presentation="drawer"] {
+  inset: 0 0 0 auto;
+  width: min(680px, 100vw);
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
+  transform: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .secop-detail-card[data-presentation="drawer"][data-state="open"] {
+    animation: secop-drawer-enter 180ms ease-out;
+  }
+  @keyframes secop-drawer-enter {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+}
+
+.secop-library-stage { display: grid; gap: 6px; max-width: 320px; color: var(--savia-text-soft); font-size: 13px; font-weight: 500; }
+.secop-library-stage select { min-height: 40px; color: var(--savia-text); }
+.secop-library-stage small { font-size: 12px; line-height: 1.45; font-weight: 400; }
+.secop-work-tasks { min-width: 0; }
+.secop-work-task-list { display: grid; gap: 0; margin: 12px 0; padding: 0; list-style: none; }
+.secop-work-task { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--savia-border-soft); font-size: 13px; }
+.secop-work-task label { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 9px; overflow-wrap: anywhere; }
+.secop-work-task input { margin-top: 3px; accent-color: var(--savia-primary); }
+.secop-work-task .is-completed { color: var(--savia-text-muted); text-decoration: line-through; }
+.secop-work-task time { color: var(--savia-text-muted); font-size: 12px; white-space: nowrap; }
+.secop-work-task-remove { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border: 0; border-radius: var(--ui-radius); color: var(--savia-text-soft); background: transparent; cursor: pointer; }
+.secop-work-task-remove:hover { background: var(--muted); }
+.secop-work-task-remove:focus-visible { outline: 2px solid var(--savia-primary); outline-offset: 2px; }
+.secop-work-task-remove svg { width: 15px; height: 15px; }
+.secop-work-task-form { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.secop-work-task-form label { display: grid; gap: 6px; font-size: 12px; color: var(--savia-text-soft); }
+.secop-work-task-form label:first-child { flex: 1 1 180px; }
+/* Keep long tender details reachable inside the workspace at every window size. */
+.secop-library-page .secop-library-layout { flex: 1; min-height: 0; overflow-y: auto; }
+.secop-published-changes { padding: 12px 14px; background: var(--muted); border-radius: var(--ui-radius); }
+.secop-published-changes dl { display: grid; gap: 10px; margin: 12px 0 0; }
+.secop-published-changes dt { color: var(--savia-text-soft); font-size: 12px; }
+.secop-published-changes dd { margin: 3px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.secop-requirement-list { display: grid; gap: 14px; margin: 12px 0; }
+.secop-requirement { display: grid; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--savia-border-soft); }
+.secop-requirement strong { font-size: 13px; overflow-wrap: anywhere; }
+.secop-requirement-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; }
+.secop-requirement-fields label { display: grid; gap: 5px; color: var(--savia-text-soft); font-size: 12px; }
+.secop-requirement-actions { display: flex; gap: 8px; }
+.secop-requirement-add { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.secop-requirement-add input { flex: 1 1 180px; }
+
+.rup-requirement-comparison { font-size: 13px; }
+.rup-requirement-comparison summary { cursor: pointer; font-weight: 500; }
+.rup-comparison-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; }
+.rup-comparison-fields label { display: grid; gap: 5px; }
+.secop-rule-suggestions ul { list-style: none; padding: 0; display: grid; gap: 10px; }
+.secop-rule-suggestions li { display: flex; gap: 12px; justify-content: space-between; align-items: start; }
+.secop-rule-suggestions li span { min-width: 0; overflow-wrap: anywhere; }
+.secop-rule-suggestions li small { display: block; color: var(--savia-text-muted); }

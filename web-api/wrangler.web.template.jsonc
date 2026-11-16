@@ -1,0 +1,36 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "savia-web-example",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-30",
+  "compatibility_flags": ["nodejs_compat", "assets_navigation_has_no_effect"],
+  "workers_dev": false,
+  "durable_objects": { "bindings": [{ "name": "PREVIEW_WAKE", "class_name": "PreviewWake" }, { "name": "BACKUP_GATE", "class_name": "BackupGate" }] },
+  "migrations": [{ "tag": "preview-wake-v1", "new_sqlite_classes": ["PreviewWake"] }, { "tag": "backup-gate-v1", "new_sqlite_classes": ["BackupGate"] }],
+  "keep_vars": true,
+  "vars": {
+    "BETTER_AUTH_URL": "https://savia.example.invalid",
+    "AUTH_REQUIRE_VERIFIED_EMAIL": "true",
+    "AUTH_EMAIL_FROM": "savia@example.invalid",
+    "CREDENTIAL_KEY_ID": "replace-key-id",
+    "BACKUP_GATE_ENABLED": "true",
+    "RUNNER_DOWNLOAD_WINDOWS_URL": "",
+    "RUNNER_DOWNLOAD_MACOS_X64_URL": "",
+    "RUNNER_DOWNLOAD_MACOS_ARM64_URL": "",
+    "RUNNER_DOWNLOAD_LINUX_ARM64_URL": ""
+  },
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["savia@example.invalid"] }],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api", "/api/*"]
+  },
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "replace-with-r2-bucket" }],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "replace-with-d1-name",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }]
+}

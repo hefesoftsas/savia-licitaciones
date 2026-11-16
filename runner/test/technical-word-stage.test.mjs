@@ -1,0 +1,8 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';
+import {createTechnicalWordStage} from '../technical-word-stage.mjs';
+test('guarda el plan antes de ajustar y reanuda sin repetir propuestas confirmadas',async()=>{
+ let savedPlan=null,planSaved=false,interrupted=true;const saved=new Map(),events=[],source='texto '.repeat(300),nodes=[{id:'a',title:'A'},{id:'b',title:'B'}];
+ const context={signal:new AbortController().signal,getTechnicalBatchContext:async()=>({nodes,completedDrafts:['a','b'],wordPlanSaved:planSaved,wordPlan:savedPlan,wordAdjustmentIds:[...saved.keys()]}),getTechnicalBatchSection:async id=>({id,title:id.toUpperCase(),content:source,reference:false}),saveTechnicalBatchWordPlan:async value=>{events.push('plan');savedPlan=value;planSaved=true;},saveTechnicalBatchWordAdjustment:async(id,targetWords,content)=>{events.push(`save:${id}`);saved.set(id,{id,targetWords,content});}};
+ const stage=createTechnicalWordStage({adjust:async(_payload,_context,{chapter})=>{events.push(`adjust:${chapter.id}`);if(chapter.id==='b'&&interrupted){interrupted=false;throw Error('interrupción');}return {content:`propuesta ${chapter.id}`};}}),payload={mode:'all',targets:['a','b'],dataProcessingConsent:true,wordAdjustment:true,wordAdjustmentConsent:true,planningOptions:{minimumWords:1800,maximumWords:2000}},decisions=new Map(nodes.map(node=>[node.id,{target_words:900}]));
+ await assert.rejects(()=>stage(payload,context,decisions),/interrupción/);await stage(payload,context,decisions);assert.deepEqual(events,['plan','adjust:a','save:a','adjust:b','adjust:b','save:b']);assert.equal(saved.size,2);
+});

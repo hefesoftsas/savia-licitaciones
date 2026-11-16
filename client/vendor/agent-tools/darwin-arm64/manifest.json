@@ -1,0 +1,41 @@
+{
+  "platform": "darwin",
+  "arch": "arm64",
+  "key": "darwin-arm64",
+  "tools": [
+    {
+      "command": "rg",
+      "version": "14.1.1",
+      "repo": "BurntSushi/ripgrep",
+      "asset": "ripgrep-14.1.1-aarch64-apple-darwin.tar.gz",
+      "platform": "darwin",
+      "arch": "arm64",
+      "key": "darwin-arm64",
+      "sha256": "24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be",
+      "binary_sha256": "0e0cb83f5195f1f51bb8feef1fff5b0b171e82bd1db6bd35deee701a3e7102f8"
+    },
+    {
+      "command": "fd",
+      "version": "v10.3.0",
+      "repo": "sharkdp/fd",
+      "asset": "fd-v10.3.0-aarch64-apple-darwin.tar.gz",
+      "platform": "darwin",
+      "arch": "arm64",
+      "key": "darwin-arm64",
+      "sha256": "0570263812089120bc2a5d84f9e65cd0c25e4a4d724c80075c357239c74ae904",
+      "binary_sha256": "14134aadba85ab2cfe4494d0f44253145f897b77a23fd4d7df2cb4929b53c786"
+    },
+    {
+      "command": "jq",
+      "version": "jq-1.7.1",
+      "repo": "jqlang/jq",
+      "asset": "jq-macos-arm64",
+      "platform": "darwin",
+      "arch": "arm64",
+      "key": "darwin-arm64",
+      "sha256": "0bbe619e663e0de2c550be2fe0d240d076799d6f8a652b70fa04aea8a8362e8a",
+      "binary_sha256": "0bbe619e663e0de2c550be2fe0d240d076799d6f8a652b70fa04aea8a8362e8a"
+    }
+  ],
+  "prepared_at": "2026-08-05T01:32:44.101Z"
+}

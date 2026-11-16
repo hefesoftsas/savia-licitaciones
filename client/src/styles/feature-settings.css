@@ -1,0 +1,1946 @@
+/* [8677-8699] settings-page/scroll + settings-page-section(first decl) */
+.settings-page {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 100%;
+  overflow: visible;
+}
+
+.settings-page-scroll {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 12px;
+  width: 100%;
+  overflow: visible;
+  padding-bottom: 24px;
+}
+
+.settings-page-section {
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+}
+
+/* [8701-8729] settings-tab-shell/settings-tab */
+.settings-tab-shell {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  justify-self: center;
+  gap: 8px;
+  padding: 5px;
+  overflow-x: auto;
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-card-radius);
+  box-shadow: none;
+}
+
+.settings-tab {
+  min-width: 92px;
+  padding: 9px 14px;
+  color: var(--foreground);
+  font-weight: 500;
+  background: transparent;
+  border: 0;
+  border-radius: var(--ui-radius);
+  white-space: nowrap;
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.settings-tab.is-active {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.settings-tab:hover:not(.is-active) {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+/* [8971-8973] (rewritten) settings-page-section second decl (overflow hidden) */
+.settings-page-section {
+  overflow: hidden;
+}
+
+/* [8975-9746] settings-section-title/list/row + font-picker + export-bullet-library + input-with-action + inline-action/spinner + image-model-status + agent-self-check-*-/agent-tool-check-* + image-test-preview + parser-* */
+/* Small group headings within tabs. */
+.settings-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px 6px;
+  color: var(--savia-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: uppercase;
+}
+
+.settings-group-title + .settings-list {
+  border-top: none;
+}
+
+.settings-group-title-with-action {
+  justify-content: space-between;
+}
+
+.settings-group-action {
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.settings-list {
+  border-top: 1px solid var(--savia-border-soft);
+}
+
+fieldset.settings-list {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 420px);
+  align-items: center;
+  gap: 20px;
+  padding: 14px 24px;
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--savia-border-soft);
+}
+
+.settings-row-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-row-copy strong {
+  color: var(--savia-text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.settings-row-copy span {
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.settings-row input,
+.settings-row select,
+.settings-row textarea,
+.settings-row .settings-readonly-value {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  color: var(--savia-text);
+  font-size: 13px;
+  background-color: var(--secondary);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+  outline: none;
+}
+
+.settings-row .settings-readonly-value {
+  display: flex;
+  align-items: center;
+  font-weight: 500;
+}
+
+.settings-row select {
+  padding-right: 42px;
+}
+
+.settings-row textarea {
+  min-height: 132px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.settings-temperature-control {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 16px;
+}
+
+.settings-row .settings-temperature-slider {
+  min-height: 24px;
+  padding: 0;
+  accent-color: var(--savia-primary);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.settings-row .settings-temperature-slider:focus {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.settings-row .settings-temperature-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.settings-temperature-control output {
+  color: var(--savia-primary);
+  font-size: 16px;
+  font-weight: 500;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-temperature-control.is-disabled output {
+  color: var(--savia-text-soft);
+  opacity: 0.7;
+}
+
+.font-picker-input {
+  font-family: inherit;
+}
+
+.font-picker {
+  position: relative;
+  width: 100%;
+}
+
+.font-picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 80;
+  display: grid;
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+}
+
+.font-picker-summary {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  padding: 8px 10px;
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  background: var(--card);
+  border-bottom: 1px solid var(--savia-border-soft);
+}
+
+.font-picker-option {
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  color: var(--savia-text);
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--ui-radius);
+  cursor: pointer;
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.font-picker-option:hover,
+.font-picker-option.is-selected {
+  color: var(--savia-primary-deep);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.font-picker-empty {
+  padding: 12px 10px;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+}
+
+.export-bullet-library {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 44px));
+  gap: 8px;
+  justify-content: end;
+}
+
+.export-bullet-option {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+.export-bullet-option span {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.export-bullet-option:hover,
+.export-bullet-option.is-active {
+  background: var(--card);
+  border-color: var(--savia-primary-deep);
+  box-shadow: none;
+}
+
+.settings-row input:focus,
+.settings-row select:focus,
+.settings-row textarea:focus {
+  background-color: var(--card);
+  border-color: color-mix(in srgb, var(--savia-border) 50%, transparent);
+  box-shadow: var(--savia-focus-ring);
+}
+
+.input-with-action {
+  display: grid;
+  width: 100%;
+  min-height: 36px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--secondary);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.input-with-action.has-password-reveal {
+  grid-template-columns: minmax(0, 1fr) 44px auto;
+}
+
+.input-with-action:focus-within {
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--savia-border) 50%, transparent);
+  box-shadow: var(--savia-focus-ring);
+}
+
+.settings-row .input-with-action input {
+  min-height: 34px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-row .input-with-action input:focus {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.input-with-action-button {
+  min-height: 34px;
+  padding: 0 14px;
+  color: var(--savia-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--card);
+  border: 0;
+  border-left: 1px solid var(--savia-border);
+}
+
+.input-with-action-icon-button {
+  display: inline-flex;
+  width: 36px;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--muted-foreground);
+  background: var(--card);
+  border: 0;
+  border-left: 1px solid var(--savia-border);
+}
+
+.input-with-action-icon-button:hover:not(:disabled),
+.input-with-action-icon-button[aria-pressed="true"]:not(:disabled) {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.input-with-action-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.input-with-action-eye-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.input-with-action-button:hover:not(:disabled) {
+  color: var(--savia-primary-deep);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.input-with-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.settings-row select:disabled {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+
+.settings-control-with-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+}
+
+.settings-control-with-action.is-single-action {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.settings-action-cell {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Official API: retain settings-row layout and show account details in a separate tab area. */
+.settings-official-api {
+  container-type: inline-size;
+}
+
+.settings-official-api .settings-row {
+  grid-template-columns: minmax(100px, 1fr) minmax(0, 420px);
+}
+
+.settings-official-api .settings-row > * {
+  min-width: 0;
+}
+
+.official-api-account {
+  color: var(--savia-text);
+  font-size: 13px;
+  line-height: 1.65;
+  word-break: break-all;
+  user-select: text;
+}
+
+.official-api-account-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.official-api-account-row .official-api-account {
+  min-width: 0;
+  flex: 1;
+}
+
+.official-api-account-row .inline-action {
+  flex: 0 0 auto;
+}
+
+.official-account-form {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.official-account-form label {
+  color: var(--savia-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.official-account-form input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  color: var(--savia-text);
+  font-size: 13px;
+  background: var(--secondary);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.official-account-form .input-with-action input {
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.official-account-form input:focus-visible {
+  outline: 2px solid var(--savia-primary);
+  outline-offset: -2px;
+}
+
+.official-account-dialog {
+  width: min(480px, calc(100vw - 32px));
+}
+
+/* Top-up reuses warm open-source-support dialogs and amount cards; products scroll independently. */
+.official-recharge-dialog {
+  overflow-y: hidden;
+}
+
+.official-recharge-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Standalone payment-completion celebration panel: a one-time halo entrance does not affect background order confirmation. */
+.official-recharge-dialog.is-success {
+  width: min(480px, calc(100vw - 32px));
+  gap: 24px;
+  padding: 28px;
+  background: var(--card);
+  border-color: var(--savia-border);
+}
+
+.official-recharge-dialog.is-success .app-dialog-card-head {
+  text-align: center;
+}
+
+.official-recharge-dialog.is-success .section-kicker {
+  color: var(--savia-warning-deep);
+}
+
+.official-recharge-dialog.is-success .app-dialog-card-head h2 {
+  color: var(--savia-warning-deep);
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.official-recharge-dialog.is-success .app-dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.official-recharge-dialog.is-success .app-dialog-actions button {
+  min-width: 0;
+}
+
+.official-recharge-success {
+  display: grid;
+  gap: 24px;
+  text-align: center;
+}
+
+.official-recharge-success-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 148px;
+}
+
+.official-recharge-success-orbit {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border: 1px solid var(--savia-warning-border);
+  border-radius: 50%;
+  box-shadow: none;
+  animation: official-recharge-celebrate 650ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.official-recharge-success-medal {
+  display: grid;
+  place-items: center;
+  width: 100px;
+  height: 100px;
+  color: var(--foreground);
+  background: var(--secondary);
+  border: 1px solid var(--savia-border);
+  border-radius: 50%;
+  box-shadow: none;
+  animation: official-recharge-celebrate 450ms 100ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.official-recharge-success-medal svg {
+  width: 56px;
+  height: 56px;
+}
+
+.official-recharge-success-sparks {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ui-radius);
+  background: var(--savia-warning);
+  box-shadow: none;
+  rotate: -12deg;
+  animation: official-recharge-celebrate 700ms 150ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.official-recharge-success-credit {
+  color: var(--savia-warning-deep);
+  font-size: 13px;
+  animation: official-recharge-celebrate 450ms 200ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.official-recharge-success-credit p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--savia-warning-deep);
+}
+
+.official-recharge-success-credit strong {
+  min-width: 0;
+  font-size: clamp(28px, 6vw, 48px);
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.official-recharge-success-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 16px 0 0;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  border-top: 1px dashed var(--savia-border);
+  overflow-wrap: anywhere;
+}
+
+.official-recharge-success-receipt strong {
+  color: var(--savia-text);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes official-recharge-celebrate {
+  from { opacity: 0; transform: translateY(8px) scale(0.88); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .official-recharge-success * {
+    animation: none;
+  }
+}
+
+.official-recharge-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 180px;
+  color: var(--savia-text-soft);
+  font-size: 14px;
+}
+
+.official-recharge-products {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  list-style: none;
+}
+
+.official-recharge-product {
+  min-width: 0;
+  min-height: 128px;
+  padding: 16px 8px;
+  overflow-wrap: anywhere;
+}
+
+.official-recharge-name {
+  margin: 0 0 4px;
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+.official-recharge-price {
+  margin: 0;
+  color: var(--savia-warning-deep);
+  font-variant-numeric: tabular-nums;
+}
+
+.official-recharge-price strong {
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.official-recharge-points {
+  margin: 0;
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.official-recharge-products:disabled .official-recharge-product {
+  cursor: wait;
+}
+
+.official-orders-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+}
+
+.official-api-table.official-orders-table {
+  min-width: 660px;
+}
+
+.official-orders-table .inline-action {
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.official-orders-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--savia-border-soft);
+  font-size: 12px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.official-order-link {
+  padding: 0;
+  color: var(--savia-primary-deep);
+  text-align: left;
+  background: none;
+  border: 0;
+  overflow-wrap: anywhere;
+}
+
+.official-order-link:hover {
+  text-decoration: underline;
+}
+
+.official-order-status {
+  color: var(--savia-text-soft);
+}
+
+.official-order-status.is-waiting {
+  color: var(--savia-warning-deep);
+}
+
+.official-order-status.is-success {
+  color: var(--savia-success-deep);
+}
+
+/* Invoice status reuses order-status text styling; closed remains default gray. */
+.official-invoice-status[data-status='CAN_APPLY'] {
+  color: var(--savia-primary-deep);
+}
+
+.official-invoice-status[data-status='PENDING'] {
+  color: var(--savia-warning-deep);
+}
+
+.official-invoice-status[data-status='REJECTED'] {
+  color: var(--savia-danger-deep);
+}
+
+.official-invoice-status[data-status='ISSUED'] {
+  color: var(--savia-success-deep);
+}
+
+.official-order-refund {
+  display: block;
+  color: var(--savia-text-soft);
+}
+
+.official-order-dialog {
+  width: min(520px, calc(100vw - 32px));
+  overflow-wrap: anywhere;
+}
+
+.official-order-detail {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px 20px;
+  min-height: 0;
+  margin: 0;
+  overflow-y: auto;
+  font-size: 14px;
+}
+
+.official-order-detail dt {
+  color: var(--savia-text-soft);
+}
+
+.official-order-detail dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.official-api-balance-row,
+.official-api-balance-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.official-api-balance-row {
+  justify-content: space-between;
+}
+
+.official-api-balance {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 100%;
+  color: var(--savia-primary-deep);
+  user-select: text;
+}
+
+.official-api-balance-value {
+  min-width: 0;
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.official-api-balance small {
+  flex: 0 0 auto;
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.official-api-details {
+  min-width: 0;
+  margin: 12px 24px 24px;
+  overflow: hidden;
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.official-api-tabs {
+  display: flex;
+  overflow-x: auto;
+  background: var(--savia-bg);
+  border-bottom: 1px solid var(--savia-border-soft);
+}
+
+.official-api-tab {
+  flex: 0 0 auto;
+  min-width: 80px;
+  min-height: 44px;
+  padding: 10px 20px;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+}
+
+.official-api-tab:hover,
+.official-api-tab.is-active {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.official-api-tab.is-active {
+  border-bottom-color: var(--savia-primary);
+}
+
+.official-api-tab:focus-visible,
+.official-api-tab-content:focus-visible {
+  outline: 2px solid var(--savia-primary);
+  outline-offset: -3px;
+}
+
+.official-api-tab-content {
+  min-height: 260px;
+  overflow-x: auto;
+}
+
+.official-api-statement strong {
+  color: var(--savia-primary-deep);
+  font-weight: 500;
+}
+
+.official-api-empty {
+  margin: 0;
+  padding: 24px;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  text-align: center;
+}
+
+.official-api-tab-content > .official-api-empty {
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+}
+
+.official-api-table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.official-api-table th {
+  height: 44px;
+  padding: 10px 14px;
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  border-bottom: 1px solid var(--savia-border-soft);
+}
+
+.official-api-table .official-api-empty {
+  height: 216px;
+}
+
+/* Both account tables share a loading area; flex preserves spinner dimensions and rotation. */
+.official-table-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 192px;
+  color: var(--savia-text-soft);
+}
+
+@container (max-width: 540px) {
+  .settings-official-api .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 14px 16px;
+  }
+
+  .official-api-details {
+    margin: 12px 16px 20px;
+  }
+}
+
+.inline-action {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px;
+  color: var(--savia-primary);
+  font-size: 13px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.inline-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.image-model-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 24px 12px;
+  padding: 12px 16px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+}
+
+.image-model-status div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.image-model-status strong {
+  color: var(--savia-text);
+  font-size: 16px;
+}
+
+.image-model-status span,
+.image-model-status small {
+  color: var(--savia-text-soft);
+  line-height: 1.55;
+}
+
+.image-model-status em {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-style: normal;
+  font-weight: 500;
+  border-radius: var(--ui-radius);
+}
+
+.image-model-status.is-untested em {
+  color: var(--muted-foreground);
+  background: var(--card);
+}
+
+.image-model-status.is-available em {
+  color: var(--savia-success);
+  background: color-mix(in srgb, var(--savia-success) 12%, transparent);
+}
+
+.image-model-status.is-unavailable em {
+  color: var(--savia-danger);
+  background: color-mix(in srgb, var(--savia-warning) 10%, transparent);
+}
+
+.agent-self-check-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 24px 12px;
+  padding: 12px 16px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+}
+
+.agent-self-check-status div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.agent-self-check-status strong {
+  color: var(--savia-text);
+  font-size: 16px;
+}
+
+.agent-self-check-status span {
+  color: var(--savia-text-soft);
+  line-height: 1.55;
+}
+
+.agent-self-check-status em {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-style: normal;
+  font-weight: 500;
+  border-radius: var(--ui-radius);
+}
+
+.agent-self-check-status.is-untested em {
+  color: var(--muted-foreground);
+  background: var(--card);
+}
+
+.agent-self-check-status.is-checking em {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.agent-self-check-status.is-normal em {
+  color: var(--savia-success);
+  background: color-mix(in srgb, var(--savia-success) 12%, transparent);
+}
+
+.agent-self-check-status.is-busy em {
+  color: var(--savia-warning-deep);
+  background: color-mix(in srgb, var(--savia-warning) 14%, transparent);
+}
+
+.agent-self-check-status.is-error em {
+  color: var(--savia-danger);
+  background: color-mix(in srgb, var(--savia-warning) 10%, transparent);
+}
+
+.agent-self-check-result {
+  display: grid;
+  gap: 14px;
+  margin: 12px 24px 20px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+}
+
+.agent-self-check-result.is-normal {
+  border-color: color-mix(in srgb, var(--savia-success-border) 22%, transparent);
+}
+
+.agent-self-check-result.is-busy {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 24%, transparent);
+}
+
+.agent-self-check-result.is-error {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 24%, transparent);
+}
+
+.agent-self-check-result-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.agent-self-check-result-head div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.agent-self-check-result-head strong {
+  color: var(--savia-text);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.agent-self-check-result-head span,
+.agent-self-check-result-head small {
+  color: var(--savia-text-soft);
+  line-height: 1.55;
+}
+
+.agent-self-check-result-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.agent-self-check-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-self-check-step {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.agent-self-check-step strong {
+  color: var(--savia-text);
+  font-size: 14px;
+}
+
+.agent-self-check-step span {
+  overflow: hidden;
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-self-check-step.is-success {
+  border-color: color-mix(in srgb, var(--savia-success-border) 20%, transparent);
+}
+
+.agent-self-check-step.is-error {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 24%, transparent);
+}
+
+.agent-self-check-step.is-warning {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 24%, transparent);
+}
+
+.agent-self-check-step.is-skipped {
+  opacity: 0.72;
+}
+
+.agent-self-check-step.is-running {
+  border-color: color-mix(in srgb, var(--savia-border) 24%, transparent);
+}
+
+.agent-diagnostic-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.agent-diagnostic-section.is-success {
+  border-color: color-mix(in srgb, var(--savia-success-border) 20%, transparent);
+}
+
+.agent-diagnostic-section.is-warning {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 24%, transparent);
+}
+
+.agent-diagnostic-section.is-running {
+  border-color: color-mix(in srgb, var(--savia-border) 24%, transparent);
+}
+
+.agent-diagnostic-section.is-error {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 24%, transparent);
+}
+
+.agent-diagnostic-section.is-skipped {
+  opacity: 0.72;
+}
+
+.agent-diagnostic-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-diagnostic-section-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.agent-diagnostic-section-head strong {
+  color: var(--savia-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.agent-diagnostic-section-head span {
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-diagnostic-section-head em {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
+  border-radius: var(--ui-radius);
+}
+
+.agent-diagnostic-section.is-success .agent-diagnostic-section-head em {
+  color: var(--savia-success);
+  background: color-mix(in srgb, var(--savia-success) 12%, transparent);
+}
+
+.agent-diagnostic-section.is-warning .agent-diagnostic-section-head em {
+  color: var(--savia-warning-deep);
+  background: color-mix(in srgb, var(--savia-warning) 14%, transparent);
+}
+
+.agent-diagnostic-section.is-running .agent-diagnostic-section-head em {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.agent-diagnostic-section.is-error .agent-diagnostic-section-head em {
+  color: var(--savia-danger);
+  background: color-mix(in srgb, var(--savia-warning) 10%, transparent);
+}
+
+.agent-diagnostic-section.is-skipped .agent-diagnostic-section-head em {
+  color: var(--savia-text-soft);
+  background: color-mix(in srgb, var(--muted-foreground) 12%, transparent);
+}
+
+.agent-diagnostic-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-diagnostic-detail-grid > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 10px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.agent-diagnostic-detail-grid span {
+  color: var(--savia-text-soft);
+  font-size: 11px;
+}
+
+.agent-diagnostic-detail-grid strong {
+  overflow: hidden;
+  color: var(--savia-text);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tool-check-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-tool-check-item {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.agent-tool-check-item div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-tool-check-item strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--savia-text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tool-check-item em {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
+  border-radius: var(--ui-radius);
+}
+
+.agent-tool-check-item span,
+.agent-tool-check-item small {
+  overflow: hidden;
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tool-check-item.is-success {
+  border-color: color-mix(in srgb, var(--savia-success-border) 20%, transparent);
+}
+
+.agent-tool-check-item.is-success em {
+  color: var(--savia-success);
+  background: color-mix(in srgb, var(--savia-success) 12%, transparent);
+}
+
+.agent-tool-check-item.is-pending em,
+.agent-tool-check-item.is-running em {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.agent-tool-check-item.is-warning {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 24%, transparent);
+}
+
+.agent-tool-check-item.is-warning em {
+  color: var(--savia-warning-deep);
+  background: color-mix(in srgb, var(--savia-warning) 14%, transparent);
+}
+
+.agent-tool-check-item.is-error {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 24%, transparent);
+}
+
+.agent-tool-check-item.is-error em {
+  color: var(--savia-danger);
+  background: color-mix(in srgb, var(--savia-warning) 10%, transparent);
+}
+
+.agent-self-check-result pre {
+  max-height: 360px;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.image-test-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 260px);
+  align-items: center;
+  gap: 14px;
+  margin: 0 24px 20px;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.image-test-preview div {
+  display: grid;
+  gap: 8px;
+}
+
+.image-test-preview strong {
+  color: var(--savia-text);
+  font-size: 17px;
+}
+
+.image-test-preview span {
+  color: var(--savia-text-soft);
+}
+
+.image-test-preview img {
+  width: auto;
+  height: auto;
+  max-width: 260px;
+  max-height: 220px;
+  justify-self: end;
+  object-fit: contain;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+/* File-parser introduction dialog: horizontal comparison table. */
+.detail-help-card:has(.parser-help-table) {
+  width: min(880px, calc(100vw - 40px));
+}
+
+.parser-help-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.parser-help-note {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  line-height: 1.55;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.parser-help-table-wrap {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.parser-help-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.parser-help-table th,
+.parser-help-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.45;
+  border-bottom: 1px solid var(--savia-border-soft);
+  border-right: 1px solid var(--savia-border-soft);
+}
+
+.parser-help-table th:last-child,
+.parser-help-table td:last-child {
+  border-right: 0;
+}
+
+.parser-help-table thead th {
+  background: var(--card);
+  color: var(--savia-text);
+  font-weight: 500;
+}
+
+.parser-help-table thead th:first-child,
+.parser-help-table tbody th {
+  width: 72px;
+  color: var(--savia-text-muted);
+  font-weight: 500;
+  background: var(--card);
+  white-space: nowrap;
+}
+
+.parser-help-table thead th strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--savia-text);
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+
+.parser-help-table thead th span {
+  display: inline-block;
+  padding: 2px 7px;
+  color: var(--savia-primary);
+  font-size: 11px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.parser-help-table thead .parser-help-col-primary {
+  background: var(--card);
+}
+
+.parser-help-table thead .parser-help-col-accent {
+  background: var(--card);
+}
+
+.parser-help-table thead .parser-help-col-muted {
+  background: var(--card);
+}
+
+.parser-help-table tbody td {
+  color: var(--savia-text);
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.parser-help-table tbody tr:last-child th,
+.parser-help-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.parser-help-table tbody tr:nth-child(even) td {
+  background: var(--card);
+}
+
+/* [9748-9981] about-* and privacy-* (About / Privacy statement). */
+.about-overview {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.4fr);
+  gap: 14px;
+  padding: 0 24px 24px;
+}
+
+.about-update-card,
+.about-info-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 18px;
+  color: var(--savia-text);
+  text-decoration: none;
+  background: var(--savia-bg);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-card-radius);
+  box-shadow: none;
+}
+
+.about-update-card {
+  align-content: start;
+  background:
+    var(--card);
+}
+
+.about-card-head,
+.about-info-card {
+  align-content: start;
+}
+
+.about-card-head {
+  display: grid;
+  gap: 8px;
+}
+
+.about-card-head span,
+.about-info-card > span {
+  width: fit-content;
+  padding: 4px 10px;
+  color: var(--savia-primary);
+  font-size: 12px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-card-radius);
+}
+
+.about-card-head strong,
+.about-info-card strong {
+  color: var(--savia-text);
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.about-update-card p,
+.about-info-card p {
+  margin: 0;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.about-links-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about-links-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--savia-border-soft);
+}
+
+.about-links-item:last-child {
+  border-bottom: none;
+}
+
+.about-links-label {
+  flex-shrink: 0;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+}
+
+.about-links-value {
+  min-width: 0;
+  color: var(--savia-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.about-links-value.is-link {
+  color: var(--savia-primary);
+  text-decoration: none;
+}
+
+.about-links-value.is-link:hover {
+  text-decoration: underline;
+}
+
+.about-links-value.is-trusted {
+  color: var(--savia-success);
+}
+
+.about-links-value.is-untrusted {
+  color: var(--savia-warning-deep);
+}
+
+.about-links-activate {
+  width: fit-content;
+  margin-top: 4px;
+  padding: 8px 18px;
+  color: var(--savia-text);
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--savia-bg);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+  cursor: pointer;
+  transition: opacity var(--savia-duration), transform var(--savia-duration), border-color var(--savia-duration);
+}
+
+.about-links-activate:hover {
+  border-color: color-mix(in srgb, var(--savia-border) 28%, transparent);
+  transform: none;
+}
+
+.about-update-card .update-button {
+  width: fit-content;
+  margin-top: 4px;
+  padding: 8px 18px;
+  color: var(--primary-foreground);
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--savia-primary);
+  border: none;
+  border-radius: var(--ui-radius);
+  cursor: pointer;
+  transition: opacity var(--savia-duration), transform var(--savia-duration);
+}
+
+.about-update-card .update-button:hover {
+  opacity: 0.88;
+  transform: none;
+}
+
+.about-update-card .update-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+  transform: none;
+}
+
+.privacy-statement {
+  display: grid;
+  gap: 14px;
+  margin: 0 24px 24px;
+  padding: 18px;
+  color: var(--savia-text-soft);
+  background:
+    var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+}
+
+.privacy-statement-head {
+  display: grid;
+  gap: 8px;
+}
+
+.privacy-statement-head span {
+  width: fit-content;
+  padding: 4px 10px;
+  color: var(--savia-primary);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.privacy-statement-head strong {
+  color: var(--savia-text);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.privacy-statement-head p,
+.privacy-item p {
+  margin: 0;
+  line-height: 1.75;
+}
+
+.privacy-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.privacy-item {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.privacy-item > span {
+  width: fit-content;
+  padding: 4px 9px;
+  color: var(--primary-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--savia-primary);
+  border-radius: var(--ui-radius);
+}
+
+.privacy-item strong {
+  color: var(--savia-text);
+  font-size: 15px;
+}
+
+/* Invoice notes stack vertically in the dialog to avoid overflow from settings-page two-column minimum widths. */
+.settings-row.official-invoice-remark {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 0;
+}
+
+/* Storage dialog: three usage groups in sequence, with group details scrolling inside the dialog. */
+.storage-space-dialog {
+  width: min(600px, calc(100vw - 32px));
+}
+
+.storage-space-body {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.storage-space-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 160px;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+}
+
+.storage-space-group {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.storage-space-group-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+/* The entire heading row (arrow, description, size) toggles expansion; the delete button sits outside and does not affect collapse state. */
+.storage-space-group-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.storage-space-group-toggle:focus-visible {
+  border-radius: var(--ui-radius);
+  outline: 2px solid var(--savia-primary);
+  outline-offset: 4px;
+}
+
+.storage-space-group-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--savia-text-muted);
+  transition: transform var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease;
+}
+
+.storage-space-group.is-expanded .storage-space-group-chevron {
+  color: var(--savia-primary);
+  transform: rotate(90deg);
+}
+
+.storage-space-group-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.storage-space-group-copy strong {
+  color: var(--savia-text);
+  font-size: 15px;
+}
+
+.storage-space-group-copy span,
+.storage-space-item-copy small {
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.storage-space-size {
+  color: var(--savia-text);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.storage-space-group-head .storage-space-size {
+  font-size: 15px;
+}
+
+.storage-space-group-head .danger-action {
+  min-width: 72px;
+}
+
+.storage-space-items {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.storage-space-items li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--savia-border-soft);
+}
+
+.storage-space-item-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.storage-space-item-copy span {
+  color: var(--savia-text);
+  font-size: 13px;
+}
+
+.storage-space-items .storage-space-size {
+  color: var(--savia-text-soft);
+  font-weight: 600;
+}

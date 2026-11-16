@@ -1,0 +1,26 @@
+{
+  "name": "savia-monorepo",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "install:verified": "node scripts/install-dependencies.mjs",
+    "dev:web": "node scripts/dev-web.mjs",
+    "dev:web-api": "pnpm --filter @savia/web-api run dev",
+    "test:web-api": "pnpm --filter @savia/web-api run test",
+    "test:runner": "node --test runner/test/*.test.mjs",
+    "build:runner": "node runner/build.mjs",
+    "build:web": "pnpm --filter savia-licitaciones run build:web",
+    "test:web-assets": "pnpm run build:web && node --test web-api/test-assets/*.test.mjs",
+    "build:connector": "node connector/build.mjs",
+    "test:connector": "node --test connector/test/*.test.cjs",
+    "typecheck": "pnpm --filter ./client exec tsc --noEmit",
+    "test:scripts": "node --test scripts/tests/*.test.mjs client/scripts/tests/joi-regression.test.cjs",
+    "test:client": "node --test --test-concurrency=1 'client/src/**/*.test.mjs' 'client/test/*.test.*'"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "3.1159.0"
+  },
+  "packageManager": "pnpm@11.24.0"
+}

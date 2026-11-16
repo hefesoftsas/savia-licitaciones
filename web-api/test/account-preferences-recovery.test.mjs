@@ -1,0 +1,50 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile,readdir,mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {execFileSync,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {join,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
+import {captureAccountPreferences,restoreAccountPreferences} from '../../runner/account-preferences-snapshot.mjs';
+const root=join(dirname(fileURLToPath(import.meta.url)),'..');
+test('el runner recupera preferencias solo para su cuenta y con revisión explícita',async()=>{
+ const build=await mkdtemp(join(tmpdir(),'savia-prefs-build-'));
+ execFileSync('pnpm',['exec','wrangler','deploy','--dry-run','--outdir',build],{cwd:root,stdio:'pipe',env:{...process.env,CLOUDFLARE_SEND_METRICS:'false'}});
+ const worker=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile(join(build,'index.js'),'utf8'),compatibilityDate:'2026-10-30',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'preferences-recovery'},r2Buckets:['FILES'],bindings:{AUTH_ALLOW_REGISTRATION:'true',BETTER_AUTH_SECRET:'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz',BETTER_AUTH_URL:'http://localhost'}}));
+ try {
+  const db=await worker.getD1Database('DB');for(const file of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(join(root,'migrations',file),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await db.prepare(sql).run();
+  const req=(path,options={})=>worker.dispatchFetch(`http://localhost${path}`,options);
+  const post=(path,body,headers={})=>req(path,{method:'POST',headers:{origin:'http://localhost','content-type':'application/json',...headers},body:JSON.stringify(body)});
+  async function setup(name){const response=await post('/api/auth/sign-up/email',{name,email:`${name}@example.com`,password:'test-password-12345'});assert.equal(response.status,200);const cookie=response.headers.get('set-cookie').split(';')[0];const {code}=await(await post('/api/runner-pairings',{}, {cookie})).json();const runner=await(await post('/api/runners/pair',{code,name:'Equipo'})).json();return {cookie,token:runner.token};}
+  const alice=await setup('alice'),bob=await setup('bob');
+  const read=async user=>req('/api/runner/preferences-snapshot',{headers:{authorization:`Bearer ${user.token}`}});
+  const write=async(user,payload)=>req('/api/runner/preferences-snapshot',{method:'PUT',headers:{authorization:`Bearer ${user.token}`,'content-type':'application/json'},body:JSON.stringify(payload)});
+  assert.equal((await req('/api/runner/preferences-snapshot')).status,401);
+  const original=await(await read(alice)).json();assert.deepEqual(original.preferences,{language:'es',theme:'system',colorTheme:'neutral',visualStyle:'vega'});assert.equal(original.revision,0);
+  const desired={language:'en',theme:'dark',colorTheme:'blue',visualStyle:'nova'};
+  assert.equal((await write(bob,{expectedRevision:0,preferences:desired})).status,200);
+  assert.deepEqual((await(await read(alice)).json()).preferences,original.preferences);
+  assert.equal((await write(bob,{expectedRevision:0,preferences:original.preferences})).status,409);
+  const update=await req('/api/preferences',{method:'PUT',headers:{cookie:bob.cookie,origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({theme:'light'})});assert.equal(update.status,200);
+  const latest=await(await read(bob)).json();assert.equal(latest.revision,2);assert.equal(latest.preferences.theme,'light');
+  assert.equal((await write(bob,{expectedRevision:1,preferences:original.preferences})).status,409);
+  assert.equal((await write(bob,{expectedRevision:2,preferences:{...desired,theme:'invalid'}})).status,400);
+  assert.equal((await write(bob,{expectedRevision:2,preferences:original.preferences})).status,200);
+  assert.deepEqual((await(await read(bob)).json()).preferences,original.preferences);
+  const directory=join(build,'snapshot'),server=(await worker.ready).origin;
+  await captureAccountPreferences({server,token:alice.token,directory});
+  assert.equal((await write(bob,{expectedRevision:3,preferences:desired})).status,200);
+  await assert.rejects(()=>restoreAccountPreferences({server,token:bob.token,directory,expectedRevision:3}),/cambiaron/);
+  assert.deepEqual((await(await read(bob)).json()).preferences,desired);
+  await restoreAccountPreferences({server,token:bob.token,directory,expectedRevision:4});
+  assert.deepEqual((await(await read(bob)).json()).preferences,original.preferences);
+  const config=join(build,'runner.json');await writeFile(config,JSON.stringify({server,token:bob.token}));
+  const cli=join(root,'../runner/cli.mjs'),run=promisify(execFile);
+  assert.match((await run(process.execPath,[cli,'read-account-preferences','--config',config])).stdout,/Revisión de preferencias: 5/);
+  const cliSnapshot=join(build,'cli-snapshot');
+  assert.match((await run(process.execPath,[cli,'capture-account-preferences','--config',config,'--output',cliSnapshot])).stdout,/No es un respaldo completo/);
+  assert.match((await run(process.execPath,[cli,'restore-account-preferences','--config',config,'--snapshot',cliSnapshot,'--expected-revision','5'])).stdout,/Nueva revisión: 6/);
+ } finally {await worker.dispose();await rm(build,{recursive:true,force:true});}
+});

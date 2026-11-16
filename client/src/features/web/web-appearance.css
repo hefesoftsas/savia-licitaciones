@@ -1,0 +1,16 @@
+/* The desktop's visual style tokens also shape the web workspace. */
+.web-shell { font-family: var(--ui-font); }
+.web-shell .web-content { padding: var(--ui-spacing); font-size: var(--ui-font-size); }
+.web-shell .web-nav button { border-radius: var(--ui-radius); min-height: var(--ui-control-height); font-size: var(--ui-font-size); }
+.web-shell :is(.web-list > button, .web-list > div) { padding: var(--ui-row-padding); border-radius: var(--ui-radius); }
+.web-shell :is(.web-notice, .web-profile-group, .web-secop-detail) { border-radius: var(--ui-card-radius); }
+.web-shell :is(select, textarea) { font-family: var(--ui-font); border-radius: var(--ui-radius); }
+.web-header-appearance { display: flex; align-items: center; gap: 16px; }
+.web-header-appearance select { min-height: 32px; max-width: 120px; padding: 4px 8px; border: 1px solid var(--web-input-border); background: var(--web-bg); color: var(--web-text); }
+.web-header-appearance select:focus-visible, .web-appearance select:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.web-appearance { gap: 16px; }
+.web-appearance h2 { margin: 0; }
+.web-appearance p { margin: 6px 0 0; line-height: 1.5; }
+.web-appearance label { gap: 7px; }
+.web-appearance select { min-height: var(--ui-control-height); border-radius: var(--ui-radius); font-family: var(--ui-font); }
+@media (max-width: 700px) { .web-shell .web-content { padding: min(var(--ui-spacing), 16px); } .web-header-appearance { gap: 8px; } .web-header-appearance > span { display: none; } }

@@ -1,0 +1,725 @@
+/* [7900-8649] All rejection-* and typo-* styles (RejectionCheckPage.tsx). */
+.rejection-check-page {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  container: rejection-check / inline-size;
+}
+
+@container rejection-check (max-width: 600px) {
+  .rejection-check-page .rejection-check-result-tabs [role='tab'] { flex: 1 1 0; min-width: 0; padding: 8px; }
+  .rejection-check-page .rejection-check-result-tab .duplicate-analysis-tab-main { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .rejection-check-page .rejection-check-result-tab em { max-width: 100%; overflow: hidden; padding: 3px 5px; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+.rejection-documents-content {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  container: rejection-documents / inline-size;
+}
+.rejection-documents-content > .upload-board,
+.rejection-documents-content > .app-tab-bar { flex: 0 0 auto; }
+.rejection-documents-content > .rejection-reader-card { flex: 1 0 220px; min-height: 220px; }
+.rejection-documents-content .document-switch-tabs { max-width: 100%; overflow-x: auto; }
+
+@container rejection-documents (max-width: 620px) {
+  .rejection-documents-content .upload-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px; }
+  .rejection-documents-content .upload-label { grid-column: 1 / -1; display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+  .rejection-documents-content .upload-label span { padding: 0; }
+  .rejection-documents-content .upload-actions { min-width: 0; }
+}
+
+/* Step01 uploads moved to shared-upload.css (shared/ui/UploadBoard.tsx). */
+.rejection-reader-card,
+.rejection-result-command-bar {
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-card-radius);
+  box-shadow: none;
+}
+
+.rejection-bid-file-list {
+  display: grid;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.rejection-bid-file-entry {
+  display: grid;
+  gap: 6px;
+}
+
+.rejection-bid-file-entry > span {
+  width: max-content;
+  padding: 3px 8px;
+  color: var(--savia-primary);
+  font-size: 12px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+  border-radius: var(--ui-radius);
+}
+
+.rejection-reader-card {
+  height: 100%;
+}
+
+.rejection-reader-head {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.rejection-reader-heading {
+  display: grid;
+  flex: 1 1 320px;
+  min-width: 0;
+  gap: 4px;
+}
+
+.rejection-reader-head > span,
+.rejection-reader-heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rejection-custom-save-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.rejection-custom-save-state {
+  color: var(--savia-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.rejection-custom-save-state.is-dirty {
+  color: var(--savia-warning-deep);
+}
+
+.rejection-result-command-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 0;
+  background:
+    transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.rejection-result-command-bar strong {
+  display: block;
+  margin: 7px 0 5px;
+  color: var(--savia-text);
+  font-size: 24px;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+}
+
+.rejection-result-command-bar p {
+  margin: 0;
+  color: var(--savia-text-soft);
+}
+
+.rejection-result-status {
+  display: grid;
+  min-width: 180px;
+  gap: 4px;
+  padding: 10px 14px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.rejection-result-status span {
+  color: var(--savia-text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.rejection-result-status small {
+  overflow: hidden;
+  color: var(--savia-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rejection-result-status.is-idle {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-color: color-mix(in srgb, var(--savia-border) 14%, transparent);
+}
+
+.rejection-result-status.is-running {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-color: color-mix(in srgb, var(--savia-border) 18%, transparent);
+}
+
+.rejection-result-status.is-success {
+  background: color-mix(in srgb, var(--savia-success) 8%, transparent);
+  border-color: color-mix(in srgb, var(--savia-success-border) 18%, transparent);
+}
+
+.rejection-result-status.is-error {
+  background: color-mix(in srgb, var(--savia-warning) 8%, transparent);
+  border-color: color-mix(in srgb, var(--savia-warning-border) 18%, transparent);
+}
+
+.rejection-result-card {
+  min-height: 0;
+}
+
+.rejection-result-viewer,
+.rejection-custom-editor {
+  min-height: 0;
+}
+
+.rejection-custom-editor {
+  height: 100%;
+}
+
+.rejection-check-result-panel {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-row: 1 / -1;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 18px;
+  padding: 24px;
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-card-radius);
+  box-shadow: none;
+}
+
+.rejection-check-result-title {
+  min-height: 58px;
+}
+
+.rejection-check-result-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rejection-check-result-tabs {
+  display: grid;
+  overflow: hidden;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.rejection-check-result-tab {
+  display: grid;
+  min-height: 86px;
+  gap: 10px;
+  padding: 16px 20px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--savia-border) 12%, transparent);
+  cursor: pointer;
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.rejection-check-result-tab:last-child {
+  border-right: 0;
+}
+
+.rejection-check-result-tab.is-active {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+.rejection-check-result-tab:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--primary) 4%, transparent);
+}
+
+.rejection-check-result-tab strong {
+  color: var(--savia-text);
+  font-size: 20px;
+}
+
+.rejection-check-result-tab em {
+  padding: 5px 9px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 500;
+  border-radius: var(--ui-radius);
+}
+
+.rejection-check-result-tab.is-running em {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.rejection-check-result-tab.is-success em {
+  color: var(--savia-success);
+  background: color-mix(in srgb, var(--savia-success) 10%, transparent);
+}
+
+.rejection-check-result-tab.is-error em {
+  color: var(--savia-danger);
+  background: color-mix(in srgb, var(--savia-danger) 10%, transparent);
+}
+
+.rejection-check-result-tab.is-idle em,
+.rejection-check-result-tab.is-disabled em {
+  color: var(--savia-text-muted);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.rejection-check-result-content {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: center;
+  overflow: auto;
+  padding: 34px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-card-radius);
+}
+
+.rejection-check-result-content h3 {
+  margin: 10px 0 12px;
+  color: var(--savia-text);
+  font-size: 26px;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+}
+
+.rejection-check-result-content p {
+  max-width: 620px;
+  margin: 0;
+  color: var(--savia-text-soft);
+  line-height: 1.8;
+}
+
+.rejection-check-result-content.is-rejection-list {
+  justify-content: flex-start;
+  gap: 18px;
+  padding: 24px;
+}
+
+.rejection-check-result-content.is-rejection-list p {
+  max-width: none;
+}
+
+.rejection-finding-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.rejection-finding-summary h3 {
+  margin: 8px 0 8px;
+  font-weight: 600;
+}
+
+.rejection-finding-list {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.rejection-bid-result-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 2px;
+}
+
+.rejection-bid-result-filter button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  color: var(--savia-text-soft);
+  font-weight: 500;
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.rejection-bid-result-filter button.is-active {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-color: color-mix(in srgb, var(--savia-border) 24%, transparent);
+}
+
+.rejection-bid-result-filter span {
+  min-width: 18px;
+  padding: 2px 6px;
+  color: inherit;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-radius: var(--ui-radius);
+}
+
+.rejection-finding-group {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.rejection-finding-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  color: var(--savia-text-soft);
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.rejection-finding-group-head strong {
+  color: var(--savia-text);
+  font-weight: 600;
+}
+
+.rejection-finding-group-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rejection-finding-item {
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+}
+
+.rejection-finding-item.is-expanded {
+  border-color: color-mix(in srgb, var(--savia-border) 24%, transparent);
+}
+
+.rejection-finding-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px;
+}
+
+.rejection-finding-toggle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--ui-radius);
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.rejection-finding-toggle:hover {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.rejection-finding-chevron {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  color: var(--savia-primary);
+  font-size: 18px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-radius: var(--ui-radius);
+}
+
+.rejection-finding-title-wrap {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.rejection-finding-title-wrap > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.rejection-finding-title-wrap strong {
+  overflow: hidden;
+  color: var(--savia-text);
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rejection-finding-title-wrap small {
+  overflow: hidden;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  line-height: 1.55;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rejection-finding-tag,
+.rejection-finding-file-tag,
+.rejection-finding-severity {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 500;
+  border-radius: var(--ui-radius);
+}
+
+.rejection-finding-file-tag {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.rejection-finding-tag.is-invalidBid {
+  color: var(--savia-danger);
+  background: color-mix(in srgb, var(--savia-warning) 10%, transparent);
+}
+
+.rejection-finding-tag.is-rejectionItem {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 11%, transparent);
+}
+
+.rejection-finding-tag.is-typo {
+  color: var(--savia-warning-deep);
+  background: color-mix(in srgb, var(--savia-warning) 13%, transparent);
+}
+
+.rejection-finding-tag.is-logic {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 11%, transparent);
+}
+
+.rejection-finding-severity.is-high {
+  color: var(--savia-danger);
+  background: color-mix(in srgb, var(--savia-warning) 10%, transparent);
+}
+
+.rejection-finding-severity.is-medium {
+  color: var(--savia-warning-deep);
+  background: color-mix(in srgb, var(--savia-warning) 13%, transparent);
+}
+
+.rejection-finding-severity.is-low {
+  color: var(--savia-success);
+  background: color-mix(in srgb, var(--savia-success) 10%, transparent);
+}
+
+.rejection-finding-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rejection-finding-delete,
+.rejection-finding-copy {
+  align-self: center;
+  padding: 8px 12px;
+  font-weight: 500;
+  border: 0;
+  border-radius: var(--ui-radius);
+}
+
+.rejection-finding-delete {
+  color: var(--savia-danger);
+  background: color-mix(in srgb, var(--savia-warning) 8%, transparent);
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.rejection-finding-copy {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.rejection-finding-delete:hover {
+  background: color-mix(in srgb, var(--savia-warning) 14%, transparent);
+}
+
+.rejection-finding-copy:hover {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.typo-finding-title {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.typo-finding-title i {
+  color: var(--savia-text-muted);
+  font-style: normal;
+}
+
+.typo-original-excerpt {
+  margin: 0;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.typo-original-excerpt mark {
+  padding: 1px 4px;
+  color: var(--savia-warning-deep);
+  font-weight: 500;
+  background: color-mix(in srgb, var(--savia-warning) 38%, transparent);
+  border-radius: var(--ui-radius);
+}
+
+.rejection-finding-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.rejection-finding-detail-block {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.rejection-finding-detail-block strong {
+  color: var(--savia-text);
+  font-size: 14px;
+}
+
+.rejection-finding-markdown {
+  min-height: 0;
+  padding: 0;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  line-height: 1.7;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.rejection-finding-markdown p,
+.rejection-finding-markdown ul,
+.rejection-finding-markdown ol {
+  margin: 0;
+}
+
+@media (max-width: 900px), (max-height: 700px) {
+  .rejection-check-result-panel {
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .rejection-check-result-title {
+    min-height: 0;
+  }
+
+  .rejection-check-result-tab {
+    min-height: 58px;
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  .rejection-check-result-tab strong {
+    font-size: 14px;
+  }
+
+  .rejection-check-result-content.is-rejection-list {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .rejection-finding-summary h3 {
+    margin: 4px 0;
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 900px) {
+  .rejection-finding-item.is-typo .rejection-finding-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rejection-finding-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .rejection-finding-title-wrap > span {
+    flex-wrap: wrap;
+  }
+
+  .rejection-finding-title-wrap strong,
+  .rejection-finding-title-wrap small {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .rejection-finding-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rejection-finding-group-head strong {
+    flex-shrink: 0;
+  }
+}
+
+.rejection-finding-empty {
+  flex: 1;
+  min-height: 220px;
+}
+
+.rejection-finding-empty.is-error {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 18%, transparent);
+}
+
+.rejection-check-config-card {
+  width: min(560px, calc(100vw - 40px));
+}
+
+.rejection-markdown-viewer,
+.rejection-empty-reader {
+  min-height: 0;
+}

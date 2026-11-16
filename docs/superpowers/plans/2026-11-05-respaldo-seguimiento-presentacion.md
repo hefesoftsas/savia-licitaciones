@@ -1,0 +1,12 @@
+# Respaldo del seguimiento de presentaciones
+
+Capturar solicitudes, resultados, presentaciones y sus copias de evidencias por proyecto, preservando identidad de origen, fechas, estado y vínculos a tareas. La captura debe verificar propiedad, detectar cambios observados en D1 y R2, conservar SHA-256 y rechazar archivos ausentes. No es una instantánea conjunta ni incluye credenciales. El transporte del runner no debe incluir claves internas de R2.
+
+1. **Implementado:** transporte autenticado por proyecto y descargas condicionales, con aislamiento entre cuentas, revocación, cambios y objetos ausentes; integrado al manifiesto parcial de captura.
+2. Diseñar e implementar la recuperación idempotente con recibos propios, remapeo de tareas y manejo explícito de vínculos históricos no disponibles; preservar ediciones y eliminaciones. Validar metadatos, hashes y relaciones antes de escribir.
+   - La importación de flujo conserva transaccionalmente la correspondencia de IDs de tareas nuevas y la recuperación del seguimiento la utiliza. Las importaciones anteriores carecen de ese mapa y no se reconstruyen por coincidencia de campos.
+   - Preparada la validación previa de metadatos, relaciones y SHA-256 de archivos mediante lectura por flujo. La carga multipart autenticada para archivos de hasta 256 MiB está conectada a las publicaciones y al módulo de recuperación del runner.
+   - Preparada la importación individual de solicitudes y resultados con recibos transaccionales, conservación de cambios/eliminaciones y resolución de tareas por mapa. Para una tarea sin correspondencia se guarda su ID original en el recibo y se usa una referencia no disponible en el proyecto recuperado.
+   - Implementada la publicación transaccional de presentaciones, evidencias y adjuntos con recibos idempotentes.
+3. Integrado al runner y probado con Miniflare, dos cuentas, capturas antiguas y paquete independiente; probado el reintento multipart de un adjunto mayor de 10 MiB. Queda verificar una interrupción y recuperación del flujo completo con archivos grandes, y la migración de este seguimiento desde escritorio.
+4. El runner captura e inspecciona respaldos de escritorio hasta el esquema 69 y transfiere el seguimiento en ambos comandos. Las presentaciones con evidencias ausentes conservan sus metadatos y declaran qué archivos faltan; la interfaz permite adjuntar una copia de un documento del proyecto. Los archivos ausentes o dañados se informan en el resultado de importación. Siguen pendientes los archivos de oferta y las decisiones de adendas.

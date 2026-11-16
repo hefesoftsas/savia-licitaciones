@@ -1,0 +1,70 @@
+import {useEffect, useRef, useState, type RefObject} from 'react';
+import {useEditorEvent, useEditorState, type DocxEditorRef} from '@docx-editor.dev/react';
+import type {TextMatch} from '@docx-editor.dev/core';
+import {ArrowLeft, ArrowRight, Check, FileWarning, ListChecks, Sparkles, Undo2} from 'lucide-react';
+import {Button} from '@/shared/ui/primitives/button';
+import {Tooltip,TooltipTrigger,TooltipContent,TooltipProvider} from '@/shared/ui/primitives/tooltip';
+import {Popover,PopoverTrigger,PopoverContent} from '@/shared/ui/primitives/popover';
+import {collectPendingFields,pendingFieldIndex} from './word-pending-fields.mjs';
+import {applyPendingField} from './word-field-assistance.mjs';
+import {WebWordAssistant} from './WebWordAssistant';
+import {WebWordBatchAssistant} from './WebWordBatchAssistant';
+import {applyBatchAdvice} from './word-batch-assistance.mjs';
+import {sameField} from './word-field-assistance.mjs';
+import {applyFictional,collectLegacyFictional,generateFictional,undoFictional,type FictionalRecord} from './word-fictional.mjs';
+import {request} from './api.mjs';
+import {useToast} from '@/shared/ui/ToastProvider';
+
+export default function WebWordPending({editor,en,onCount,projectId,wordId}:{editor:RefObject<DocxEditorRef|null>;en:boolean;onCount?:(count:number)=>void;projectId?:string;wordId?:string}) {
+ const loading=useEditorState(s=>s.isLoading||!!s.isOpening);
+ const [revision,setRevision]=useState(0),[fields,setFields]=useState<TextMatch[]>([]),[active,setActive]=useState<TextMatch|null>(null);
+ const [assisting,setAssisting]=useState(false),[batchOpen,setBatchOpen]=useState(false),[batchBusy,setBatchBusy]=useState(false);const selectedRevision=useRef(0),advanceFrom=useRef<TextMatch|null>(null),liveRevision=useRef(0);
+ const [legacyFields,setLegacyFields]=useState<TextMatch[]>([]),[legacyAnswers,setLegacyAnswers]=useState<string[]>([]);
+ useEffect(()=>{if(!projectId)return;let live=true;void request<{jobs:{result?:{answer?:string}|null}[]}>(`/api/projects/${encodeURIComponent(projectId)}/jobs`).then(data=>{if(live)setLegacyAnswers(data.jobs.map(job=>job.result?.answer||'').filter(Boolean));}).catch(()=>{});return()=>{live=false;};},[projectId]);
+ const [testConfirm,setTestConfirm]=useState(false),[testBusy,setTestBusy]=useState(false);const {showToast}=useToast();
+ const [fictionalRecords,setFictionalRecords]=useState<FictionalRecord[]>([]),[fictionalProgress,setFictionalProgress]=useState(0);
+ const fillTestData=async()=>{if(!projectId)return;setTestBusy(true);setFictionalProgress(0);try{
+  const engine=editor.current?.getEditor();if(!engine)throw Error('editor_unavailable');const pending=[...collectPendingFields(engine),...collectLegacyFictional(engine,legacyAnswers)];if(!pending.length)throw Error('no_pending');const startRevision=liveRevision.current;
+  const base=`/api/projects/${encodeURIComponent(projectId)}`;
+  const [files,credentials]=await Promise.all([request<{files:{id:string;deleting?:number}[]}>(`${base}/files`),request<{defaultCredentialId:string|null}>('/api/provider-credentials')]);
+  const fileIds=files.files.filter(file=>!file.deleting).map(file=>file.id);if(!fileIds.length||fileIds.length>50)throw Error('files');
+  const ask=async(question:string)=>{type Job={id:string;state:string;result?:{answer?:string}|null};const created=await request<{job:Job}>(`${base}/jobs`,{method:'POST',headers:{'idempotency-key':crypto.randomUUID()},json:{kind:'tender-chat.send',...(credentials.defaultCredentialId?{credentialId:credentials.defaultCredentialId}:{}),payload:{...(!credentials.defaultCredentialId?{localRunner:true}:{}),wordAssistance:true,fictionalTest:true,question,fileIds,language:en?'en':'es',dataProcessingConsent:true}}});let job=created.job;
+   for(let i=0;i<180&&['queued','running'].includes(job.state);i++){await new Promise(resolve=>setTimeout(resolve,2000));const data=await request<{jobs:Job[]}>(`${base}/jobs`);const found=data.jobs.find(item=>item.id===job.id);if(!found)throw Error('job');job=found;}
+   if(job.state!=='succeeded'||!job.result?.answer)throw Error('job');return job.result.answer;
+  };
+  const answers=await generateFictional(pending,ask,en?'inglés':'español',setFictionalProgress);
+  if(liveRevision.current!==startRevision||editor.current?.getEditor()!==engine)throw Error('changed');
+  const result=applyFictional(engine,pending,answers,crypto.randomUUID().slice(0,8));setFictionalRecords(previous=>[...previous,...result.records]);setTestConfirm(false);setAssisting(false);setBatchOpen(false);setActive(null);
+  if(result.failed)showToast(en?`${result.records.length} fields filled; ${result.failed} could not be changed.`:`Se llenaron ${result.records.length} campos; ${result.failed} no se pudieron cambiar.`,'error');
+  else showToast(en?`${result.records.length} fictional fields added.`:`Se llenaron ${result.records.length} campos con datos ficticios.`,'success');
+ }catch(err){const code=(err as Error).message;showToast(code==='changed'?(en?'The document changed while generating. No fields were replaced.':'El documento cambió durante la generación. No se reemplazó ningún campo.'):code==='files'?(en?'Select up to 50 project documents first.':'Agrega entre 1 y 50 documentos al proyecto primero.'):code==='invalid_answer'?(en?'The model did not return the requested test values. No fields were replaced.':'El modelo no devolvió los datos de prueba solicitados. No se reemplazó ningún campo.'):(en?'Could not generate fictitious data. Check the runner and try again.':'No se pudieron generar los datos ficticios. Revisa el runner e inténtalo de nuevo.'),'error');}finally{setTestBusy(false);}};
+ const undoTestData=()=>{const engine=editor.current?.getEditor();if(!engine)return;const result=undoFictional(engine,fictionalRecords);setFictionalRecords(result.remaining);showToast(result.remaining.length?(en?`Restored ${result.restored}; ${result.remaining.length} edited fields were kept.`:`Se restauraron ${result.restored}; se conservaron ${result.remaining.length} campos modificados.`):(en?`Restored ${result.restored} fields.`:`Se restauraron ${result.restored} campos.`),result.remaining.length?'info':'success');};
+ useEditorEvent('change',()=>{liveRevision.current++;setRevision(liveRevision.current);});
+ useEffect(()=>{
+  if(loading)return;
+  const engine=editor.current?.getEditor();if(!engine)return;
+  const matches=collectPendingFields(engine);setFields(matches);setLegacyFields(collectLegacyFictional(engine,legacyAnswers));onCount?.(matches.length);
+  if(advanceFrom.current){const previous=advanceFrom.current;advanceFrom.current=null;if(matches.length){const next=matches[pendingFieldIndex(matches,previous,1)];engine.selectMatch(next);selectedRevision.current=revision;setActive(next);}else{setActive(null);setAssisting(false);}}
+ },[loading,revision,editor,onCount,legacyAnswers]);
+ const index=active?fields.findIndex(field=>field.blockId===active.blockId&&field.start===active.start&&JSON.stringify(field.scope)===JSON.stringify(active.scope)):-1;
+ const go=(direction:number)=>{
+  if(!fields.length)return;
+  // When an edit removes the active marker, the next marker occupies its old position.
+  const target=fields[pendingFieldIndex(fields,active,direction)];
+  const engine=editor.current?.getEditor();if(!engine)return;
+  engine.selectMatch(target);editor.current?.focus();selectedRevision.current=revision;setActive(target);
+ };
+ return <div className="web-word-pending-region"><div className="web-word-pending" role="region" aria-label={en?'Complete missing information':'Completar datos pendientes'}>
+  <div><strong role="status">{loading?(en?'Checking fields…':'Revisando campos…'):fields.length?`${fields.length} ${en?'pending fields':'datos pendientes'}`:<><Check size={16}/>{en?'No pending markers':'Sin marcadores pendientes'}</>}</strong><small>{fields.length?(en?'Select a field and type its value in the document.':'Selecciona un campo y escribe su valor en el documento.'):legacyFields.length?(en?`${legacyFields.length} generic test values can be replaced with AI.`:`${legacyFields.length} datos genéricos pueden reemplazarse con IA.`):(en?'Review the document and save to continue.':'Revisa el documento y guarda para continuar.')}</small></div>
+  {(!!projectId||!!fields.length||!!legacyFields.length||!!fictionalRecords.length)&&<TooltipProvider delayDuration={250}><div className="web-word-pending-controls">
+   {!!fields.length&&<>{index>=0&&<span>{index+1} / {fields.length}</span>}
+   <Tooltip><TooltipTrigger asChild><Button type="button" size="icon" variant="ghost" aria-label={en?'Previous pending field':'Dato pendiente anterior'} onClick={()=>go(-1)}><ArrowLeft size={16}/></Button></TooltipTrigger><TooltipContent>{en?'Previous pending field':'Dato pendiente anterior'}</TooltipContent></Tooltip>
+   <Tooltip><TooltipTrigger asChild><Button type="button" size="icon" variant="ghost" aria-label={active?(en?'Next pending field':'Siguiente pendiente'):(en?'Complete fields':'Completar datos')} onClick={()=>go(1)}><ArrowRight size={16}/></Button></TooltipTrigger><TooltipContent>{active?(en?'Next pending field':'Siguiente pendiente'):(en?'Complete fields':'Completar datos')}</TooltipContent></Tooltip>
+   </>}
+   {projectId&&<Tooltip><TooltipTrigger asChild><Button type="button" size="icon" variant={assisting?'secondary':'ghost'} aria-label={en?'Help me complete':'Ayúdame a completar'} aria-expanded={assisting} aria-disabled={!fields.length||batchBusy} onClick={()=>{if(!fields.length){showToast(en?'There are no pending fields to complete.':'No hay datos pendientes para completar.','info');return;}if(batchBusy)return;setBatchOpen(false);if(!assisting&&!active)go(1);setAssisting(value=>!value);}}><Sparkles size={16}/></Button></TooltipTrigger><TooltipContent>{fields.length?(en?'Help me complete':'Ayúdame a completar'):(en?'No pending fields to complete':'No hay datos pendientes para completar')}</TooltipContent></Tooltip>}
+   {projectId&&<Tooltip><TooltipTrigger asChild><Button type="button" size="icon" variant={batchOpen?'secondary':'ghost'} aria-label={en?'Complete all':'Completar todos'} aria-expanded={batchOpen} aria-disabled={!fields.length||batchBusy} onClick={()=>{if(!fields.length){showToast(en?'There are no pending fields to complete.':'No hay datos pendientes para completar.','info');return;}if(batchBusy)return;setAssisting(false);setBatchOpen(value=>!value);}}><ListChecks size={16}/></Button></TooltipTrigger><TooltipContent>{fields.length?(en?'Complete all':'Completar todos'):(en?'No pending fields to complete':'No hay datos pendientes para completar')}</TooltipContent></Tooltip>}
+   {!!fictionalRecords.length&&<Tooltip><TooltipTrigger asChild><Button type="button" size="icon" variant="ghost" aria-label={en?'Undo fictional data':'Deshacer datos ficticios'} disabled={testBusy} onClick={undoTestData}><Undo2 size={16}/></Button></TooltipTrigger><TooltipContent>{en?'Undo fictional data':'Deshacer datos ficticios'}</TooltipContent></Tooltip>}
+   {!!projectId&&<Popover open={testConfirm} onOpenChange={open=>{if(open&&!fields.length&&!legacyFields.length){showToast(en?'There are no pending fields for test data.':'No hay datos pendientes para llenar con datos ficticios.','info');return;}if(!testBusy)setTestConfirm(open);}}><Tooltip><TooltipTrigger asChild><PopoverTrigger asChild><Button type="button" size="icon" variant={testConfirm?'secondary':'ghost'} aria-label={en?'Fill with fictitious data':'Llenar con datos ficticios'} aria-disabled={!fields.length&&!legacyFields.length} disabled={batchBusy||testBusy}><FileWarning size={16}/></Button></PopoverTrigger></TooltipTrigger><TooltipContent>{fields.length||legacyFields.length?(en?'Fill with fictitious data':'Llenar con datos ficticios'):(en?'No pending fields for test data':'No hay datos pendientes para llenar con datos ficticios')}</TooltipContent></Tooltip><PopoverContent align="end" sideOffset={8} className="web-word-test-popover" onInteractOutside={event=>{if(testBusy)event.preventDefault();}}><strong>{en?'Fill this Word with fictitious data?':'¿Llenar este Word con datos ficticios?'}</strong><p>{en?`This will replace the ${fields.length+legacyFields.length} pending or generic fields in the open draft with clearly marked test data. AI will generate test values in a different font. Do not submit it as an offer. You can undo unchanged fields while the editor stays open.`:`Se reemplazarán los ${fields.length+legacyFields.length} campos pendientes o datos genéricos del borrador abierto con datos identificados como ficticios. La IA creará datos de prueba con otra fuente. No lo presentes como oferta. Podrás deshacer los campos que no hayas editado mientras mantengas abierto el editor.`}</p><div className="web-word-assistant-actions"><Button size="sm" disabled={testBusy} onClick={()=>void fillTestData()}>{testBusy?(en?`Generating ${fictionalProgress}/${fields.length+legacyFields.length}…`:`Generando ${fictionalProgress}/${fields.length+legacyFields.length}…`):(en?'Fill with test data':'Llenar con datos de prueba')}</Button><Button size="sm" variant="ghost" disabled={testBusy} onClick={()=>setTestConfirm(false)}>{en?'Cancel':'Cancelar'}</Button></div></PopoverContent></Popover>}
+  </div></TooltipProvider>}
+ </div>{assisting&&projectId&&active&&<WebWordAssistant projectId={projectId} en={en} field={active} onApply={(field,value)=>{const engine=editor.current?.getEditor();if(!applyPendingField(engine,field,value,selectedRevision.current,liveRevision.current))return false;advanceFrom.current=field;return true;}}/>}{batchOpen&&projectId&&wordId&&<WebWordBatchAssistant projectId={projectId} wordId={wordId} en={en} fields={fields} revision={revision} onBusy={setBatchBusy} onClose={()=>setBatchOpen(false)} onApply={(items,original,version)=>{const engine=editor.current?.getEditor();const current=engine?collectPendingFields(engine):[];if(current.length!==original.length||current.some((field:TextMatch,index:number)=>!sameField(field,original[index])))return {applied:0,failed:0,stale:true};return applyBatchAdvice(engine,original,items,version,liveRevision.current);}}/>}</div>;
+}

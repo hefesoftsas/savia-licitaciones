@@ -1,0 +1,16 @@
+{
+  "slug": "savia",
+  "assetScheme": "savia-asset",
+  "database": "savia.sqlite",
+  "profileNames": [],
+  "identity": {
+    "projectName": "savia-licitaciones",
+    "appId": "app.savia.licitaciones"
+  },
+  "signatures": {
+    "document": "\n---savia-rejection-signature---\n",
+    "bidDocument": "\n---savia-rejection-bid-document---\n",
+    "checkInput": "\n---savia-rejection-check-input---\n",
+    "bidSignature": "\n---savia-rejection-bid-signature---\n"
+  }
+}

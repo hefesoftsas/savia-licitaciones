@@ -1,0 +1,3 @@
+CREATE TABLE jobs (id TEXT PRIMARY KEY NOT NULL, project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE, owner_id TEXT NOT NULL REFERENCES "user" (id) ON DELETE CASCADE, kind TEXT NOT NULL, client_request_id TEXT NOT NULL, payload_json TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, runner_id TEXT REFERENCES runners (id), lease_hash TEXT, lease_expires_at INTEGER, result_json TEXT, UNIQUE (owner_id, project_id, client_request_id));
+CREATE INDEX jobs_owner_state_idx ON jobs (owner_id, state, created_at);
+CREATE INDEX jobs_project_idx ON jobs (project_id, created_at);

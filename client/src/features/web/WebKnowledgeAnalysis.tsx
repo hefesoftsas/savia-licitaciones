@@ -1,0 +1,33 @@
+import {Square} from 'lucide-react';
+import {WebJobProgress} from './WebJobProgress';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import AppDialog from '@/shared/ui/AppDialog';
+import {ActionButton as Button} from '@/shared/ui/ActionButton';
+import { useToast } from '@/shared/ui/ToastProvider';
+import { request } from './api.mjs';
+import WebImportedKnowledgeItems from './WebImportedKnowledgeItems';
+
+type Credential = { id: string; provider: string; model: string };
+type Entry = { title: string; summary: string; quote: string };
+type Job = { id: string; state: string; progress?: string | null; result: { entries?: Entry[]; discardedCount?: number; message?: string } | null };
+type Data = { jobs: Job[]; revision: number; sourceJobId: string | null; entries: Entry[] };
+export default function WebKnowledgeAnalysis({ documentId, name, language, credentials, onIndexed }: { documentId: string; name: string; language: 'es' | 'en'; credentials: Credential[]; onIndexed: () => void }) {
+ const en = language === 'en', { showToast } = useToast();
+ const [data, setData] = useState<Data | null>(null), credential=credentials[0]?.id||'', [consentFor, setConsentFor] = useState(''), [busy, setBusy] = useState(false), [failed, setFailed] = useState(false), [confirm, setConfirm] = useState<{ job: Job; revision: number } | null>(null);
+ const key = JSON.stringify([documentId, credential]), consent = true;
+ const path = `/api/knowledge/documents/${encodeURIComponent(documentId)}/analyses`;
+ const mounted = useRef(false), submission = useRef<{ body: string; id: string } | null>(null);
+ const load = useCallback(async () => { const next = await request<Data>(path); if (mounted.current) { setData(next); setFailed(false); } }, [path]);
+ useEffect(() => { mounted.current = true; const refresh = () => void load().catch(() => { if (mounted.current) setFailed(true); }); refresh(); const timer = window.setInterval(refresh, 5000); return () => { mounted.current = false; window.clearInterval(timer); }; }, [load]);
+ const run = async (action: () => Promise<void>) => { setBusy(true); try { await action(); await load(); } catch { await load().catch(() => undefined); showToast(en ? 'Could not complete the action. Check the document and try again.' : 'No se pudo completar la acción. Revisa el documento e inténtalo de nuevo.', 'error'); } finally { setBusy(false); } };
+ const queue = () => { if (!consent) return; const body = { credentialId: credential, language, dataProcessingConsent: true }, encoded = JSON.stringify(body); if (submission.current?.body !== encoded) submission.current = { body: encoded, id: crypto.randomUUID() }; void run(async () => { await request(path, { method: 'POST', headers: { 'idempotency-key': submission.current!.id }, json: body }); submission.current = null; setConsentFor(''); }); };
+ const apply = () => { const current = confirm; setConfirm(null); if (!current) return; const { job, revision } = current; void run(async () => { await request(`${path}/${job.id}/apply`, { method: 'POST', json: { revision } }); onIndexed(); }); };
+ return <section className="web-knowledge-analysis"><h3>{en ? 'Analyze and review' : 'Analizar y revisar'}: {name}</h3><p>{en ? 'Pi reads the selected document on your runner. Review summaries and their exact source excerpts before accepting them.' : 'Pi lee el documento seleccionado en tu runner. Revisa los resúmenes y sus fragmentos originales antes de aceptarlos.'}</p><p>{en ? 'Supports TXT, Markdown, DOCX, XLS and XLSX, and PDFs with selectable text. DOC and WPS may require LibreOffice or another local converter. Split documents exceeding 300,000 extracted characters.' : 'Admite TXT, Markdown, DOCX, XLS y XLSX, y PDF con texto seleccionable. DOC y WPS pueden requerir LibreOffice u otro conversor local. Divide los documentos con más de 300.000 caracteres extraídos.'}</p>
+ <></><></><Button size="sm" disabled={busy || !consent || !data || failed || data.jobs.some(job => ['queued', 'running'].includes(job.state))} onClick={queue}>{en ? 'Analyze document' : 'Analizar documento'}</Button>
+ {failed && <p role="alert">{en ? 'Could not refresh analysis.' : 'No se pudo actualizar el análisis.'}</p>}{!data && !failed && <p role="status">{en ? 'Loading…' : 'Cargando…'}</p>}
+ <WebImportedKnowledgeItems documentId={documentId} language={language} />
+ {!!data?.entries.length && <div><h4>{en ? 'Accepted entries' : 'Entradas aceptadas'}</h4>{data.entries.map((entry, index) => <article key={index}><strong>{entry.title}</strong><p>{entry.summary}</p><blockquote>{entry.quote}</blockquote></article>)}</div>}
+ {data?.jobs.map(job => <article key={job.id}><strong>{({ queued: en ? 'Queued' : 'En cola', running: en ? 'Running' : 'En ejecución', succeeded: en ? 'Ready for review' : 'Listo para revisión', failed: en ? 'Failed' : 'Falló', cancelled: en ? 'Cancelled' : 'Cancelado', interrupted: en ? 'Interrupted' : 'Interrumpido' } as Record<string, string>)[job.state] || job.state}</strong><WebJobProgress state={job.state} progress={job.progress} language={language} />{job.result?.message && <p>{job.result.message}</p>}{!!job.result?.discardedCount && <p>{en ? `Unmatched excerpts discarded: ${job.result.discardedCount}.` : `Fragmentos no encontrados descartados: ${job.result.discardedCount}.`}</p>}{job.result?.entries?.map((entry, index) => <div key={index}><strong>{entry.title}</strong><p>{entry.summary}</p><blockquote>{entry.quote}</blockquote></div>)}{!!job.result?.entries?.length && <Button size="sm" variant="outline" disabled={busy || job.id === data.sourceJobId} onClick={() => setConfirm({ job, revision: data.revision })}>{job.id === data.sourceJobId ? (en ? 'Accepted' : 'Aceptadas') : (en ? 'Accept entries' : 'Aceptar entradas')}</Button>}{['queued', 'running'].includes(job.state) && <Button icon={Square} size="sm" variant="ghost" disabled={busy} onClick={() => void run(async () => { await request(`${path}/${job.id}/cancel`, { method: 'POST', json: {} }); })}>{en ? 'Cancel task' : 'Cancelar tarea'}</Button>}</article>)}
+ <AppDialog open={!!confirm} onOpenChange={open => { if (!open) setConfirm(null); }} title={en ? 'Replace accepted entries?' : '¿Reemplazar las entradas aceptadas?'} description={en ? 'The selected analysis will replace this document’s previous accepted entries.' : 'El análisis seleccionado reemplazará las entradas aceptadas anteriormente para este documento.'} actions={<><Button variant="outline" onClick={() => setConfirm(null)}>{en ? 'Cancel' : 'Cancelar'}</Button><Button onClick={apply}>{en ? 'Replace entries' : 'Reemplazar entradas'}</Button></>} />
+ </section>;
+}

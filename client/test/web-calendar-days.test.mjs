@@ -1,0 +1,2 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {monthDays,shiftMonth} from '../src/features/web/agenda-calendar.mjs';
+test('calcula semanas de lunes a domingo, bisiestos y cambios de año',()=>{const days=monthDays(2024,2);assert.equal(days.length,35);assert.equal(days[3],'2024-02-01');assert.equal(days[31],'2024-02-29');assert.equal(days[0],null);assert.deepEqual(shiftMonth(2024,12,1),{year:2025,month:1});assert.deepEqual(shiftMonth(2024,1,-1),{year:2023,month:12});});

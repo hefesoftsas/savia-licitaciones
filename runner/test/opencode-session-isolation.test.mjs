@@ -1,0 +1,10 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url),{createAiService}=require('../../client/electron/services/aiService.cjs'),{createPiRuntimeService}=require('../../client/electron/services/pi/piRuntimeService.cjs');
+test('las tareas sin ámbito de cola mantienen sesiones de OpenCode separadas', {timeout:30000},async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'savia-opencode-sessions-')),previous=globalThis.fetch,headers=[];
+ const app={isPackaged:false,getPath:()=>directory},configStore={load:()=>({text_model_provider:'opencode-go',api_key:'fixture',model_name:'muse-spark-1.3-contributor',base_url:'https://opencode.ai/inference/go/openai/v1',request_mode:'normal',output_token_limit:4096,reasoning_effort:'low',ui_language:'es',developer_mode:false,multimodal_enabled:false,components:{file_parser:{provider:'local'}}})};
+ globalThis.fetch=async(url,options={})=>{if(String(url).startsWith('http://127.0.0.1:'))return previous(url,options);headers.push(new Headers(options.headers).get('x-opencode-session'));return new Response(JSON.stringify({id:'fixture',status:'completed',model:'muse-spark-1.3-contributor',output:[{type:'message',content:[{type:'output_text',text:'Respuesta'}]}],usage:{input_tokens:1,output_tokens:1,total_tokens:2}}),{headers:{'content-type':'application/json'}});};
+ const runtime=createPiRuntimeService({app,configStore,aiService:createAiService({app,configStore}),isMonitorActive:()=>false});
+ try{for(const task_id of ['one','two'])await runtime.runTask({task_id,prompt:'Responde brevemente',max_retries:0,secop_safe_tools:true,active_tools:['read']});assert.equal(headers.length,2);assert.ok(headers.every(value=>/^[a-f0-9]{64}$/.test(value)));assert.notEqual(headers[0],headers[1]);}
+ finally{await runtime.close();globalThis.fetch=previous;await rm(directory,{recursive:true,force:true});}
+});

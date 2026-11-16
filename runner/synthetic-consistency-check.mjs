@@ -1,0 +1,6 @@
+// Deliberately fictional inputs, used solely by the opt-in evaluator.
+export const syntheticConsistencyScenario={chapters:[{id:'alcance',title:'Alcance',content:'El plazo de ejecución del contrato es de 30 días calendario. La coordinación se realizará mediante reuniones de seguimiento.'},{id:'cronograma',title:'Cronograma',content:'El plazo de ejecución del contrato es de 45 días calendario. El equipo revisará el avance en cada reunión.'}],references:[{id:'pliego',title:'Referencia aprobada',content:'El plazo autorizado para la ejecución del contrato es de 30 días calendario.'}],globalFacts:[{title:'Plazo aprobado',content:'El plazo de ejecución del contrato es de 30 días calendario.'}]};
+export function assessSyntheticConsistency(result){
+ const {chapters}=syntheticConsistencyScenario,corrected=result.sections.find(item=>item.id==='cronograma')?.content||chapters[1].content,first=result.sections.find(item=>item.id==='alcance')?.content||chapters[0].content,resolved=/\b30\b/.test(first)&&/\b30\b/.test(corrected)&&!/\b45\b/.test(corrected),reported=result.unresolved.some(item=>item.section_ids.includes('cronograma')&&/(plazo|d[ií]as|30|45)/i.test(item.description));
+ return {detected:resolved||reported,resolved,reported};
+}

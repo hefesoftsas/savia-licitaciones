@@ -1,0 +1,10 @@
+ALTER TABLE "user" ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE "user" ADD COLUMN banned INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "user" ADD COLUMN banReason TEXT;
+ALTER TABLE "user" ADD COLUMN banExpires INTEGER;
+ALTER TABLE "session" ADD COLUMN impersonatedBy TEXT;
+CREATE TABLE auth_superadmin_bootstrap (
+ slot INTEGER PRIMARY KEY CHECK(slot=1),
+ user_id TEXT REFERENCES "user"(id) ON DELETE SET NULL,
+ created_at INTEGER NOT NULL
+);

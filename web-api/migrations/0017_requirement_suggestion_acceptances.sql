@@ -1,0 +1,1 @@
+CREATE TABLE requirement_suggestion_acceptances (project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, suggestion_id TEXT NOT NULL, requirement_id TEXT NOT NULL REFERENCES project_requirements(id) ON DELETE CASCADE, job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE, PRIMARY KEY(project_id, suggestion_id));

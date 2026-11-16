@@ -1,0 +1,23 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "savia-web-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "vars": {
+    "RUNNER_DOWNLOAD_WINDOWS_URL": "https://github.com/hefesoftsas/savia-licitaciones/releases/download/connector-v0.1.2/Savia-Conector-0.1.2-win-x64.exe",
+    "RUNNER_DOWNLOAD_MACOS_X64_URL": "https://github.com/hefesoftsas/savia-licitaciones/releases/download/connector-v0.1.2/Savia-Conector-0.1.2-mac-x64.dmg",
+    "RUNNER_DOWNLOAD_MACOS_ARM64_URL": "https://github.com/hefesoftsas/savia-licitaciones/releases/download/connector-v0.1.2/Savia-Conector-0.1.2-mac-arm64.dmg",
+    "RUNNER_DOWNLOAD_LINUX_ARM64_URL": "https://github.com/hefesoftsas/savia-licitaciones/releases/download/connector-v0.1.2/Savia-Conector-0.1.2-linux-arm64.AppImage"
+  },
+  "durable_objects": { "bindings": [{ "name": "PREVIEW_WAKE", "class_name": "PreviewWake" }] },
+  "migrations": [{ "tag": "preview-wake-v1", "new_sqlite_classes": ["PreviewWake"] }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "savia-web-local-files" }],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "savia-web-local",
+    "database_id": "local-only",
+    "migrations_dir": "migrations"
+  }]
+}

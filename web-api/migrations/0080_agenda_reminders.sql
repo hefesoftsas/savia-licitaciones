@@ -1,0 +1,2 @@
+CREATE TABLE agenda_reminder_settings (owner_id TEXT PRIMARY KEY REFERENCES "user"(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+CREATE TABLE agenda_reminders (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE, reminder_key TEXT NOT NULL, created_at TEXT NOT NULL, dismissed_at TEXT, notified_at TEXT, notification_token TEXT, notification_lease_until INTEGER, UNIQUE(owner_id,reminder_key));

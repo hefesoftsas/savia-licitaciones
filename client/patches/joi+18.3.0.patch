@@ -1,0 +1,7 @@
+diff --git a/lib/types/string.js b/lib/types/string.js
+--- a/lib/types/string.js
++++ b/lib/types/string.js
+@@ -319,2 +319,2 @@
+                 const address = internals.addressOptions(options);
+-                const regex = new RegExp(`\\s*[${options.separator ? escapeRegex(options.separator) : ','}]\\s*`);
++                const regex = new RegExp(`(?:(?<!\\s)\\s+)?[${options.separator ? escapeRegex(options.separator) : ','}]\\s*`);

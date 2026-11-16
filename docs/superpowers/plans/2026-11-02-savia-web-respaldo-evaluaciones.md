@@ -1,0 +1,12 @@
+# Captura y recuperación de evaluaciones de ofertas
+
+Incorporar las evaluaciones web del proyecto a la captura parcial y recuperar los informes y revisiones en un proyecto nuevo sin reutilizar credenciales ni reanudar trabajos. Los informes eliminados deben seguir eliminados; una eliminación pendiente impide la captura. Tareas sin informe terminal se registran como interrumpidas o fallidas y no deben aparentar tener informe. Incluir revisiones humanas, fechas y contenido preservable; rechazar antes de crear el proyecto los datos incompatibles con el importador existente. No modificar el manifiesto de capturas anteriores.
+
+1. Preparar una fuente por cuenta que lea estados, informes y revisiones, compruebe tamaño y versión de objetos en R2 y detecte modificaciones o eliminaciones concurrentes.
+2. Añadir transporte privado con lectura condicional y captura por flujo; comprobar el SHA-256 independiente del informe.
+3. Validar el contenido localmente y restaurarlo mediante los recibos existentes, sin sobrescribir ediciones o recrear eliminaciones, y mantener compatibilidad hacia atrás.
+4. Probar Miniflare, aislamiento, estados, ausencia y cambios de R2, revisiones simultáneas, recuperación, reintentos e interrupciones. Las capturas seguirán siendo parciales y no cifradas. No desplegar.
+
+**Avance:** existe una fuente interna que lee evaluaciones y revisiones por propietario y proyecto, identifica los informes terminados, convierte las tareas no terminadas a estado interrumpido y verifica versiones y tamaño en R2. Una prueba con Miniflare cubre aislamiento, cambios de revisiones, cambios o ausencia de objetos y eliminaciones pendientes o completas. La fuente todavía no está conectada al endpoint de captura ni a la restauración; las evaluaciones siguen excluidas de las capturas actuales.
+
+**Integración:** la captura parcial ya incluye las evaluaciones, revisiones e informes disponibles con SHA-256 independiente. La recuperación valida el contenido y las revisiones antes de crear el proyecto y usa recibos idempotentes, convirtiendo trabajos activos en interrumpidos. Una eliminación pendiente detiene la captura; los informes eliminados no se recrean. Se conservan cambios posteriores en las revisiones. Miniflare comprobó captura entre cuentas, reintento, eliminación, cambios concurrentes y lectura condicional. La captura sigue siendo parcial, no cifrada y no atómica entre D1 y R2; requiere revisión en las plataformas no probadas.

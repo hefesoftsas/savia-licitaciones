@@ -1,0 +1,41 @@
+{
+  "platform": "win32",
+  "arch": "x64",
+  "key": "win32-x64",
+  "tools": [
+    {
+      "command": "rg",
+      "version": "14.1.1",
+      "repo": "BurntSushi/ripgrep",
+      "asset": "ripgrep-14.1.1-x86_64-pc-windows-msvc.zip",
+      "platform": "win32",
+      "arch": "x64",
+      "key": "win32-x64",
+      "sha256": "d0f534024c42afd6cb4d38907c25cd2b249b79bbe6cc1dbee8e3e37c2b6e25a1",
+      "binary_sha256": "f162b54de2adfc72d78adb1dbada2dedda111ae0a5e2f6e9500f4f909664c5d2"
+    },
+    {
+      "command": "fd",
+      "version": "v10.3.0",
+      "repo": "sharkdp/fd",
+      "asset": "fd-v10.3.0-x86_64-pc-windows-msvc.zip",
+      "platform": "win32",
+      "arch": "x64",
+      "key": "win32-x64",
+      "sha256": "318aa2a6fa664325933e81fda60d523fff29444129e91ebf0726b5b3bcd8b059",
+      "binary_sha256": "fd3d4853da7a319a604e1cb03ede88cbf584edd12b89a0991871fb4d9cd3ba5b"
+    },
+    {
+      "command": "jq",
+      "version": "jq-1.7.1",
+      "repo": "jqlang/jq",
+      "asset": "jq-windows-amd64.exe",
+      "platform": "win32",
+      "arch": "x64",
+      "key": "win32-x64",
+      "sha256": "7451fbbf37feffb9bf262bd97c54f0da558c63f0748e64152dd87b0a07b6d6ab",
+      "binary_sha256": "7451fbbf37feffb9bf262bd97c54f0da558c63f0748e64152dd87b0a07b6d6ab"
+    }
+  ],
+  "prepared_at": "2026-08-05T01:31:36.228Z"
+}

@@ -1,0 +1,6 @@
+.citation-preview { display:grid; gap:8px; min-width:0; }
+.citation-preview > button { justify-self:start; }
+.citation-preview > div { display:grid; gap:8px; min-width:0; }
+.citation-pages { display:flex; flex-wrap:wrap; gap:6px; }
+.citation-note { color:var(--savia-text-soft); font-size:12px; line-height:1.5; }
+.citation-error { font-size:13px; line-height:1.45; padding:10px; border:1px solid var(--savia-border); border-radius:var(--radius); }

@@ -1,0 +1,526 @@
+/*
+ * Shared dialog entrance: overlay fade-in and card fade-in with slight scaling. Dialog classes end in
+ * -modal/-overlay for overlays or -card/-dialog for cards. Radix sets data-state='open', enabling common
+ * attribute selectors. Use the independent scale property so centered cards retain transform:
+ * translate(-50%, -50%).
+ */
+@keyframes savia-dialog-overlay-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes savia-dialog-card-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+[class*='-modal'][data-state='open'],
+[class*='-overlay'][data-state='open'] {
+  animation: savia-dialog-overlay-in var(--savia-duration-fast) var(--savia-ease);
+}
+
+[class*='-card'][data-state='open'],
+[class*='-dialog'][data-state='open'] {
+  animation: savia-dialog-card-in var(--savia-duration) var(--savia-ease);
+}
+
+/*
+ * [4003-4009] content-regenerate-modal (global overlay reused by 13+ features). AppDialog uses neutral
+ * .app-dialog-* aliases with visuals identical to content-regenerate-*.
+ */
+.app-dialog-modal,
+.content-regenerate-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: color-mix(in srgb, var(--overlay-ink) 34%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+/* [4145-4228] detail-help-link/modal/card/head/close/body/actions (DetailHelpLink.tsx) */
+.detail-help-link {
+  margin-left: 6px;
+  padding: 0;
+  color: var(--savia-primary);
+  font: inherit;
+  font-weight: 500;
+  line-height: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.detail-help-link:hover {
+  color: var(--savia-primary-deep);
+}
+
+.detail-help-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: color-mix(in srgb, var(--overlay-ink) 32%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.detail-help-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 121;
+  display: flex;
+  flex-direction: column;
+  width: min(480px, calc(100vw - 40px));
+  max-height: min(680px, calc(100vh - 40px));
+  gap: 16px;
+  padding: 22px;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 90%, transparent);
+  border-radius: var(--savia-radius-xl);
+  box-shadow: none;
+  transform: translate(-50%, -50%);
+}
+
+.detail-help-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.detail-help-head h2 {
+  margin: 0;
+  color: var(--savia-text);
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+.detail-help-close {
+  width: 32px;
+  height: 32px;
+  color: var(--savia-text-soft);
+  font-size: 22px;
+  line-height: 1;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+  cursor: pointer;
+}
+
+.detail-help-body {
+  min-height: 0;
+  overflow: auto;
+  color: var(--savia-text-soft);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.detail-help-actions {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+/* [4230-4262] content-regenerate-card base + flex rules for description/textarea */
+.content-regenerate-card > [data-radix-dialog-title],
+.content-regenerate-card > .content-regenerate-title,
+.content-regenerate-card > .content-regenerate-card-head {
+  flex: 0 0 auto;
+}
+
+.content-regenerate-card > [data-radix-dialog-description],
+.content-regenerate-card > .content-regenerate-description,
+.content-regenerate-card > textarea,
+.content-regenerate-card > .gpu-acceleration-copy {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.app-dialog-card,
+.content-regenerate-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  gap: 16px;
+  padding: 24px;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 90%, transparent);
+  border-radius: var(--savia-radius-xl);
+  box-shadow: var(--savia-shadow-modal);
+  transform: translate(-50%, -50%);
+}
+
+/* [5146-5190] content-regenerate-card-head + textarea + actions (shared dialog inner parts) */
+.app-dialog-card-head,
+.content-regenerate-card-head {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.app-dialog-card-head h2,
+.content-regenerate-card-head h2 {
+  margin: 0;
+  color: var(--savia-text);
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+.app-dialog-card-head p,
+.content-regenerate-card-head p {
+  margin: 0;
+  color: var(--savia-text-soft);
+  line-height: 1.7;
+}
+
+.content-regenerate-card textarea {
+  width: 100%;
+  min-height: 150px;
+  padding: 14px 16px;
+  color: var(--savia-text);
+  line-height: 1.7;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--savia-radius-lg);
+  outline: none;
+  resize: vertical;
+}
+
+.content-regenerate-card textarea:focus {
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--savia-border) 50%, transparent);
+  box-shadow: var(--savia-focus-ring);
+}
+
+.app-dialog-actions,
+.content-regenerate-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/*
+ * Shared Radix-based switch (shared/ui/AppSwitch.tsx), replacing native-checkbox savia-switch-control and
+ * technical-plan content-generation-switch implementations.
+ */
+.savia-switch {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  justify-self: end;
+  flex: 0 0 auto;
+  padding: 0;
+  background: var(--secondary);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 90%, transparent);
+  border-radius: var(--savia-radius-pill);
+  box-shadow: none;
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, opacity var(--savia-duration-fast) ease;
+}
+
+.savia-switch[data-state='checked'] {
+  background: var(--primary);
+  border-color: color-mix(in srgb, var(--savia-border) 35%, transparent);
+  box-shadow: none;
+}
+
+.savia-switch[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.savia-switch-thumb {
+  display: block;
+  width: 18px;
+  height: 18px;
+  transform: translateX(3px);
+  background: var(--card);
+  border-radius: var(--savia-radius-pill);
+  box-shadow: none;
+  transition: transform var(--savia-duration) ease;
+}
+
+.savia-switch-thumb[data-state='checked'] {
+  transform: translateX(23px);
+}
+
+/* Agent questions stay above business dialogs while Toast retains the highest notification layer. */
+.agent-question-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--savia-z-agent-question);
+  background: color-mix(in srgb, var(--overlay-ink) 52%, transparent);
+  backdrop-filter: blur(7px);
+}
+
+.agent-question-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: calc(var(--savia-z-agent-question) + 1);
+  display: flex;
+  flex-direction: column;
+  width: min(620px, calc(100vw - 40px));
+  max-height: min(720px, calc(100vh - 40px));
+  gap: 14px;
+  padding: 22px;
+  overflow: hidden;
+  background: var(--savia-surface);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 94%, transparent);
+  border-radius: var(--savia-radius-xl);
+  box-shadow: none;
+  transform: translate(-50%, -50%);
+}
+
+.agent-question-head {
+  flex: 0 0 auto;
+}
+
+.agent-question-head h2 {
+  margin: 0;
+  color: var(--savia-text);
+  font-size: 19px;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.agent-question-body {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.agent-question-copy {
+  padding: 13px 15px;
+  color: var(--savia-text);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.65;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 62%, transparent);
+  border-radius: 12px;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+
+.agent-question-copy p,
+.agent-question-copy ul,
+.agent-question-copy ol {
+  margin: 0;
+}
+
+.agent-question-copy p + p,
+.agent-question-copy p + ul,
+.agent-question-copy p + ol,
+.agent-question-copy ul + p,
+.agent-question-copy ol + p {
+  margin-top: 9px;
+}
+
+.agent-question-copy ul,
+.agent-question-copy ol {
+  display: grid;
+  gap: 4px;
+  padding-left: 22px;
+}
+
+.agent-question-copy strong {
+  font-weight: 500;
+}
+
+.agent-question-options {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-question-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 11px 13px;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--savia-radius-md);
+  cursor: pointer;
+  transition: border-color var(--savia-duration-fast) var(--savia-ease), background var(--savia-duration-fast) var(--savia-ease), box-shadow var(--savia-duration-fast) var(--savia-ease);
+}
+
+.agent-question-option:hover {
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--savia-border) 24%, transparent);
+}
+
+.agent-question-option.is-selected {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border-color: color-mix(in srgb, var(--savia-border) 38%, transparent);
+  box-shadow: none;
+}
+
+.agent-question-option > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.agent-question-radio {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  place-items: center;
+  background: var(--card);
+  border: 1.5px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.agent-question-option.is-selected .agent-question-radio {
+  border: 5px solid var(--savia-primary);
+}
+
+.agent-question-option:has([role='radio']:focus-visible) {
+  outline: 2px solid var(--savia-primary);
+  outline-offset: 2px;
+}
+
+.agent-question-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.agent-question-option-copy strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--savia-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.agent-question-option-copy strong em {
+  padding: 2px 7px;
+  color: var(--savia-primary-deep);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-radius: var(--ui-radius);
+}
+
+.agent-question-option-copy small {
+  color: var(--savia-text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agent-question-custom-answer {
+  width: 100%;
+  min-height: 82px;
+  max-height: 200px;
+  padding: 13px 15px;
+  color: var(--savia-text);
+  font: inherit;
+  line-height: 1.6;
+  overflow-y: auto;
+  resize: vertical;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--savia-radius-md);
+  outline: none;
+}
+
+.agent-question-custom-answer:focus {
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--savia-border) 38%, transparent);
+  box-shadow: 0 0 0 4px rgba(33, 116, 253, 0.08);
+}
+
+.agent-question-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.agent-question-auto-answer {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agent-question-auto-answer label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  color: var(--savia-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.agent-question-auto-answer .savia-switch {
+  justify-self: auto;
+}
+
+.agent-question-auto-answer small {
+  color: var(--savia-primary-deep);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .agent-question-card {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    gap: 12px;
+    padding: 18px;
+    border-radius: var(--savia-radius-xl);
+  }
+
+  .agent-question-body {
+    gap: 10px;
+  }
+
+  .agent-question-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .agent-question-auto-answer {
+    width: 100%;
+  }
+
+}

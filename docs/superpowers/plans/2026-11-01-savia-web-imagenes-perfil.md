@@ -1,0 +1,11 @@
+# Imágenes del perfil empresarial
+
+**Objetivo:** conservar, consultar y gestionar los originales de imágenes vinculados al perfil empresarial, tanto cargados en la web como migrados del escritorio.
+
+**Diseño:** guardar en R2 originales por cuenta y conservar en D1 la categoría del escritorio, nombre, nombre personalizado, orden y metadatos. La carga se registra con staging recuperable; el borrado se marca antes de eliminar el objeto y puede reintentarse. La importación del respaldo acepta únicamente rutas dentro de este, informa archivos faltantes y formatos incompatibles, y utiliza recibos por imagen para no recrear las eliminadas ni sobrescribir ediciones. La interfaz mostrará las categorías en español e inglés y permitirá ver, cargar y retirar imágenes. La preferencia de marca de agua no altera los originales y no se presenta como aplicada hasta implementar el procesamiento correspondiente.
+
+1. API de imágenes con aislamiento, validación, staging y borrado reintentable en Miniflare.
+2. Lectura y transferencia del respaldo mediante runner, con recibos idempotentes, rutas seguras y reportes de archivos no disponibles.
+3. Interfaz por categoría, revisión de accesibilidad, pruebas y compilaciones; no desplegar.
+
+**Estado:** API de imágenes implementada con carga, consulta, aislamiento, staging y borrado reintentable; pruebas de Miniflare cubren acceso, formatos y fallo de almacenamiento. El lector del runner identifica los originales de perfil dentro del respaldo, conserva sus metadatos y reporta ausentes o rutas inseguras; inspect-backup muestra cantidades sin revelar nombres. El comando de perfil transfiere originales con recibos idempotentes, conserva el orden y los metadatos y reporta los faltantes, formatos y categorías incompatibles. Miniflare verifica concurrencia, eliminaciones, aislamiento y reversión, también con runner empaquetado en macOS arm64. La pantalla muestra imágenes por categoría, permite añadir, abrir y retirar originales y reintentar borrados; los cambios de imagen se guardan de inmediato. Pasaron pruebas de representación en es/en y compilaciones web y de escritorio. La revisión visual interactiva queda pendiente porque el navegador local está deshabilitado; tampoco se ha probado un respaldo real ni otras plataformas.

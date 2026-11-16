@@ -1,0 +1,58 @@
+const exact: Record<string, string> = {
+  'li 包含不支持的内容': 'El elemento de lista contiene contenido no admitido.',
+  'figure 缺少合法 data-sv-generation': 'La figura necesita un valor válido de data-sv-generation.',
+  'figure 缺少合法 data-sv-size': 'La figura necesita un valor válido de data-sv-size.',
+  'figure 的 data-sv-fit 只能是 contain 或 cover': 'El ajuste de la figura debe ser contain o cover.',
+  'figure 只能包含 template、img 和 figcaption': 'La figura solo puede contener template, img y figcaption.',
+  'figure 必须包含一个配图提示 template': 'La figura debe incluir una plantilla para la instrucción de imagen.',
+  'figure 必须包含一个 img': 'La figura debe incluir una imagen.',
+  'figure 最多包含一个 figcaption': 'La figura puede incluir como máximo una leyenda.',
+  'template 的 data-sv-role 必须为 prompt': 'El atributo data-sv-role de la plantilla debe ser prompt.',
+  '配图提示 template 只能包含非空文字': 'La instrucción de imagen debe contener texto.',
+  'img 必须包含非空 alt': 'La imagen debe incluir una descripción alternativa.',
+  'data-sv-asset-ref 必须是工作区内的相对路径': 'La referencia de imagen debe ser una ruta relativa dentro del proyecto.',
+  '表格合并单元格发生重叠': 'Las celdas combinadas de la tabla se superponen.',
+  '表格各行逻辑列数不一致': 'Las filas de la tabla tienen cantidades de columnas diferentes.',
+  'rowspan 超出表格末行': 'La combinación de filas sobrepasa el final de la tabla.',
+  'table 缺少合法 data-sv-preset': 'La tabla necesita un valor válido de data-sv-preset.',
+  'table 只能直接包含 caption、thead 和 tbody': 'La tabla solo puede contener caption, thead y tbody.',
+  'table 的 caption、thead 或 tbody 数量不符合规范': 'La cantidad de caption, thead o tbody de la tabla no es válida.',
+  'tbody 至少包含一行': 'El cuerpo de la tabla debe contener al menos una fila.',
+  'tr 只能包含 th 或 td': 'Una fila solo puede contener celdas th o td.',
+  'scope 只能在 th 上使用 row 或 col': 'El atributo scope solo puede usar row o col en una celda th.',
+  '标题只能包含非空纯文本': 'El título debe contener texto sin formato y no puede estar vacío.',
+  '段落不能为空': 'El párrafo no puede estar vacío.',
+  'aside 只能作为表格后的 table-notes': 'aside solo puede usarse para notas después de una tabla.',
+  '表注 aside 只能包含 p': 'Las notas de la tabla solo pueden contener párrafos.',
+  '片段缺少合法主块': 'El fragmento no tiene un bloque principal válido.',
+  '每个片段只能包含一个主块，表格可额外包含一个表注': 'Cada fragmento debe tener un bloque principal; una tabla puede incluir además notas.',
+  '首个正文块前缺少 savia:block 分隔注释': 'Falta el separador savia:block antes del primer bloque.',
+  '没有可解析的正文块': 'No hay bloques de contenido que se puedan analizar.',
+};
+const patterns: Array<[RegExp, string]> = [
+  [/^禁止使用 <([^>]+)>$/, 'No se permite la etiqueta <$1>.'],
+  [/^不支持块标签 <([^>]+)>$/, 'No se admite el bloque <$1>.'],
+  [/^已移除行内标签 <([^>]+)>，并保留其中的文字$/, 'Se quitó la etiqueta <$1> y se conservó su texto.'],
+  [/^已删除 <([^>]+)> 的属性 (.+)$/, 'Se quitó el atributo $2 de <$1>.'],
+  [/^<([^>]+)> 缺少 (.+)$/, '<$1> necesita $2.'],
+  [/^<([^>]+)> 的 (.+) 必须是正整数$/, '$2 de <$1> debe ser un entero positivo.'],
+  [/^<([^>]+)> 缺少合法 id$/, '<$1> necesita un identificador válido.'],
+  [/^id (.+) 与第 (\d+) 个块重复$/, 'El identificador $1 está repetido en el bloque $2.'],
+  [/^<([^>]+)> 包含不允许的子节点$/, '<$1> contiene elementos no permitidos.'],
+  [/^<([^>]+)> 只能直接包含 li$/, '<$1> solo puede contener elementos li.'],
+  [/^li 不能包含 <([^>]+)>$/, 'El elemento li no puede contener <$1>.'],
+  [/^<([^>]+)> 只能包含 tr$/, '<$1> solo puede contener filas tr.'],
+  [/^单元格不能包含 <([^>]+)>$/, 'La celda no puede contener <$1>.'],
+  [/^(.+) 的行列结构不符合规范$/, 'La estructura de filas y columnas de $1 no es válida.'],
+  [/^(.+) 禁止合并单元格$/, '$1 no permite combinar celdas.'],
+  [/^(.+) 的图片单元格必须只包含一个 figure$/, 'Cada celda de imagen de $1 debe contener una sola figura.'],
+  [/^(.+) 的每张图片都必须包含图注$/, 'Cada imagen de $1 debe incluir una leyenda.'],
+  [/^(.+) 的表头必须使用 th scope="col"$/, 'El encabezado de $1 debe usar th scope="col".'],
+  [/^(.+) 的首列必须使用 th scope="row"$/, 'La primera columna de $1 debe usar th scope="row".'],
+];
+export function localizeRestrictedHtmlIssue(message: string, language: string): string {
+  if (language !== 'es') return message;
+  if (exact[message]) return exact[message];
+  for (const [pattern, replacement] of patterns) if (pattern.test(message)) return message.replace(pattern, replacement);
+  return message;
+}

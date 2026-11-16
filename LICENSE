@@ -1,0 +1,49 @@
+Business Source License 1.1
+
+License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
+"Business Source License" is a trademark of MariaDB Corporation Ab.
+
+Parameters
+
+Licensor:             Hefesoft S.A.S.
+Licensed Work:        Savia Licitaciones (all source code, documentation, and assets in this repository)
+Additional Use Grant: Non-production, evaluation, and internal testing use only.
+                      Production use, commercial use, and offering the Licensed Work
+                      (or any derivative work) as a hosted, managed, or SaaS service
+                      to third parties are expressly prohibited without a separate
+                      written commercial license from the Licensor.
+Change Date:          2030-11-16
+Change License:       Apache License 2.0
+
+Terms and Conditions
+
+1. Grant of License.
+Subject to the terms and conditions of this License, the Licensor hereby grants
+to you a non-exclusive, worldwide, non-transferable, non-sublicensable,
+royalty-free license to copy, modify, create derivative works of, and use the
+Licensed Work solely as permitted under the Additional Use Grant above, until
+the Change Date.
+
+2. Production Use Restriction.
+You may not make any Production Use of the Licensed Work prior to the Change
+Date unless you have obtained a separate commercial license from the Licensor.
+"Production Use" includes using the Licensed Work to provide services to third
+parties, operating it in a live or commercial environment, or deriving direct
+or indirect commercial value from its operation.
+
+3. Change License.
+On and after the Change Date, the Licensor grants you a license to the Licensed
+Work under the terms of the Change License specified above, provided you have
+not breached this License prior to the Change Date.
+
+4. Notice and Attribution.
+You must retain all copyright, trademark, patent, and attribution notices in
+all copies or substantial portions of the Licensed Work. Any redistribution of
+the Licensed Work or derivative works must include this License text.
+
+5. Disclaimer of Warranty and Limitation of Liability.
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE LICENSOR BE
+LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE LICENSED
+WORK OR THIS LICENSE.

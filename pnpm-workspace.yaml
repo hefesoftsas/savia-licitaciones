@@ -1,0 +1,17 @@
+packages:
+  - client
+  - web-api
+
+minimumReleaseAge: 2880
+minimumReleaseAgeStrict: true
+ignoreScripts: true
+enablePrePostScripts: false
+verifyDepsBeforeRun: error
+
+overrides:
+  "@earendil-works/pi-coding-agent>undici": 8.12.3
+  "brace-expansion@5": 5.0.12
+  "@emnapi/runtime>tslib": 2.8.1
+patchedDependencies:
+  "@docx-editor.dev/core@2.15.0": client/patches/@docx-editor.dev+core+2.15.0.patch
+  "joi@18.3.0": client/patches/joi+18.3.0.patch

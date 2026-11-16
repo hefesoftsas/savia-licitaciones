@@ -1,0 +1,9 @@
+{
+  "name": "savia-conector",
+  "productName": "Savia Conector",
+  "version": "0.1.2",
+  "description": "Conecta tu equipo con Savia",
+  "author": "Savia",
+  "private": true,
+  "main": "main.cjs"
+}

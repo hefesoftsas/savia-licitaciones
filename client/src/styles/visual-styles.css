@@ -1,0 +1,41 @@
+/* Runtime adaptations of the Create styles; document canvases keep their own typography. */
+:root { --ui-radius: 6px; --ui-card-radius: 10px; --ui-control-height: 36px; --ui-spacing: 24px; --ui-row-padding: 16px; --ui-font-size: 14px; --ui-font: ui-sans-serif, system-ui, sans-serif; }
+:root {
+  --savia-radius-sm: var(--ui-radius);
+  --savia-radius-md: var(--ui-radius);
+  --savia-radius-lg: var(--ui-card-radius);
+  --savia-radius-xl: var(--ui-card-radius);
+}
+.markdown-viewer, .restricted-html-document, .export-format-preview {
+  --savia-radius-sm: 6px;
+  --savia-radius-md: 8px;
+  --savia-radius-lg: 10px;
+  --savia-radius-xl: 12px;
+}
+:root[data-ui-style='nova'] { --ui-radius: 8px; --ui-card-radius: 12px; --ui-control-height: 32px; --ui-spacing: 20px; --ui-row-padding: 12px; --ui-font-size: 13px; }
+:root[data-ui-style='maia'] { --ui-radius: 16px; --ui-card-radius: 20px; --ui-control-height: 40px; --ui-spacing: 28px; --ui-row-padding: 20px; }
+:root[data-ui-style='lyra'] { --ui-radius: 0px; --ui-card-radius: 2px; --ui-control-height: 34px; --ui-spacing: 22px; --ui-row-padding: 14px; --ui-font-size: 13px; --ui-font: ui-monospace, 'Cascadia Code', Consolas, monospace; }
+:root[data-ui-style='mira'] { --ui-radius: 4px; --ui-card-radius: 6px; --ui-control-height: 28px; --ui-spacing: 16px; --ui-row-padding: 10px; --ui-font-size: 12px; }
+@theme inline { --radius-sm: calc(var(--ui-radius) * .67); --radius-md: var(--ui-radius); --radius-lg: var(--ui-card-radius); }
+[data-ui], [data-sidebar], .workspace-header { font-family: var(--ui-font); }
+.workspace-inset, .workspace-content :is(.settings-list,.secondary-menu-row,.settings-section,.secop-card) { border-radius: var(--ui-card-radius); }
+.workspace-content, .workspace-content:has(.settings-page), .workspace-content:has(.secop-page) { padding: var(--ui-spacing); }
+.workspace-content .settings-row { padding-top: var(--ui-row-padding); padding-bottom: var(--ui-row-padding); }
+.workspace-content .secondary-menu-row { padding: var(--ui-spacing); }
+:root[data-ui-style] :is(button[data-ui='button'], input[data-ui='input'], select[data-ui='native-select']) { border-radius: var(--ui-radius); min-height: var(--ui-control-height); font-size: var(--ui-font-size); }
+:root[data-ui-style] :is(input[data-ui='input'],select[data-ui='native-select']) { height: var(--ui-control-height); padding-block: 4px; line-height: 1.25; }
+textarea[data-ui], [data-ui='dialog-content'], [data-ui='popover-content'], [data-ui='card'] { border-radius: var(--ui-card-radius); }
+.workspace-sidebar [data-sidebar='menu-button'] { border-radius: var(--ui-radius); min-height: var(--ui-control-height); font-size: var(--ui-font-size); }
+.workspace-header-actions select[data-ui] { min-height: 30px; }
+.workspace-brand { max-width: 100%; }
+.workspace-brand strong { white-space: normal; line-height: 1.2; }
+/* App chrome only; document previews retain their own fonts and page dimensions. */
+.workspace-content :is(.section-kicker,.settings-group-title,.template-library-group-title) { color: var(--muted-foreground); font-size: 12px; font-weight: 500; letter-spacing: normal; }
+.workspace-content :is(.secop-head,.knowledge-breadcrumb,.template-library-head,.plugins-head,.resources-shelf-head,.upload-page-title) :is(h2,h3,strong) { font-family: var(--ui-font); font-weight: 600; }
+.workspace-content :is(.bid-analysis-task-item,.outline-selection-row,.knowledge-document-card,.secop-library-item,.template-library-card) { border-radius: var(--ui-radius); }
+.workspace-content :is(.duplicate-upload-summary,.content-generation-stats span,.global-facts-stats span) { background: transparent; font-weight: 400; }
+.workspace-content :is(.duplicate-upload-summary,.content-generation-stats,.global-facts-stats) strong { color: var(--foreground); font-size: 14px; font-weight: 500; }
+.workspace-content :is(.duplicate-analysis-tabs,.rejection-check-result-tabs) { padding: 4px; gap: 4px; border: 0; border-radius: var(--ui-radius); background: var(--secondary); }
+.workspace-content :is(.duplicate-analysis-tab,.rejection-check-result-tab) { border: 0; border-radius: var(--ui-radius); font-weight: 500; }
+.workspace-content :is(.duplicate-analysis-tab,.rejection-check-result-tab).is-active { background: var(--card); color: var(--foreground); }
+@media (max-width:767px) { .workspace-content, .workspace-content:has(.settings-page), .workspace-content:has(.secop-page) { padding: min(var(--ui-spacing),16px); } }

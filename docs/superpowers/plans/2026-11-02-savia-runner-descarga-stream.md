@@ -1,0 +1,11 @@
+# Descarga de fuentes por streaming para el runner
+
+Las cargas web ya admiten documentos grandes, pero el contexto `getFileInfo` lee la respuesta completa en memoria y aplica 15 segundos. Para las tareas que reutilizan `extractTenderSources`, añadir una descarga autenticada por flujo hacia el espacio temporal de la tarea, con cancelación, tamaño máximo y plazo explícito. Comprobar firma de formato leyendo solo los primeros bytes; los conversores reciben un archivo local. Los textos planos se limitan antes de cargarlos a memoria; el tamaño y el consumo de los conversores PDF/Word siguen sujetos a sus propias limitaciones. No prometer procesamiento de 1 GiB en todos los formatos.
+
+1. Probar lectura en flujo, validación de firma y eliminación del temporal al fallar; mantener compatibilidad con contextos de prueba existentes.
+2. Conectar `getFileStream` a la concesión de trabajo con autenticación y cancelación, y probar que no se almacena el cuerpo completo en el transporte.
+3. Verificar el flujo con Miniflare, Pi simulado y runner empaquetado; explicar límites en la interfaz y documentación. No desplegar.
+
+**Avance:** las tareas que usan la extracción común reciben los documentos del proyecto por flujo con concesión vigente y plazo de cinco minutos; se eliminan los temporales al terminar y se limita el texto plano a 25 MiB. Miniflare verificó una carga de 50 MiB más un byte seguida por la descarga real al runner y el paso al parser simulado, también con la distribución empaquetada; las pruebas cubren pérdida de concesión, límite, formato y limpieza. Las comprobaciones que trabajan con binarios directamente y la biblioteca siguen con el transporte anterior. Los conversores reales y el máximo de 1 GiB no se han medido.
+
+La comparación de duplicados, extracción de plantillas e inspección y corrección anónimas también descargan por flujo al espacio temporal. Las reglas de color de imágenes aún leen el DOCX en memoria y la copia corregida se carga en memoria para entregarla. El helper OpenXML real, conversión a escala de grises, cancelación y runner empaquetado pasaron pruebas con archivos pequeños; no se ha medido el uso de memoria de conversores con documentos grandes.

@@ -1,0 +1,26 @@
+# Matriz de requisitos asistida — plan
+
+**Objetivo:** Proponer requisitos del pliego con citas verificables y candidatos de RUP o credenciales para revisión humana, integrados con la matriz existente.
+
+**Arquitectura:** Pi/OpenCode Go lee instantáneas de documentos importados y datos revisados del perfil. Electron Main valida que cada cita exista y que cada dato o credencial sugerida pertenezca al perfil actual; persiste resultados por licitación y marca cambios de fuentes. El usuario decide qué propuestas agregar como requisitos pendientes; ninguna coincidencia determina cumplimiento.
+
+- [x] Extraer requisitos y candidatos con fuentes verificables, descartando citas o identificadores inventados; pruebas de datos ambiguos, faltantes y duplicados.
+- [x] Ejecutar en segundo plano con persistencia, interrupción, deduplicación de aceptación y control de fuentes desactualizadas.
+- [x] Integrar en la matriz existente: revisar citas y candidatos, seleccionar qué guardar y conservar valoración pendiente, sin guardar comparaciones numéricas automáticamente.
+- [x] Verificar IPC real, aislamiento entre licitaciones, migraciones y Pi con datos sintéticos si el proveedor está disponible.
+
+**Verificación:** pruebas unitarias y de IPC, migración y Pi/OpenCode Go con documento y RUP sintéticos. Las coincidencias son candidatos y requieren revisión; no califican el cumplimiento.
+
+Al quitar documentos del proyecto activo, las propuestas anteriores se marcan desactualizadas y no pueden agregarse a la matriz. La prueba Electron cubre también la eliminación del último documento y el cambio posterior de proyecto.
+
+Las comparaciones numéricas con RUP usan la misma fuente de documentos actual: al añadir un anexo en el chat quedan desactualizadas antes de navegar a otra pantalla, y siguen así al cambiar de proyecto. Si no se pueden leer los documentos, se exige revisión en vez de afirmar que la comparación está vigente. Se verificó mediante IPC real y pruebas del almacén.
+
+**Prueba con pliego público:** Pi con OpenCode Go analizó el texto completo del [TDR 006, PIDAR 291 de 2025](https://www.adr.gov.co/wp-content/uploads/2026/01/TDR-006-PIDAR-291V2-08-01-2026-.pdf), de 96 páginas, usando exclusivamente un dato RUP ficticio revisado de liquidez `3,50`. Propuso cinco requisitos con citas verificadas, entre ellos liquidez mayor o igual a 3, y vinculó ese dato como candidato. La cita se localizó en la página 27; al aceptar la sugerencia quedó guardada como pendiente. El pliego pide una certificación del revisor fiscal o contador para esos parámetros, por lo que el dato ficticio del RUP no demuestra por sí solo que se haya aportado la certificación exigida. La prueba no evalúa cumplimiento ni sustituye la lectura del pliego. SHA-256 del PDF: `76967c7b313659ea0f12084f8d6e6b2ba4370d5bb1da1c27d019ec9985c9ad7c`.
+
+**Contexto de las citas:** tres citas de esa ejecución terminaban dentro de una oración, entre ellas una sobre vigencia que terminaba en «anteriores a la». Se reforzó la instrucción para solicitar la cláusula completa, incluidas las condiciones y los plazos. En una nueva ejecución con el mismo pliego, Pi produjo seis requisitos con citas literales que incluían las condiciones visibles en los fragmentos revisados. Esta comparación comprende pocas ejecuciones y sus resultados pueden variar: una coincidencia literal no garantiza que el fragmento contenga todo el contexto necesario ni que la interpretación sea correcta. La persona debe consultar la fuente antes de valorar el requisito.
+
+Para repetir el recorrido, `client/scripts/requirement-suggestions-public-eval.cjs` recibe el texto extraído de un pliego público en `SAVIA_PUBLIC_PLIEGO_TEXT`; crea un espacio temporal y un dato RUP ficticio, usa la configuración existente de OpenCode Go y consume cuota. Los resultados pueden variar y la salida incluye citas, por lo que la prueba solo debe usar documentos públicos.
+
+**Cruce adicional con un indicador público:** se extrajo un único indicador numérico de liquidez de la página física 28 del [certificado publicado por Colombia Compra Eficiente](https://operaciones.colombiacompra.gov.co/sites/cce_public/files/documentos_adicionales_oc/acta_de_inicio_y_demas_documentos_oc_108813-2023.pdf). El localizador encontró la cita del indicador en esa página; se simuló su revisión para la prueba y se enviaron al agente únicamente la etiqueta, el valor, el corte y la página, sin identidad ni NIT. Con el pliego público anterior, Pi propuso cinco requisitos y vinculó el indicador como candidato al requisito de liquidez; al aceptarlo quedó pendiente. Son documentos de procesos y titulares distintos: la prueba no atribuye el indicador al proponente del pliego ni demuestra cumplimiento o aportación de la certificación exigida. SHA-256 del PDF que contiene el certificado: `b23b8db807d0560ad167f89b439775d872a26140b4cd605ec1978e55a8b9c9c2`.
+
+El recorrido es reproducible con `client/scripts/requirement-suggestions-rup-public-eval.cjs`, las variables `SAVIA_PUBLIC_PLIEGO_TEXT` y `SAVIA_PUBLIC_RUP_INDICATORS`, y un indicador previamente extraído de un certificado público. Simula la confirmación humana en un espacio temporal; no debe utilizarse para atribuir la identidad de un certificado real a un perfil ni para afirmar cumplimiento. Requiere conexión y consume cuota de OpenCode Go.

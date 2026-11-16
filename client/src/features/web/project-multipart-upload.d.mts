@@ -1,0 +1,1 @@
+export function uploadLargeProjectFile(options: {projectId: string; file: File; key: string; request: (url: string, options?: RequestInit & {json?: unknown}) => Promise<any>; retryDelay?: (ms: number) => Promise<void>; onProgress?: (uploaded: number, total: number) => void}): Promise<{file: unknown}>;

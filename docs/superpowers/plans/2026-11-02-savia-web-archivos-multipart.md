@@ -1,0 +1,9 @@
+# Restauración de proyectos con cargas multipart
+
+**Objetivo:** permitir recuperar archivos de proyecto de hasta 1 GiB sin exceder los límites de solicitud de Workers ni mantener el archivo completo en memoria.
+
+**Diseño:** el runner transfiere partes de 10 MiB mediante una carga multipart R2 por intento. El servidor autentica al runner, vincula la carga y sus metadatos a la cuenta y al recibo de importación mediante un identificador firmado y un staging de duración limitada, comprueba los ETags recibidos y calcula SHA-256 del objeto completo antes de publicarlo en D1. Un reintento tras pérdida de confirmación usa el recibo existente; si se pierde la carga en curso, se inicia otra y la carga incompleta caduca automáticamente. El staging mantiene recuperable la eliminación de objetos terminados sin publicar. No se restauran recursos de otro tipo con este flujo.
+
+**Verificación:** Miniflare y runner empaquetado deben recuperar un archivo mayor de 50 MiB, detectar alteraciones, probar aislamiento, reintentos, cancelación de staging, publicación atómica y compatibilidad con el límite anterior. Ninguna parte de esta preparación despliega o activa infraestructura alojada.
+
+**Avance:** el runner divide el archivo en partes de 10 MiB y reintenta hasta dos veces cada fallo temporal durante la ejecución. Si se interrumpe por completo se inicia una carga nueva; no se conservan las partes para reanudar tras reiniciar. El servidor verifica la longitud y el SHA-256 del objeto terminado antes de asociarlo al proyecto y usa los recibos existentes para evitar duplicados. Un fallo intenta abortar; si la conexión se pierde, R2 caduca la carga incompleta según la configuración del bucket. El flujo está limitado a 1 GiB por archivo de proyecto y no cubre aún los demás tipos de recurso ni una recuperación completa de cuenta.

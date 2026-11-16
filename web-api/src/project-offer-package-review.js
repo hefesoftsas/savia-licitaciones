@@ -1,0 +1,14 @@
+const missing=()=>Response.json({error:'not_found'},{status:404});
+const conflict=()=>Response.json({error:'source_changed'},{status:409});
+export async function reviewOfferPackageItem(request,env,owner,projectId,itemId){
+ if(request.method!=='POST')return new Response('Method not allowed',{status:405});
+ if(request.headers.get('origin')!==new URL(env.BETTER_AUTH_URL).origin)return Response.json({error:'invalid_origin'},{status:403});
+ let input;try{input=await request.json();}catch{return Response.json({error:'invalid_input'},{status:400});}
+ if(typeof input?.fileId!=='string'||!input.fileId||input.fileId.length>128||!Number.isSafeInteger(input.documentVersion)||input.documentVersion<1||!['changed','review','missing'].includes(input.state)||typeof input.reviewRequired!=='boolean'||!Number.isSafeInteger(input.size)||input.size<0||typeof input.digest!=='string'||input.digest.length>256)return Response.json({error:'invalid_input'},{status:400});
+ const row=await env.DB.prepare('SELECT x.document_id,x.expected_size,x.expected_digest,x.state,x.review_required,d.file_id,d.version,f.object_key,f.size FROM project_offer_package_items x JOIN projects p ON p.id=x.project_id LEFT JOIN project_offer_documents d ON d.id=x.document_id AND d.project_id=x.project_id LEFT JOIN project_files f ON f.id=d.file_id AND f.project_id=x.project_id WHERE x.id=? AND x.project_id=? AND p.owner_id=?').bind(itemId,projectId,owner).first();
+ if(!row)return missing();
+ if(!row.file_id||!row.object_key||row.file_id!==input.fileId||row.version!==input.documentVersion||row.state!==input.state||!!row.review_required!==input.reviewRequired||row.expected_size!==input.size||row.expected_digest!==input.digest)return conflict();
+ const object=await env.FILES.get(row.object_key);if(!object?.body||object.size!==row.size)return conflict();const hash=new crypto.DigestStream('SHA-256');await object.body.pipeTo(hash);const checksum=Array.from(new Uint8Array(await hash.digest),byte=>byte.toString(16).padStart(2,'0')).join('');const head=await env.FILES.head(row.object_key);if(!head||head.etag!==object.etag||head.size!==row.size)return conflict();
+ const result=await env.DB.prepare("UPDATE project_offer_package_items SET expected_size=?,expected_digest=?,state='ready',review_required=0 WHERE id=? AND project_id=? AND document_id=? AND expected_size=? AND expected_digest=? AND state=? AND review_required=? AND EXISTS(SELECT 1 FROM project_offer_documents d JOIN projects p ON p.id=d.project_id JOIN project_files f ON f.id=d.file_id AND f.project_id=d.project_id WHERE d.id=? AND d.project_id=? AND p.owner_id=? AND d.version=? AND f.id=? AND f.object_key=? AND f.size=?)").bind(row.size,checksum,itemId,projectId,row.document_id,input.size,input.digest,input.state,input.reviewRequired?1:0,row.document_id,projectId,owner,input.documentVersion,input.fileId,row.object_key,row.size).run();
+ return result.meta.changes?Response.json({reviewed:true}):conflict();
+}

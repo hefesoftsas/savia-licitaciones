@@ -1,0 +1,1 @@
+export function deliverAgendaNotifications<T extends {id:string;notified:boolean}>(options:{reminders:T[];claim:(id:string)=>Promise<{token:string}>;notify:(items:T[])=>Promise<void>|void;ack:(id:string,token:string)=>Promise<unknown>;release:(id:string,token:string)=>Promise<unknown>}):Promise<{failed:boolean}>;

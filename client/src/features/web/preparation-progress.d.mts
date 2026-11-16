@@ -1,0 +1,3 @@
+export type PreparationStatus = 'running' | 'complete' | 'current' | 'pending';
+export function preparationProgress(input: {selectedFiles?:string[];analyses?:{category:string;current:boolean}[];outline?:unknown;facts?:{current?:boolean;revision?:number;importReviewPending?:boolean};plan?:{version?:number;outline?:{content?:string;children?:any[]}[]};jobs?:{kind:string;state:string;artifactState?:string;wordRevision?:number;sourcesStale?:boolean;payload?:any}[]}): {resume:number;states:PreparationStatus[]};
+export function preparationBlocker(step:number, snapshot:Parameters<typeof preparationProgress>[0]|null, selectedFiles?:string[]): 'analyses'|'documents'|'document-limit'|'loading'|'facts'|'facts-before-draft'|'outline'|'drafts'|'pending-values'|null;

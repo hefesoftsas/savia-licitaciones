@@ -1,0 +1,41 @@
+{
+  "platform": "linux",
+  "arch": "arm64",
+  "key": "linux-arm64",
+  "tools": [
+    {
+      "command": "rg",
+      "version": "14.1.1",
+      "repo": "BurntSushi/ripgrep",
+      "asset": "ripgrep-14.1.1-aarch64-unknown-linux-gnu.tar.gz",
+      "sha256": "c827481c4ff4ea10c9dc7a4022c8de5db34a5737cb74484d62eb94a95841ab2f",
+      "binary_sha256": "e07d5c85fa9ca740ff4ab8bbac60a1e11c7a5ce242435f7820a03f7c20ef6276",
+      "platform": "linux",
+      "arch": "arm64",
+      "key": "linux-arm64"
+    },
+    {
+      "command": "fd",
+      "version": "v10.3.0",
+      "repo": "sharkdp/fd",
+      "asset": "fd-v10.3.0-aarch64-unknown-linux-gnu.tar.gz",
+      "sha256": "66f297e404400a3358e9a0c0b2f3f4725956e7e4435427a9ae56e22adbe73a68",
+      "binary_sha256": "4372eca31ca713a9a2f4aaed9bcf1d1bea36d5dd1ff557f3b89cd8abb2e6d8d6",
+      "platform": "linux",
+      "arch": "arm64",
+      "key": "linux-arm64"
+    },
+    {
+      "command": "jq",
+      "version": "jq-1.7.1",
+      "repo": "jqlang/jq",
+      "asset": "jq-linux-arm64",
+      "sha256": "4dd2d8a0661df0b22f1bb9a1f9830f06b6f3b8f7d91211a1ef5d7c4f06a8b4a5",
+      "binary_sha256": "4dd2d8a0661df0b22f1bb9a1f9830f06b6f3b8f7d91211a1ef5d7c4f06a8b4a5",
+      "platform": "linux",
+      "arch": "arm64",
+      "key": "linux-arm64"
+    }
+  ],
+  "prepared_at": "2026-11-02T10:23:15.896Z"
+}

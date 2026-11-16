@@ -1,0 +1,30 @@
+import {cleanupDesktopUploads,uploadLeaseMs} from './desktop-file-cleanup.js';
+import {imageType} from './certificate-images.js';
+export const experienceImageFields=['projectContract','bidWinningNotice','projectAcceptanceCertificate','paymentInvoice'];
+const bad=()=>Response.json({error:'invalid_image'},{status:400}),missing=()=>Response.json({error:'not_found'},{status:404});
+const view=row=>({id:row.id,name:row.name,customName:row.custom_name||'',fieldKey:row.field_key,contentType:row.content_type,size:row.size,createdAt:row.created_at,deleting:!!row.deleting});
+export async function cleanExperienceImageDeletions(env,owner,project){
+ const rows=await env.DB.prepare('SELECT id,object_key FROM company_experience_image_deletions WHERE owner_id=? AND project_id=? AND storage_deleted_at IS NULL').bind(owner,project).all();
+ for(const row of rows.results){try{await env.FILES.delete(row.object_key);}catch{return false;}await env.DB.prepare('UPDATE company_experience_image_deletions SET storage_deleted_at=COALESCE(storage_deleted_at,?) WHERE id=? AND owner_id=?').bind(new Date().toISOString(),row.id,owner).run();}return true;
+}
+export async function experienceImages(request,env,owner,project,id){
+ if(request.method!=='GET'&&request.headers.get('origin')!==new URL(env.BETTER_AUTH_URL).origin)return Response.json({error:'invalid_origin'},{status:403});
+ if(!await env.DB.prepare('SELECT id FROM company_experience_projects WHERE id=? AND owner_id=? AND deleting=0').bind(project,owner).first())return missing();
+ if(request.method==='GET'&&!id){const rows=await env.DB.prepare("SELECT id,name,custom_name,field_key,content_type,size,sort_order,created_at,0 AS deleting FROM company_experience_images WHERE project_id=? AND owner_id=? UNION ALL SELECT id,name,'' AS custom_name,field_key,content_type,size,sort_order,created_at,1 AS deleting FROM company_experience_image_deletions WHERE project_id=? AND owner_id=? AND storage_deleted_at IS NULL ORDER BY field_key,sort_order,created_at,id").bind(project,owner,project,owner).all();return Response.json({images:rows.results.map(view)});}
+ if(request.method==='GET'&&id){const row=await env.DB.prepare('SELECT * FROM company_experience_images WHERE id=? AND project_id=? AND owner_id=?').bind(id,project,owner).first();if(!row)return missing();const object=await env.FILES.get(row.object_key);if(!object)return missing();return new Response(object.body,{headers:{'content-type':row.content_type,'content-disposition':`inline; filename*=UTF-8''${encodeURIComponent(row.name).replace(/['()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`,'x-content-type-options':'nosniff'}});}
+ if(request.method==='DELETE'&&id){await env.DB.batch([
+  env.DB.prepare('INSERT OR IGNORE INTO company_experience_image_deletions(id,project_id,owner_id,name,field_key,content_type,object_key,size,sort_order,created_at) SELECT id,project_id,owner_id,name,field_key,content_type,object_key,size,sort_order,created_at FROM company_experience_images WHERE id=? AND project_id=? AND owner_id=?').bind(id,project,owner),
+  env.DB.prepare('DELETE FROM company_experience_images WHERE id=? AND project_id=? AND owner_id=? AND EXISTS (SELECT 1 FROM company_experience_image_deletions WHERE id=? AND project_id=? AND owner_id=?)').bind(id,project,owner,id,project,owner),
+ ]);const row=await env.DB.prepare('SELECT id FROM company_experience_image_deletions WHERE id=? AND project_id=? AND owner_id=?').bind(id,project,owner).first();if(!row)return missing();return await cleanExperienceImageDeletions(env,owner,project)?new Response(null,{status:204}):Response.json({error:'file_cleanup_pending'},{status:503});}
+ if(request.method!=='POST'||id)return new Response('Method not allowed',{status:405});
+ let name;try{name=decodeURIComponent(request.headers.get('x-file-name')||'').trim();}catch{return bad();}const field=request.headers.get('x-field-key')||'';
+ if(!experienceImageFields.includes(field)||!name||name.length>255||/[\x00-\x1f\x7f]/.test(name)||Number(request.headers.get('content-length')||0)>25*1024*1024)return bad();
+ const data=await request.arrayBuffer();if(!data.byteLength||data.byteLength>25*1024*1024)return bad();const type=imageType(new Uint8Array(data));if(!type)return bad();
+ const imageId=crypto.randomUUID(),mutation=crypto.randomUUID(),key=`company-experience-images/${crypto.randomUUID()}`,now=new Date().toISOString();
+ await env.DB.prepare("INSERT INTO desktop_file_staging(id,owner_id,object_key,state,lease_until,created_at) VALUES(?,?,?,'writing',?,?)").bind(mutation,owner,key,Date.now()+uploadLeaseMs,Date.now()).run();
+ const release=async()=>{try{await env.DB.prepare("UPDATE desktop_file_staging SET state='cleanup',lease_until=0 WHERE id=? AND owner_id=? AND state IN ('writing','watching')").bind(mutation,owner).run();await cleanupDesktopUploads(env,owner);}catch{/* eligible for later cleanup */}};
+ try{await env.FILES.put(key,data);await env.DB.prepare('UPDATE desktop_file_staging SET writer_done=1 WHERE id=? AND owner_id=?').bind(mutation,owner).run();const result=await env.DB.batch([
+  env.DB.prepare("INSERT INTO company_experience_images(id,project_id,owner_id,name,field_key,content_type,object_key,size,sort_order,created_at) SELECT ?,id,owner_id,?,?,?,?,?,(SELECT COALESCE(MAX(sort_order)+1,0) FROM company_experience_images WHERE owner_id=? AND project_id=? AND field_key=?),? FROM company_experience_projects WHERE id=? AND owner_id=? AND deleting=0 AND EXISTS (SELECT 1 FROM desktop_file_staging WHERE id=? AND owner_id=? AND state='writing' AND lease_until>?)").bind(imageId,name,field,type,key,data.byteLength,owner,project,field,now,project,owner,mutation,owner,Date.now()),
+  env.DB.prepare("DELETE FROM desktop_file_staging WHERE id=? AND owner_id=? AND state='writing' AND EXISTS (SELECT 1 FROM company_experience_images WHERE id=? AND owner_id=? AND object_key=?)").bind(mutation,owner,imageId,owner,key),
+ ]);if(result[0].meta.changes)return Response.json({image:{id:imageId,name,fieldKey:field,contentType:type,size:data.byteLength,createdAt:now}},{status:201});}catch(error){await release();throw error;}await release();return missing();
+}

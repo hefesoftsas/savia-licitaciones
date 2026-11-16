@@ -1,0 +1,51 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {mkdtemp,readFile,readdir,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {dirname,join,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+test('soportes de requisitos aíslan cuentas, verifican vínculos y protegen versiones',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'savia-support-api-'));let worker;
+ try{
+  execFileSync('pnpm',['exec','wrangler','deploy','--dry-run','--outdir',dir],{cwd:root,stdio:'pipe',env:{...process.env,CLOUDFLARE_SEND_METRICS:'false'}});
+  worker=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile(join(dir,'index.js'),'utf8'),compatibilityDate:'2026-10-30',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'supports'},r2Buckets:['FILES'],bindings:{AUTH_ALLOW_REGISTRATION:'true',BETTER_AUTH_SECRET:'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz',BETTER_AUTH_URL:'http://localhost'}}));
+  const DB=await worker.getD1Database('DB');for(const f of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(join(root,'migrations',f),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
+  const req=(path,options={})=>worker.dispatchFetch(`http://localhost${path}`,options);
+  const write=(path,method,body,cookie,origin='http://localhost')=>req(path,{method,headers:{origin,'content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(body)});
+  async function signup(name){const r=await write('/api/auth/sign-up/email','POST',{name,email:`${name}@example.com`,password:'password-123456'});assert.equal(r.status,200);return r.headers.get('set-cookie').split(';')[0];}
+  const alice=await signup('alice'),bob=await signup('bob');const owner=(await DB.prepare('SELECT id FROM "user" WHERE email=?').bind('alice@example.com').first()).id,other=(await DB.prepare('SELECT id FROM "user" WHERE email=?').bind('bob@example.com').first()).id;
+  const project=(await(await write('/api/projects','POST',{title:'Compra'},alice)).json()).project;
+  const requirement=(await(await write(`/api/projects/${project.id}/workflow/requirements`,'POST',{title:'Experiencia'},alice)).json()).item;
+  for(const [id,user] of [['cert-a',owner],['cert-b',other]])await DB.prepare('INSERT INTO company_certificates (id,owner_id,name,number,validity_mode,valid_from,valid_to,version,created_at,updated_at) VALUES (?,?,?,"","","","",1,"2026","2026")').bind(id,user,id).run();
+  await DB.prepare('INSERT INTO rup_certificates (id,owner_id,name,object_key,pages,imported_at) VALUES (?,?,?, ?,1,?)').bind('rup-a',owner,'RUP','rup-key','2026').run();await DB.prepare('INSERT INTO rup_current (owner_id,certificate_id,version) VALUES (?,?,1)').bind(owner,'rup-a').run();
+  const path=`/api/projects/${project.id}/workflow/requirements/${requirement.id}/supports`;
+  assert.equal((await req(path)).status,401);assert.equal((await req(path,{headers:{cookie:bob}})).status,404);
+  assert.equal((await write(path,'POST',{title:'Certificado'},alice,'https://other.example')).status,403);
+  const created=await(await write(path,'POST',{title:' Certificado '},alice)).json(),item=created.item;assert.equal(item.title,'Certificado');assert.equal(item.status,'missing');assert.equal(item.version,1);
+  const itemPath=`${path}/${item.id}`,payload={status:'reviewed',linkType:'certificate',linkId:'cert-a',version:1};
+  assert.equal((await write(itemPath,'PATCH',{...payload,linkId:'cert-b'},alice)).status,400);
+  assert.equal((await write(itemPath,'PATCH',payload,bob)).status,404);
+  const saved=await(await write(itemPath,'PATCH',payload,alice)).json();assert.equal(saved.item.linkAvailable,true);assert.equal(saved.item.version,2);
+  assert.equal((await write(itemPath,'PATCH',payload,alice)).status,409);
+  const linked=await(await write(itemPath,'PATCH',{status:'pending',linkType:'rup',linkId:'rup-a',version:2},alice)).json();assert.equal(linked.item.linkAvailable,true);
+  await DB.prepare('UPDATE rup_current SET certificate_id=NULL WHERE owner_id=?').bind(owner).run();const list=await(await req(path,{headers:{cookie:alice}})).json();assert.equal(list.items[0].linkAvailable,false);
+  const reviewPath=`/api/projects/${project.id}/preflight`;assert.equal((await req(reviewPath)).status,401);assert.equal((await req(reviewPath,{headers:{cookie:bob}})).status,404);
+  const preflight=await(await req(reviewPath,{headers:{cookie:alice}})).json();assert.ok(preflight.items.some(x=>x.code==='support_unavailable'));assert.ok(preflight.items.some(x=>x.code==='requirement_pending'));assert.ok(preflight.items.some(x=>x.code==='deadline_missing'));assert.ok(preflight.items.some(x=>x.code==='offer_missing'));assert.equal(Object.hasOwn(preflight,'ready'),false);
+  await DB.prepare('INSERT INTO project_secop VALUES (?,?,?,?,?)').bind(project.id,owner,'secop-i','p',JSON.stringify({deadline:'2026-11-25',deadlineVerified:false})).run();
+  await DB.prepare('INSERT INTO secop_watch_baselines_web VALUES (?,?,?,?,?,?,?,?)').bind(project.id,owner,JSON.stringify({deadline:'2026-11-20',deadlineVerified:true}),null,'2026','','1','token').run();
+  await DB.prepare("UPDATE company_certificates SET validity_mode='range',valid_from='2026-01-01',valid_to='2026-11-19' WHERE id='cert-a'").run();
+  assert.equal((await write(itemPath,'PATCH',{status:'reviewed',linkType:'certificate',linkId:'cert-a',version:3},alice)).status,200);
+  const dated=await(await req(reviewPath,{headers:{cookie:alice}})).json();assert.ok(dated.items.some(x=>x.code==='deadline_recorded'&&x.date==='2026-11-20'));assert.ok(dated.items.some(x=>x.code==='support_expires_before_deadline'));
+  const draft={currency:'COP',budget:'',items:[{id:'x',name:'',quantity:'',price:'',rate:'0',cost:''}]};await DB.prepare('INSERT INTO economic_offer_drafts VALUES (?,?,?,?)').bind(project.id,JSON.stringify(draft),1,'2026').run();assert.ok((await(await req(reviewPath,{headers:{cookie:alice}})).json()).items.some(x=>x.code==='offer_invalid'));
+  draft.items[0]={id:'x',name:'Servicio',quantity:'1',price:'10',rate:'0',cost:''};await DB.prepare('UPDATE economic_offer_drafts SET draft_json=? WHERE project_id=?').bind(JSON.stringify(draft),project.id).run();assert.ok((await(await req(reviewPath,{headers:{cookie:alice}})).json()).items.some(x=>x.code==='offer_recorded'));
+  assert.equal((await write(itemPath,'DELETE',{version:2},alice)).status,409);assert.equal((await write(itemPath,'DELETE',{version:4},alice)).status,200);
+  assert.deepEqual((await(await req(path,{headers:{cookie:alice}})).json()).items,[]);
+  await write(path,'POST',{title:'Otro soporte'},alice);
+  assert.equal((await write(`/api/projects/${project.id}/workflow/requirements/${requirement.id}`,'DELETE',{version:requirement.version},alice)).status,200);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS count FROM project_requirement_supports WHERE requirement_id=?').bind(requirement.id).first()).count,0);
+  assert.equal((await req(path,{headers:{cookie:alice}})).status,404);
+ }finally{await worker?.dispose();await rm(dir,{recursive:true,force:true});}
+});

@@ -1,0 +1,54 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile,readdir} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
+import {prepareBlindTransport,openBlindSource} from '../src/project-blind-transport.js';
+import {runnerBlindCapture} from '../src/project-blind-capture.js';
+
+test('captura inspecciones y correcciones privadas con sus dos informes y detecta cambios',{timeout:30000},async()=>{
+ const worker=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-10-30',d1Databases:{DB:'blind-snapshot'},r2Buckets:['FILES']}));
+ try{
+  const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');
+  for(const f of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${f}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
+  for(const id of ['alice','bob'])await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,0,0,0)').bind(id,id,`${id}@example.com`).run();
+  await DB.prepare('INSERT INTO projects VALUES(?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+  const job=async(id,kind,state,payload)=>DB.prepare('INSERT INTO jobs(id,project_id,owner_id,kind,client_request_id,payload_json,state,created_at,updated_at,result_json) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id,'p','alice',kind,id,JSON.stringify(payload),state,'2026','2026',null).run();
+  await job('inspection','blind-check.inspect','succeeded',{fileIds:['f'],bidFileId:'f',profile:{name:'perfil'}});
+  await job('correction','blind-check.fix-report','succeeded',{inspectionJobId:'inspection',fileIds:['f'],reportVersion:1,fixRules:['properties']});
+  await job('active','blind-check.fix-ai','running',{inspectionJobId:'inspection',fileIds:['f']});
+  await job('legacy','blind-check.fix','succeeded',{inspectionJobId:'inspection',fileIds:['f'],fixRules:['properties']});
+  await job('failed','blind-check.fix-ai','failed',{inspectionJobId:'inspection',fileIds:['f']});
+  const put=async(table,id,jobId,key,content)=>{await FILES.put(key,content);const sha=createHash('sha256').update(content).digest('hex');await DB.prepare(`INSERT INTO ${table}(id,job_id,object_key,sha256,size,created_at) VALUES(?,?,?,?,?,?)`).bind(id,jobId,key,sha,Buffer.byteLength(content),'2026').run();return sha;};
+  const inspect='{"groups":[]}',docx='PK-prueba',report='{"after":{"groups":[]}}';
+  await put('job_artifacts','i','inspection','inspect',inspect);const sha=await put('job_artifacts','c','correction','docx',docx);await put('job_repair_reports','r','correction','report',report);
+  await put('job_artifacts','l','legacy','legacy-docx',docx);
+  const env={DB,FILES},snapshot=await prepareBlindTransport(env,'alice','p');
+  assert.equal(await prepareBlindTransport(env,'bob','p'),null);
+  assert.equal(snapshot.tasks.length,5);const correction=snapshot.tasks.find(item=>item.id==='correction');assert.equal(correction.artifact.sha256,sha);assert.equal(correction.payload.inspectionJobId,'inspection');assert.ok(correction.report);
+  assert.equal(snapshot.tasks.find(item=>item.id==='active').state,'interrupted');
+  assert.equal(snapshot.tasks.find(item=>item.id==='failed').state,'failed');assert.equal(snapshot.tasks.find(item=>item.id==='legacy').report,null);
+  assert.equal(await openBlindSource(env,'bob','p','correction','artifact',correction.artifact.etag,correction.artifact.version),null);
+  assert.equal(await new Response(await openBlindSource(env,'alice','p','correction','artifact',correction.artifact.etag,correction.artifact.version)).text(),docx);
+  assert.equal(await new Response(await openBlindSource(env,'alice','p','correction','report',correction.report.etag,correction.report.version)).text(),report);
+  const baseRequest=new Request('http://localhost/capture');
+  const captured=await (await runnerBlindCapture(baseRequest,env,{ownerId:'alice'},'p')).json();assert.equal(captured.tasks.length,5);assert.match(captured.revision,/^[a-f0-9]{64}$/);
+  assert.equal((await runnerBlindCapture(baseRequest,env,{ownerId:'bob'},'p')).status,404);
+  const query=`?etag=${encodeURIComponent(correction.report.etag)}&version=${correction.report.version}`;
+  assert.equal(await (await runnerBlindCapture(new Request(`http://localhost/capture${query}`),env,{ownerId:'alice'},'p','correction','report')).text(),report);
+  assert.equal((await runnerBlindCapture(new Request(`http://localhost/capture${query}`),env,{ownerId:'bob'},'p','correction','report')).status,404);
+  assert.equal(await openBlindSource(env,'alice','p','correction','unknown',correction.report.etag,correction.report.version),null);
+  await DB.prepare("UPDATE jobs SET payload_json=? WHERE id='correction'").bind(JSON.stringify({...correction.payload,fixRules:['color']})).run();
+  await assert.rejects(snapshot.assertUnchanged());await assert.rejects(openBlindSource(env,'alice','p','correction','artifact',correction.artifact.etag,correction.artifact.version));
+  await DB.prepare("UPDATE jobs SET payload_json=? WHERE id='correction'").bind(JSON.stringify(correction.payload)).run();
+  await FILES.put('report','cambiado');await assert.rejects(snapshot.assertUnchanged());await assert.rejects(openBlindSource(env,'alice','p','correction','report',correction.report.etag,correction.report.version));
+  assert.equal((await runnerBlindCapture(new Request(`http://localhost/capture${query}`),env,{ownerId:'alice'},'p','correction','report')).status,409);
+  await FILES.delete('report');await assert.rejects(prepareBlindTransport(env,'alice','p'));
+  await FILES.put('report',report);await DB.prepare("UPDATE job_repair_reports SET deleted_at='2026' WHERE job_id='correction'").run();await assert.rejects(prepareBlindTransport(env,'alice','p'));
+  assert.equal(await openBlindSource(env,'alice','p','correction','report',correction.report.etag,correction.report.version),null);
+  await DB.prepare("UPDATE job_repair_reports SET deleted_at=NULL WHERE job_id='correction'").run();
+  await FILES.put('report',report);await DB.prepare("UPDATE job_artifacts SET deleted_at='2026' WHERE job_id='correction'").run();await assert.rejects(prepareBlindTransport(env,'alice','p'));
+  await DB.prepare("UPDATE job_repair_reports SET deleted_at='2026',storage_deleted_at='2026' WHERE job_id='correction'").run();await DB.prepare("UPDATE job_artifacts SET storage_deleted_at='2026' WHERE job_id='correction'").run();
+  const removed=await prepareBlindTransport(env,'alice','p');assert.ok(!removed.tasks.some(item=>item.id==='correction'));
+ }finally{await worker.dispose();}
+});

@@ -1,0 +1,1 @@
+export function projectOfferProgress(project: {fileCount?:number;hasPreparation?:number|boolean;hasDraft?:number|boolean;hasReviewedWord?:number|boolean;hasSubmission?:number|boolean;latestResult?:string|null}): {stage:'empty'|'documents'|'preparation'|'draft'|'word'|'submitted'|'awarded'|'not-awarded'|'result';next:'documents'|'prepare'|'submit'|'after'};

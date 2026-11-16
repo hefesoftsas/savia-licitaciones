@@ -1,0 +1,9 @@
+# Copia cifrada recuperable de correcciones grandes
+
+Antes de entregar una copia corregida grande, el runner la conserva cifrada por flujo en una bandeja local vinculada al token del runner, servidor, identidad y tarea. La elimina al confirmar la publicación; si la entrega se interrumpe, conserva el archivo para exportación manual. El archivo exportado es legible y solo se crea tras verificar la autenticación completa y sin sobrescribir un destino existente. Reemparejar se bloquea mientras existan copias; no se muestra el token ni el contenido. La extracción de imágenes y la copia de trabajo siguen siendo temporales locales.
+
+1. Probar cifrado autenticado, archivos grandes por flujo, integridad, aislamiento, exportación sin sobrescritura y limpieza ante errores.
+2. Conectar la bandeja a la entrega y al CLI (`outbox-list`, `outbox-export`, `outbox-discard` con `--kind artifact`), preservando los tipos existentes.
+3. Verificar fallos de red, reemparejamiento, recuperación manual y runner empaquetado. Informar que la exportación es manual y que perder el token o cambiar servidor/runner impide descifrar. No desplegar.
+
+**Avance:** la bandeja cifra por flujo antes de enviar y conserva la copia hasta que la tarea queda confirmada. El CLI permite listarla, exportarla sin sobrescribir y retirarla; reemparejar queda bloqueado mientras exista. Las pruebas verificaron 26 MiB, adulteración, clave incorrecta, interrupción, confirmación recuperada y CLI; pasaron también con el runner empaquetado y Miniflare. La recuperación de la copia DOCX es manual cuando falla su entrega; si se pierde el token o cambia el servidor o identidad del runner no puede descifrarse. Una interrupción durante la exportación puede dejar un archivo temporal legible en el destino. La ejecución y el máximo en Cloudflare real siguen sin probarse.

@@ -1,0 +1,1 @@
+export function buildDuplicateExcel(report: unknown, options?: {language?: 'es'|'en';files?: {id:string;name:string}[];bidFileIds?: string[];tenderFileIds?: string[];labelForMetadata?: (key:string,fallback:string,language:string)=>string}): ArrayBuffer;

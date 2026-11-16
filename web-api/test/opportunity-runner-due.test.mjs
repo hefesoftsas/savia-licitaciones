@@ -1,0 +1,24 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {readFile,readdir} from 'node:fs/promises';import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
+import {opportunityDue,runnerOpportunityDue} from '../src/opportunity-candidates.js';
+import {digest} from '../src/runners.js';
+import {opportunitySuggestionSettings} from '../src/opportunity-suggestion-settings.js';
+test('requiere autorización separada, respeta idioma y no encola si se desactiva durante la consulta',async()=>{
+ const worker=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-10-30',d1Databases:{DB:'runner-due'}}));
+ try{const DB=await worker.getD1Database('DB'),env={DB,BETTER_AUTH_URL:'http://localhost',BETTER_AUTH_SECRET:'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz'};for(const f of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${f}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
+  for(const id of ['alice','bob','charlie']){await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,0,0)').bind(id,id,`${id}@example.com`).run();await DB.prepare("INSERT INTO provider_credentials(id,owner_id,provider,model,key_id,iv,ciphertext,created_at) VALUES(?,?,?,'model','k','iv','encrypted','2026')").bind(`key-${id}`,id,id==='alice'?'fireworks-api':'opencode-go').run();await DB.prepare("INSERT INTO opportunity_suggestion_settings(owner_id,enabled,keywords,version,updated_at,credential_id,include_rup,consented_at,auto_enabled) VALUES(?,1,'software',1,'2026',?,0,'2026',1)").bind(id,`key-${id}`).run();}
+  let calls=0;const lookup=async({dataset})=>{calls++;return {success:true,data:{items:[{id:'1',source:dataset,title:'Proceso',status:'Convocado'}]}}};
+  const req=()=>new Request('http://localhost/api/runner/opportunity-suggestions/due',{method:'POST'});
+  const app=(await import('../src/index.js')).default,token='a'.repeat(64);await DB.prepare('INSERT INTO runners(id,owner_id,name,token_hash,created_at) VALUES(?,?,?,?,?)').bind('runner','alice','runner',await digest(token),'2026').run();
+  assert.equal((await app.fetch(req(),env)).status,401);assert.equal((await app.fetch(new Request(req(),{headers:{authorization:`Bearer ${token}`}}),env)).status,200);
+  assert.equal((await(await runnerOpportunityDue(req(),env,{ownerId:'alice'},lookup)).json()).started,false);assert.equal(calls,0);
+  const save=(owner,version,runnerAutoEnabled,language)=>opportunitySuggestionSettings(new Request('http://localhost/settings',{method:'PUT',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({version,enabled:true,autoEnabled:true,runnerAutoEnabled,language,keywords:'software',credentialId:`key-${owner}`,dataProcessingConsent:true})}),env,owner);
+  const invalidSettings=new Request('http://localhost/settings',{method:'PUT',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({version:1,enabled:true,autoEnabled:false,runnerAutoEnabled:true,language:'es',keywords:'software',credentialId:'key-alice',dataProcessingConsent:true})});assert.equal((await opportunitySuggestionSettings(invalidSettings,env,'alice')).status,400);
+  assert.equal((await save('alice',1,true,'en')).status,200);assert.equal((await save('bob',1,true,'es')).status,200);assert.equal((await save('charlie',1,true,'en')).status,200);
+  const outdated=new Request('http://localhost/due',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({language:'es'})});
+  assert.equal((await(await opportunityDue(outdated,env,'charlie',lookup,{runnerSchedule:true})).json()).started,true);
+  assert.equal(JSON.parse((await DB.prepare("SELECT payload_json FROM account_jobs WHERE owner_id='charlie'").first()).payload_json).language,'en');
+  const [first,second]=await Promise.all([runnerOpportunityDue(req(),env,{ownerId:'alice'},lookup),runnerOpportunityDue(req(),env,{ownerId:'alice'},lookup)]);assert.equal((await Promise.all([first.json(),second.json()])).filter(x=>x.started).length,1);
+  const job=await DB.prepare("SELECT payload_json FROM account_jobs WHERE owner_id='alice' AND state='queued'").first();assert.equal(JSON.parse(job.payload_json).language,'en');
+  let disabled=false;const interrupted=await runnerOpportunityDue(req(),env,{ownerId:'bob'},async query=>{if(!disabled){disabled=true;await DB.prepare("UPDATE opportunity_suggestion_settings SET runner_auto_enabled=0 WHERE owner_id='bob'").run();}return lookup(query);});assert.equal((await interrupted.json()).started,false);assert.equal((await DB.prepare("SELECT COUNT(*) AS n FROM account_jobs WHERE owner_id='bob'").first()).n,0);
+ }finally{await worker.dispose();}
+});

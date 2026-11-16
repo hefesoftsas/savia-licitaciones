@@ -1,0 +1,2 @@
+/** A document badge for Word actions; uses the existing icon sizing and theme. */
+export function WordIcon(){return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h9l4 4v14H7z" stroke="currentColor" strokeWidth="1.5"/><path d="M15 3v5h5" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="8" width="14" height="12" rx="2" fill="currentColor"/><path d="m3.5 11 1.5 6 2-4 2 4 1.5-6" stroke="var(--background)" strokeWidth="1.4" strokeLinejoin="round"/></svg>}

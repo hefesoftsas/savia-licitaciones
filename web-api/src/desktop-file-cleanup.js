@@ -1,0 +1,24 @@
+const cleanupLeaseMs = 5 * 60_000;
+const watchIntervalMs = 24 * 60 * 60_000;
+export const uploadLeaseMs = 60 * 60_000;
+export async function cleanupDesktopUploads(env, ownerId, limit = 20) {
+ let removed = 0, failed = 0, retained = 0;
+ for (let index = 0; index < limit; index++) {
+  const now = Date.now(), lease = now + cleanupLeaseMs;
+  const row = await env.DB.prepare("UPDATE desktop_file_staging SET state = 'cleaning', lease_until = ? WHERE id = (SELECT id FROM desktop_file_staging WHERE owner_id = ? AND (state = 'cleanup' OR (state IN ('writing', 'cleaning', 'watching') AND lease_until <= ?)) ORDER BY created_at, id LIMIT 1) AND owner_id = ? AND (state = 'cleanup' OR (state IN ('writing', 'cleaning', 'watching') AND lease_until <= ?)) RETURNING id, object_key, writer_done").bind(lease, ownerId, now, ownerId, now).first();
+  if (!row) break;
+  const referenced = await env.DB.prepare('SELECT 1 AS present WHERE EXISTS (SELECT 1 FROM project_files WHERE object_key = ?) OR EXISTS (SELECT 1 FROM project_plan_assets WHERE object_key = ?) OR EXISTS (SELECT 1 FROM rup_certificates WHERE object_key = ?) OR EXISTS (SELECT 1 FROM imported_rup_comparisons WHERE object_key = ?) OR EXISTS (SELECT 1 FROM knowledge_documents WHERE object_key = ?) OR EXISTS (SELECT 1 FROM company_certificate_images WHERE object_key = ?) OR EXISTS (SELECT 1 FROM image_library_web WHERE object_key = ?) OR EXISTS (SELECT 1 FROM imported_duplicate_checks WHERE object_key = ?) OR EXISTS (SELECT 1 FROM imported_duplicate_check_files WHERE object_key = ?) OR EXISTS (SELECT 1 FROM job_artifacts WHERE object_key = ?) OR EXISTS (SELECT 1 FROM word_recoveries WHERE object_key = ?) OR EXISTS (SELECT 1 FROM job_repair_reports WHERE object_key = ?) OR EXISTS (SELECT 1 FROM desktop_feasibility_sources WHERE object_key = ?) OR EXISTS (SELECT 1 FROM account_job_artifacts WHERE object_key = ?) OR EXISTS (SELECT 1 FROM feasibility_assets WHERE object_key = ?) OR EXISTS (SELECT 1 FROM feasibility_web_sources WHERE object_key = ?) OR EXISTS (SELECT 1 FROM project_feasibility_sources WHERE object_key = ? AND deleted = 0) OR EXISTS (SELECT 1 FROM project_feasibility_extracted_texts WHERE object_key = ?) OR EXISTS (SELECT 1 FROM project_feasibility_extracted_images WHERE object_key = ?) OR EXISTS (SELECT 1 FROM feasibility_extracted_texts WHERE object_key = ?) OR EXISTS (SELECT 1 FROM feasibility_extracted_images WHERE object_key = ?) OR EXISTS (SELECT 1 FROM feasibility_snapshot_imports WHERE object_key = ?) OR EXISTS (SELECT 1 FROM feasibility_snapshot_objects WHERE object_key = ?) OR EXISTS (SELECT 1 FROM company_profile_images WHERE object_key = ?) OR EXISTS (SELECT 1 FROM company_experience_images WHERE object_key = ?) OR EXISTS (SELECT 1 FROM project_submission_attachments WHERE object_key = ?) OR EXISTS (SELECT 1 FROM project_submission_evidence WHERE object_key = ?)'      ).bind(row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key, row.object_key).first();
+  if (referenced) { await env.DB.prepare("DELETE FROM desktop_file_staging WHERE id = ? AND owner_id = ? AND state = 'cleaning' AND lease_until = ?").bind(row.id, ownerId, lease).run(); retained++; continue; }
+  try { await env.FILES.delete(row.object_key); }
+  catch { await env.DB.prepare("UPDATE desktop_file_staging SET state = 'cleanup', lease_until = 0 WHERE id = ? AND owner_id = ? AND state = 'cleaning' AND lease_until = ?").bind(row.id, ownerId, lease).run(); failed++; break; }
+  if (row.writer_done) await env.DB.prepare("DELETE FROM desktop_file_staging WHERE id = ? AND owner_id = ? AND state = 'cleaning' AND lease_until = ? AND writer_done = 1").bind(row.id, ownerId, lease).run();
+  else await env.DB.prepare("UPDATE desktop_file_staging SET state = CASE WHEN writer_done = 1 THEN 'cleanup' ELSE 'watching' END, lease_until = CASE WHEN writer_done = 1 THEN 0 ELSE ? END WHERE id = ? AND owner_id = ? AND state = 'cleaning' AND lease_until = ?").bind(Date.now() + watchIntervalMs, row.id, ownerId, lease).run();
+  removed++;
+ }
+ const pending = await env.DB.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN state = 'watching' THEN 1 ELSE 0 END), 0) AS watching FROM desktop_file_staging WHERE owner_id = ?").bind(ownerId).first();
+ return { removed, failed, retained, pending: pending?.count || 0, watching: pending?.watching || 0 };
+}
+export async function cleanupDesktopUploadsRequest(request, env, runner) {
+ if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+ return Response.json(await cleanupDesktopUploads(env, runner.ownerId));
+}

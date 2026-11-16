@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <title>Savia Conector</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <img src="savia.svg" alt="" width="36" height="36">
+      <div class="brand"><strong>Savia</strong><span data-copy="connector">Conector</span></div>
+      <label class="language"><span class="sr-only" data-copy="language">Idioma</span><select id="language"><option value="es">Español</option><option value="en">English</option></select></label>
+    </header>
+    <section id="setup" aria-labelledby="setup-title">
+      <h1 id="setup-title" data-copy="setupTitle">Conecta este equipo</h1>
+      <p data-copy="setupDescription">Copia la dirección y el código que aparecen en Savia web. Solo tienes que hacerlo una vez.</p>
+      <form id="pair-form">
+        <label><span data-copy="address">Dirección de Savia</span><input name="server" type="url" placeholder="https://…" required autocomplete="url" spellcheck="false"></label>
+        <label><span data-copy="deviceName">Nombre del equipo</span><input name="name" required maxlength="200" autocomplete="off"></label>
+        <label><span data-copy="connectionCode">Código de conexión</span><input name="code" required maxlength="64" autocomplete="off" spellcheck="false" aria-describedby="code-hint" placeholder="Pega aquí el código"></label>
+        <p class="hint" id="code-hint" data-copy="codeHint">En Savia web, abre Runners y genera tu código.</p>
+        <button type="submit" data-copy="connect">Conectar equipo</button>
+        <button type="button" id="cancel-pair" class="link" hidden data-copy="cancel">Cancelar</button>
+      </form>
+    </section>
+    <section id="connected" hidden aria-labelledby="state-title">
+      <div class="status-icon" id="status-icon" aria-hidden="true">✓</div>
+      <h1 id="state-title">Equipo conectado</h1>
+      <p id="state-description">Inicia el conector para recibir tareas de Savia.</p>
+      <div class="server" id="server"></div>
+      <button id="start" data-copy="start">Iniciar conector</button>
+      <button id="stop" class="secondary" hidden data-copy="stop">Detener conector</button>
+      <button id="open-web" class="link" data-copy="openWeb">Volver a Savia web</button>
+      <button id="reconnect" class="link" data-copy="reconnect">Conectar con otra cuenta</button>
+    </section>
+    <details id="activity-panel" open><summary id="activity-title">Actividad de esta sesión</summary><div id="activity-log" tabindex="0"><p id="activity-empty">Aún no hay actividad.</p><ol id="activity-events"></ol></div></details>
+    <p id="error" role="alert" hidden></p>
+    <p id="notice" role="status" aria-live="polite"></p>
+    <footer><span data-copy="footer">Mantén esta aplicación abierta mientras Savia trabaja.</span> <span id="version"></span><p class="update-hint" data-copy="updateHint">Para actualizar, termina las tareas, detén el conector e instala la nueva versión.</p><button id="open-downloads" class="link update-link" hidden data-copy="openDownloads">Ver descargas del conector</button></footer>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

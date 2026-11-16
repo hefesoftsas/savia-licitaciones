@@ -1,0 +1,400 @@
+/* Feasibility reports: add only feature-specific layout; reuse technical-plan workspace classes for step pages where possible. */
+
+.technical-workbench > .feasibility-materials-page {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.feasibility-project-form {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-height: 0;
+  overflow: auto;
+  padding: 22px 24px;
+}
+
+.feasibility-project-form h3 {
+  margin: 7px 0 5px;
+  color: var(--savia-text);
+  font-size: 24px;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+}
+
+.feasibility-project-form p {
+  margin: 0;
+  color: var(--savia-text-soft);
+}
+
+.feasibility-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.feasibility-form-grid .is-wide {
+  grid-column: 1 / -1;
+}
+
+.feasibility-form-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+}
+
+.feasibility-form-grid input,
+.feasibility-form-grid select,
+.feasibility-form-grid textarea,
+.outline-word-control-grid select,
+.feasibility-export-options input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 11px;
+  color: var(--savia-text);
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-radius);
+}
+
+.feasibility-form-grid textarea {
+  resize: vertical;
+}
+
+.feasibility-outline-config-fields {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.feasibility-outline-workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.feasibility-outline-workspace .outline-progress-disclosure { grid-column: 1 / -1; }
+.feasibility-outline-workspace .outline-progress-panel { display: block; }
+.feasibility-outline-workspace .outline-detail-body { overflow: auto; }
+.feasibility-outline-page { width: 100%; min-width: 0; container: feasibility-outline / inline-size; }
+.feasibility-outline-toggle, .feasibility-outline-page .outline-tree-tools .feasibility-outline-close { display: none; }
+@container feasibility-outline (max-width: 600px) {
+  .feasibility-outline-page .feasibility-outline-workspace { grid-template-columns: minmax(0, 1fr); }
+  .feasibility-outline-page .outline-tree-panel, .feasibility-outline-page .outline-detail-panel { grid-area: 2 / 1; min-width: 0; }
+  .feasibility-outline-page .outline-tree-panel { position: relative; z-index: 2; width: min(320px, 100%); height: 100%; background: var(--card); box-shadow: 8px 0 24px #0002; }
+  .feasibility-outline-page.is-tree-closed .outline-tree-panel { display: none; }
+  .feasibility-outline-page .feasibility-outline-toggle, .feasibility-outline-page .outline-tree-tools .feasibility-outline-close { display: inline-flex; flex: none; width: 36px; height: 36px; }
+}
+
+.feasibility-markdown-workspace {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.feasibility-markdown-page { width: 100%; min-width: 0; container: feasibility-markdown / inline-size; }
+.feasibility-preview-toggle { display: none; }
+@container feasibility-markdown (max-width: 600px) {
+  .feasibility-markdown-page .feasibility-preview-toggle { display: inline-flex; flex: none; }
+  .feasibility-markdown-page .global-facts-editor-grid.has-preview { grid-template-columns: minmax(0, 1fr); }
+  .feasibility-markdown-page .global-facts-editor-grid:not(.is-preview) .markdown-fullscreen-frame:has(> .global-facts-preview-pane),
+  .feasibility-markdown-page .global-facts-editor-grid.is-preview .global-facts-edit-pane { display: none; }
+}
+
+.feasibility-markdown-workspace .outline-progress-panel { display: block; }
+.feasibility-markdown-workspace .global-facts-reader { min-height: 0; }
+.feasibility-markdown-workspace .markdown-fullscreen-frame { grid-template-rows: auto minmax(0, 1fr); }
+.feasibility-markdown-workspace .markdown-fullscreen-frame > .markdown-viewer { grid-row: 2; }
+.feasibility-markdown-workspace .markdown-fullscreen-trigger { position: static; grid-row: 1; justify-self: end; margin: 8px 12px 0; }
+
+.feasibility-markdown-workspace > .outline-progress-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+.feasibility-markdown-workspace > .content-outline-stats {
+  min-height: 0;
+  overflow: auto;
+  border-bottom: 0;
+  border-right: 1px solid var(--savia-border-soft);
+}
+
+.feasibility-markdown-workspace > .markdown-editor,
+.feasibility-markdown-workspace > .global-facts-reader {
+  height: 100%;
+  min-height: 0;
+}
+
+.feasibility-analysis-edit-pane {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.feasibility-analysis-edit-pane .markdown-editor {
+  height: 100%;
+  min-height: 0;
+}
+
+.feasibility-export-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 101;
+  display: grid;
+  width: min(1120px, calc(100vw - 48px));
+  max-height: min(780px, calc(100vh - 48px));
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 14px;
+  padding: 18px;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-card-radius);
+  box-shadow: var(--savia-shadow-modal);
+  transform: translate(-50%, -50%);
+}
+
+.feasibility-export-dialog .export-template-select-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.feasibility-export-dialog .export-template-select-head h2 {
+  margin: 5px 0 3px;
+  color: var(--savia-text);
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+.feasibility-export-dialog .export-template-select-head p {
+  margin: 0;
+  color: var(--savia-text-soft);
+  line-height: 1.6;
+}
+
+.feasibility-export-dialog .export-template-select-body {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+}
+
+.feasibility-export-dialog .export-template-select-list-panel,
+.feasibility-export-dialog .export-template-select-preview {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-card-radius);
+}
+
+.feasibility-export-dialog .export-template-select-list-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+}
+
+.feasibility-export-dialog .export-template-select-search {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  color: var(--savia-text);
+  background: var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-card-radius);
+  outline: none;
+}
+
+.feasibility-export-dialog .export-template-select-search:focus {
+  border-color: color-mix(in srgb, var(--savia-border) 50%, transparent);
+  box-shadow: var(--savia-focus-ring);
+}
+
+.feasibility-export-dialog .export-template-select-list {
+  display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
+  gap: 7px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.feasibility-export-dialog .export-template-select-row {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 40px;
+  padding: 9px 11px;
+  color: var(--savia-text);
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--ui-card-radius);
+  cursor: pointer;
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease, color var(--savia-duration-fast) ease;
+}
+
+.feasibility-export-dialog .export-template-select-row strong {
+  display: block;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.feasibility-export-dialog .export-template-select-row.is-active {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-color: color-mix(in srgb, var(--savia-border) 34%, transparent);
+}
+
+.feasibility-export-dialog .export-template-select-row:hover:not(.is-active) {
+  border-color: color-mix(in srgb, var(--savia-border) 24%, transparent);
+  box-shadow: var(--savia-shadow-sm);
+}
+
+.feasibility-export-dialog .export-template-select-empty,
+.feasibility-export-dialog .export-template-select-preview-empty {
+  display: grid;
+  min-height: 140px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 18px;
+  color: var(--savia-text-soft);
+  text-align: center;
+}
+
+.feasibility-export-dialog .export-template-select-empty strong,
+.feasibility-export-dialog .export-template-select-preview-empty strong {
+  color: var(--savia-text);
+}
+
+.feasibility-export-dialog .export-template-select-preview {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.feasibility-export-dialog .export-template-select-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--card);
+  border-bottom: 1px solid var(--savia-border-soft);
+}
+
+.feasibility-export-dialog .export-template-select-preview-head strong {
+  overflow: hidden;
+  color: var(--savia-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.feasibility-export-dialog .export-template-select-preview .export-template-preview-panel {
+  position: relative;
+  top: auto;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.feasibility-export-dialog .export-template-select-preview .export-template-preview-scroll {
+  padding: 0;
+}
+
+.feasibility-export-dialog .export-template-select-actions {
+  padding-top: 0;
+}
+
+.feasibility-export-options-disclosure {
+  min-height: 0;
+  max-height: min(240px, 32vh);
+  overflow: auto;
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--ui-radius);
+}
+
+.feasibility-export-options-disclosure summary {
+  padding: 10px 14px;
+  color: var(--savia-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.feasibility-export-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 16px;
+  padding: 12px 14px;
+  background: var(--card);
+  border-top: 1px solid var(--savia-border-soft);
+}
+
+.feasibility-export-options label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--savia-text);
+  font-size: 13px;
+}
+
+.feasibility-export-options label:nth-child(4),
+.feasibility-export-options label:nth-child(5),
+.feasibility-export-options label:nth-child(6) {
+  display: grid;
+  gap: 6px;
+  color: var(--savia-text-soft);
+}
+
+@media (max-width: 900px) {
+  .feasibility-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .feasibility-export-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .feasibility-markdown-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+.content-compact-outline-toggle,
+.content-compact-outline-close {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .technical-content-page .content-generation-stats {
+    display: none;
+  }
+
+  :is(.feasibility-content-page, .technical-content-page) .content-generation-workspace {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :is(.feasibility-content-page, .technical-content-page) .content-outline-panel {
+    position: absolute;
+    z-index: 2;
+    inset: 0 auto 0 0;
+    width: min(320px, 85%);
+    visibility: hidden;
+  }
+
+  :is(.feasibility-content-page, .technical-content-page) .is-outline-open .content-outline-panel {
+    visibility: visible;
+    box-shadow: 8px 0 24px rgb(0 0 0 / 0.12);
+  }
+
+  .content-compact-outline-toggle,
+  .content-compact-outline-close {
+    display: inline-flex;
+  }
+}

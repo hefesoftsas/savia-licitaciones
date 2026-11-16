@@ -1,0 +1,31 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "savia-web-local",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-30",
+  "compatibility_flags": ["nodejs_compat", "assets_navigation_has_no_effect"],
+  "workers_dev": false,
+  "durable_objects": { "bindings": [{ "name": "PREVIEW_WAKE", "class_name": "PreviewWake" }] },
+  "migrations": [{ "tag": "preview-wake-v1", "new_sqlite_classes": ["PreviewWake"] }],
+  "send_email": [{ "name": "EMAIL" }],
+  "vars": {
+    "AUTH_EMAIL_FROM": "savia@example.com",
+    "RUNNER_DOWNLOAD_WINDOWS_URL": "https://github.com/hefesoftsas/savia-licitaciones/releases/download/connector-v0.1.2/Savia-Conector-0.1.2-win-x64.exe",
+    "RUNNER_DOWNLOAD_MACOS_X64_URL": "https://github.com/hefesoftsas/savia-licitaciones/releases/download/connector-v0.1.2/Savia-Conector-0.1.2-mac-x64.dmg",
+    "RUNNER_DOWNLOAD_MACOS_ARM64_URL": "https://github.com/hefesoftsas/savia-licitaciones/releases/download/connector-v0.1.2/Savia-Conector-0.1.2-mac-arm64.dmg",
+    "RUNNER_DOWNLOAD_LINUX_ARM64_URL": "https://github.com/hefesoftsas/savia-licitaciones/releases/download/connector-v0.1.2/Savia-Conector-0.1.2-linux-arm64.AppImage"
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api", "/api/*"]
+  },
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "savia-web-local-files" }],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "savia-web-local",
+    "database_id": "local-only",
+    "migrations_dir": "migrations"
+  }]
+}

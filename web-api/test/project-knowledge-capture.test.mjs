@@ -1,0 +1,51 @@
+import {runnerBlindCapture} from '../src/project-blind-capture.js';
+import {runnerReviewCapture} from '../src/project-review-capture.js';
+import {runnerSubmissionCapture} from '../src/project-submission-capture.js';
+import {runnerOfferDocumentsCapture} from '../src/project-offer-documents-capture.js';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { runnerProjectCapture } from '../src/project-capture-route.js';
+import { prepareKnowledgeTransport, openReferencedKnowledge } from '../src/project-knowledge-transport.js';
+import { captureProjectComponents } from '../../runner/project-component-capture.mjs';
+import { verifyComponentSnapshot } from '../../runner/cloud-snapshot-archive.mjs';
+
+test('captura fuentes de conocimiento del plan y detecta cambios y referencias ajenas', async () => {
+  const worker=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-10-30',d1Databases:{DB:'capture-knowledge'},r2Buckets:['FILES']}));
+  const root=await mkdtemp(join(tmpdir(),'savia-knowledge-capture-'));
+  try {
+    const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');
+    for(const file of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort()) for(const sql of (await readFile(new URL(`../migrations/${file}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean)) await DB.prepare(sql).run();
+    await DB.prepare('INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt) VALUES (?,?,?,0,0,0)').bind('alice','Alice','alice@example.com').run();
+    await DB.prepare('INSERT INTO projects VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+    await DB.prepare('INSERT INTO knowledge_folders(id,owner_id,name,created_at) VALUES (?,?,?,?)').bind('folder','alice','Fuentes','2026').run();
+    await FILES.put('private-doc','data');
+    await DB.prepare('INSERT INTO knowledge_documents(id,folder_id,owner_id,name,content_type,object_key,size,created_at) VALUES (?,?,?,?,?,?,?,?)').bind('doc','folder','alice','fuente.pdf','application/pdf','private-doc',4,'2026').run();
+    await DB.prepare('INSERT INTO knowledge_indices VALUES (?,?,?,?,?)').bind('doc','alice',1,'job','mutation').run();
+    for(let i=1;i<=2;i++) await DB.prepare('INSERT INTO knowledge_entries VALUES (?,?,?,?,?,?,?)').bind(`entry-${i}`,'doc','alice',`Entrada ${i}`,'Resumen','Cita',i).run();
+    await DB.prepare('INSERT INTO project_technical_plan_nodes(project_id,node_id,parent_node_id,sort_order,title,description,content_mode,knowledge_item_ids_json,content,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').bind('p','node',null,0,'Capítulo','','manual-fill','["entry-1"]','','idle','2026','2026').run();
+    const env={DB,FILES}, runner={ownerId:'alice'}, base='http://localhost/api/runner/project-captures/p';
+    const prepared=await prepareKnowledgeTransport(env,'alice',[{knowledge_item_ids_json:'["entry-1"]'}]);
+    const preDoc=prepared.knowledge.documents[0];
+    assert.equal(await new Response(await openReferencedKnowledge(env,'alice','p','doc',preDoc.etag,preDoc.version)).text(),'data');
+    await prepared.assertUnchanged();
+    let response=await runnerProjectCapture(new Request(base),env,runner,'p'); assert.equal(response.status,200);
+    const snapshot=await response.json();
+    assert.deepEqual(snapshot.knowledge.entries.map(x=>x.id),['entry-1','entry-2']);
+    assert.doesNotMatch(JSON.stringify(snapshot),/private-doc/);
+    const doc=snapshot.knowledge.documents[0], url=`${base}/knowledge/doc?etag=${encodeURIComponent(doc.etag)}&version=${doc.version}`;
+    assert.equal(await (await runnerProjectCapture(new Request(url),env,runner,'p','doc','knowledge')).text(),'data');
+    const directory=join(root,'snapshot');
+    await captureProjectComponents({server:'http://localhost',token:'test',projectId:'p',destination:directory,fetchImpl:(path,options)=>{const parsed=new URL(path),request=new Request(path,options);if(parsed.pathname.includes('/project-blind-captures/'))return runnerBlindCapture(request,env,runner,'p');if(parsed.pathname.includes('/project-review-captures/'))return runnerReviewCapture(request,env,runner,'p');if(parsed.pathname.includes('/project-submission-captures/'))return runnerSubmissionCapture(request,env,runner,'p');if(parsed.pathname.includes('/project-offer-document-captures/'))return runnerOfferDocumentsCapture(request,env,runner,'p');const match=/\/knowledge\/([^/]+)$/.exec(parsed.pathname);return runnerProjectCapture(request,env,runner,'p',match?.[1],match?'knowledge':undefined);}});
+    assert.equal((await verifyComponentSnapshot(directory)).objects.length,1);
+    await DB.prepare('UPDATE knowledge_entries SET summary=? WHERE id=?').bind('Cambiado','entry-2').run();
+    response=await runnerProjectCapture(new Request(base),env,runner,'p'); assert.notEqual((await response.json()).revision,snapshot.revision);
+    await FILES.put('private-doc','otro');
+    assert.equal((await runnerProjectCapture(new Request(url),env,runner,'p','doc','knowledge')).status,409);
+    await DB.prepare('UPDATE project_technical_plan_nodes SET knowledge_item_ids_json=? WHERE project_id=?').bind('["other-account"]','p').run();
+    assert.equal((await runnerProjectCapture(new Request(base),env,runner,'p')).status,409);
+  } finally { await worker.dispose(); await rm(root,{recursive:true,force:true}); }
+});

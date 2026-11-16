@@ -1,0 +1,2 @@
+CREATE TABLE feasibility_content_drafts (job_id TEXT NOT NULL REFERENCES account_jobs(id) ON DELETE CASCADE, owner_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE, node_id TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(job_id,node_id));
+CREATE TABLE feasibility_content_applications (job_id TEXT PRIMARY KEY REFERENCES account_jobs(id) ON DELETE CASCADE, owner_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE, source_version INTEGER NOT NULL, applied_version INTEGER NOT NULL, mutation_id TEXT NOT NULL, created_at TEXT NOT NULL);

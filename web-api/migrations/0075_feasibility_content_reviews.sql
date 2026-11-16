@@ -1,0 +1,1 @@
+CREATE TABLE feasibility_content_reviews (job_id TEXT NOT NULL REFERENCES account_jobs(id) ON DELETE CASCADE, owner_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE, node_id TEXT NOT NULL, content TEXT NOT NULL, fallback INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, PRIMARY KEY(job_id,node_id));

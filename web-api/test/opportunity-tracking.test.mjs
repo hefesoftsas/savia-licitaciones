@@ -1,0 +1,65 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+
+const {transferDesktopAddendum}=await import(process.env.SAVIA_TEST_ADDENDUM_TRANSFER_MODULE || new URL('../../runner/desktop-addendum-transfer.mjs',import.meta.url));
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+test('seguimiento personal aislado, versionado y eliminado junto al proyecto', async () => {
+  const build = await mkdtemp(join(tmpdir(), 'savia-tracking-api-')); let worker;
+  try {
+    execFileSync('pnpm', ['exec','wrangler','deploy','--dry-run','--outdir',build], {cwd:root,stdio:'pipe',env:{...process.env,CLOUDFLARE_SEND_METRICS:'false'}});
+    worker = new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile(join(build,'index.js'),'utf8'),compatibilityDate:'2026-10-30',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'tracking-test'},r2Buckets:['FILES'],bindings:{AUTH_ALLOW_REGISTRATION:'true',BETTER_AUTH_SECRET:'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz',BETTER_AUTH_URL:'http://localhost'}}));
+    const db = await worker.getD1Database('DB');
+    for (const file of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort()) for (const sql of (await readFile(join(root,'migrations',file),'utf8')).split(';').map(x=>x.trim()).filter(Boolean)) await db.prepare(sql).run();
+    const req=(path,options={})=>worker.dispatchFetch(`http://localhost${path}`,options);
+    const write=(path,method,body,cookie,origin='http://localhost')=>req(path,{method,headers:{origin,'content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(body)});
+    async function signup(name){const response=await write('/api/auth/sign-up/email','POST',{name,email:`${name}@example.com`,password:'password-123456'});assert.equal(response.status,200);return response.headers.get('set-cookie').split(';')[0];}
+    const alice=await signup('alice'),bob=await signup('bob');
+    const project=(await (await write('/api/projects','POST',{title:'Compra'},alice)).json()).project;
+    const path=`/api/projects/${project.id}/opportunity-tracking`;
+    assert.equal((await req(path)).status,401);
+    assert.equal((await req(path,{headers:{cookie:bob}})).status,404);
+    assert.deepEqual(await (await req(path,{headers:{cookie:alice}})).json(),{decision:'review',owner:'',notes:'',version:0,updatedAt:null});
+    const input={decision:'participate',owner:' Ana ',notes:' Nota ',version:0};
+    assert.equal((await write(path,'PUT',input,alice,'https://other.example')).status,403);
+    assert.equal((await write(path,'PUT',{...input,decision:'unknown'},alice)).status,400);
+    const saved=await (await write(path,'PUT',input,alice)).json();
+    assert.equal(saved.owner,'Ana');assert.equal(saved.notes,'Nota');assert.equal(saved.version,1);
+    assert.equal((await write(path,'PUT',{...input,decision:'discarded'},alice)).status,409);
+    assert.equal((await write(path,'PUT',{...input,version:1},bob)).status,404);
+    const updated=await (await write(path,'PUT',{...input,decision:'discarded',version:1},alice)).json();assert.equal(updated.version,2);
+    const pair=await (await write('/api/runner-pairings','POST',{},alice)).json();
+    const runner=await (await write('/api/runners/pair','POST',{code:pair.code,name:'Equipo'})).json();
+    const auth={authorization:`Bearer ${runner.token}`,'content-type':'application/json'};
+    const post=(url,body,extra={})=>req(url,{method:'POST',headers:{...auth,...extra},body:JSON.stringify(body)});
+    const imported=await post('/api/runner/imports/technical-plan',{title:'Importado',nodes:[]},{'idempotency-key':'tracking-import'});assert.equal(imported.status,201);
+    const importedProject=(await imported.json()).project,importPath='/api/runner/imports/technical-plan/tracking-import/opportunity-tracking',tracking={decision:'participate',owner:'Ana',notes:'Privado'};
+    const simultaneous=await Promise.all([post(importPath,tracking),post(importPath,tracking)]);assert.deepEqual(simultaneous.map(r=>r.status).sort(),[200,201]);
+    const importedPath=`/api/projects/${importedProject.id}/opportunity-tracking`;
+    assert.equal((await (await req(importedPath,{headers:{cookie:alice}})).json()).notes,'Privado');
+    assert.equal((await write(importedPath,'PUT',{...tracking,notes:'Editado',version:1},alice)).status,200);
+    assert.equal((await post(importPath,tracking)).status,200);
+    assert.equal((await (await req(importedPath,{headers:{cookie:alice}})).json()).notes,'Editado');
+    assert.equal((await post(importPath,{...tracking,notes:'Diferente'})).status,409);
+    assert.equal((await req(importedPath,{headers:{cookie:bob}})).status,404);
+    const adendaPath='/api/runner/imports/technical-plan/tracking-import/addenda', adendaView=`/api/projects/${importedProject.id}/addenda`;
+    const history={runs:[{id:'run-1',status:'completed',originalStatus:'completed',sourceHash:'abc',sources:{addendumId:'a',addendumName:'Adenda',originals:[],offers:[]},result:{impacts:[{id:'i',title:'Cambio',addendumQuote:'texto'}]},error:'',createdAt:'2026-01-01',updatedAt:'2026-01-02',reviews:[{impactId:'i',status:'reviewed',note:'Nota',updatedAt:'2026-01-02'}],orphanReviewCount:0,historical:true}]};
+    assert.equal((await req(adendaView,{headers:{cookie:bob}})).status,404);
+    const historyRace=await Promise.all([post(adendaPath,history),post(adendaPath,history)]);assert.deepEqual(historyRace.map(response=>response.status).sort(),[200,201]);assert.equal((await post(adendaPath,history)).status,200);
+    const transferResult=await transferDesktopAddendum({data:history,server:'http://localhost',token:runner.token,requestId:'tracking-import',send:(url,options)=>worker.dispatchFetch(url,options)});assert.equal(transferResult.status,'imported');
+    const captured=(await(await req(adendaView,{headers:{cookie:alice}})).json()).runs;assert.equal(captured.length,1);assert.equal(captured[0].historical,true);assert.equal(captured[0].reviews[0].note,'Nota');
+    assert.equal((await post(adendaPath,{runs:[{...history.runs[0],error:'modificado'}]})).status,409);
+    const manyProject=await post('/api/runner/imports/technical-plan',{title:'Historial amplio',nodes:[]},{'idempotency-key':'many-addenda'});assert.equal(manyProject.status,201);
+    const many=await transferDesktopAddendum({data:{runs:Array.from({length:50},(_,i)=>({...history.runs[0],id:`run-${i}`}))},server:'http://localhost',token:runner.token,requestId:'many-addenda',send:(url,options)=>worker.dispatchFetch(url,options)});assert.equal(many.count,50);
+    await db.prepare('DELETE FROM projects WHERE id = ?').bind(importedProject.id).run();
+    assert.equal((await post(importPath,tracking)).status,410);
+    await db.prepare('DELETE FROM projects WHERE id = ?').bind(project.id).run();
+    assert.equal((await req(path,{headers:{cookie:alice}})).status,404);
+    assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM project_opportunity_tracking WHERE project_id = ?').bind(project.id).first()).count,0);
+  } finally { if(worker)await worker.dispose(); await rm(build,{recursive:true,force:true}); }
+});

@@ -1,0 +1,32 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import React from 'react';import {renderToStaticMarkup} from 'react-dom/server';import {createServer} from 'vite';import {fileURLToPath} from 'node:url';import {resolve} from 'node:path';
+const root=resolve(fileURLToPath(new URL('..',import.meta.url)));
+test('muestra el catálogo adecuado y ofrece límites solo para un modelo reconocido',async()=>{
+ const server=await createServer({configFile:resolve(root,'vite.web.config.ts'),root,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},appType:'custom'});
+ try{const {CredentialModelView,findCatalogModel}=await server.ssrLoadModule('/src/features/web/WebCredentialModel.tsx');
+  const id='accounts/fireworks/models/glm-5p2',known=findCatalogModel('fireworks-api',id);
+  assert.ok(known);assert.equal(findCatalogModel('opencode-go',id),undefined);assert.equal(findCatalogModel('fireworks-api','unknown'),undefined);
+  assert.ok(findCatalogModel('zai-api','glm-4.5-air'));
+  assert.ok(findCatalogModel('ant-ling-api','Ling-2.6-flash'));
+  assert.ok(findCatalogModel('opencode-zen','big-pickle'));const zen=renderToStaticMarkup(React.createElement(CredentialModelView,{language:'es',provider:'opencode-zen',model:'desconocido',context:'',output:'',onProvider(){},onModel(){},onContext(){},onOutput(){},onUseLimits(){}}));assert.match(zen,/Elige un modelo de Zen/);assert.match(zen,/cobrar por solicitud/);
+  const ant=renderToStaticMarkup(React.createElement(CredentialModelView,{language:'es',provider:'ant-ling-api',model:'desconocido',context:'',output:'',onProvider(){},onModel(){},onContext(){},onOutput(){},onUseLimits(){}}));assert.match(ant,/Elige un modelo de Ant Ling/);
+  assert.ok(findCatalogModel('moonshot-api','kimi-k2-thinking'));
+  assert.ok(findCatalogModel('minimax-api','MiniMax-M3'));
+  assert.ok(findCatalogModel('huggingface-api','MiniMaxAI/MiniMax-M2'));
+  const props={language:'es',provider:'fireworks-api',model:id,context:'',output:'',onProvider(){},onModel(){},onContext(){},onOutput(){},onUseLimits(){}};
+  const html=renderToStaticMarkup(React.createElement(CredentialModelView,props));assert.match(html,/accounts\/fireworks\/models\/glm-5p2/);assert.match(html,/Aplicar límites del catálogo/);assert.match(html,/no garantiza/);
+  const go=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,provider:'opencode-go',model:'muse-spark-1.3-contributor'}));assert.match(go,/agentes de programación/);assert.match(go,/licitaciones/);assert.match(go,/opencode.ai\/v2\/docs\/console\/go/);
+  const goEn=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,language:'en',provider:'opencode-go',model:'muse-spark-1.3-contributor'}));assert.match(goEn,/coding agents/);
+  const minimax=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,provider:'minimax-api',model:'MiniMax-M3'}));assert.match(minimax,/condiciones de uso/);
+  const vertex=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,provider:'google-vertex-api',model:'gemini-2.5-flash'}));assert.ok(findCatalogModel('google-vertex-api','gemini-2.5-flash'));assert.match(vertex,/Vertex AI Express/);assert.match(vertex,/credenciales predeterminadas/);
+  const vertexEn=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,language:'en',provider:'google-vertex-api',model:'gemini-2.5-flash'}));assert.match(vertexEn,/Application Default Credentials are not supported/);
+  const minimaxCn=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,provider:'minimax-cn-api',model:'MiniMax-M3'}));assert.ok(findCatalogModel('minimax-cn-api','MiniMax-M3'));assert.match(minimaxCn,/MiniMax API \(China\)/);assert.match(minimaxCn,/no hay cambio automático/);
+  const minimaxCnEn=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,language:'en',provider:'minimax-cn-api',model:'MiniMax-M3'}));assert.match(minimaxCnEn,/regions are not switched automatically/);
+  const xiaomi=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,provider:'xiaomi-api',model:'mimo-v2-flash'}));assert.match(xiaomi,/Xiaomi MiMo API/);assert.match(xiaomi,/planes regionales/);assert.doesNotMatch(xiaomi,/value="mimo-v2.5"/);
+  assert.match(xiaomi,/programación/);assert.match(xiaomi,/licitaciones/);assert.match(xiaomi,/mimo\.mi\.com/);
+  const xiaomiEn=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,language:'en',provider:'xiaomi-api',model:'mimo-v2-flash'}));assert.match(xiaomiEn,/coding/);assert.match(xiaomiEn,/tender/);
+  const azure=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,provider:'azure-openai-api',model:'mi-despliegue'}));assert.match(azure,/Azure OpenAI/);assert.match(azure,/name="resource"/);assert.match(azure,/Nombre de la implementación/);
+  const azureEn=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,language:'en',provider:'azure-openai-api',model:'my-deployment'}));assert.match(azureEn,/Deployment name/);assert.match(azureEn,/Resource name/);
+  const hugging=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,provider:'huggingface-api',model:'MiniMaxAI/MiniMax-M2'}));assert.match(hugging,/proveedores externos/);
+  const unknown=renderToStaticMarkup(React.createElement(CredentialModelView,{...props,model:'personalizado',language:'en'}));assert.match(unknown,/does not guarantee/);assert.doesNotMatch(unknown,/Apply catalog limits/);
+ }finally{await server.close();}
+});

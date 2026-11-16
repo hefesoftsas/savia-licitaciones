@@ -1,0 +1,17 @@
+# Informe de viabilidad en Savia web
+
+La función de escritorio mantiene un informe independiente por espacio de empresa: información, fuentes, análisis, índice, parámetros y contenido, con tareas en segundo plano. Su equivalente web debe conservar esas etapas, no asociarlo arbitrariamente a una licitación. El trabajo se desarrollará sobre el almacenamiento de cuenta y el runner local existentes.
+
+1. Crear un estado de informe aislado por cuenta en D1, con escritura optimista, prueba de sesión, concurrencia y límites. Almacenar todos los campos funcionales y los identificadores de fuentes e índice sin modificar su contenido.
+2. Recuperar desde respaldos SQLite metadatos, árbol, contenido y fuentes disponibles; comunicar claramente archivos no incluidos y tratar tareas activas como interrumpidas. Repetir la importación no debe sobrescribir cambios web.
+3. Construir una interfaz de seis etapas en español e inglés, con edición, guardado y protección de cambios sin guardar; mantener navegación y contenido al recargar.
+4. Adaptar análisis, índice, parámetros, redacción y corrección a tareas Pi del runner local, con resultados revisables, estados durables y cancelación; conservar las reglas de invalidación del escritorio.
+5. Implementar exportación Word y probar un recorrido realista con Miniflare y Pi simulado, incluidos restauración, pérdida de conexión y dos cuentas. No habilitar el runner alojado.
+
+## Exportación del informe
+
+El ensamblador reutiliza `buildDocxResult` del escritorio con las opciones de portada, notas y anexos; el runner limita las imágenes a las entregadas para la tarea y las embebidas en el documento. Los avisos se devuelven al propietario sin incluir contenido en la consola. La API ofrece un trabajo de cuenta versionado con concesión, comprobación previa y posterior, archivo R2 y descarga autenticada; se probaron cancelación, reintentos y aislamiento en Miniflare. La interfaz permite configurar las opciones, consultar el estado y descargar o eliminar el Word. Las imágenes importadas, las extraídas de fuentes seleccionadas y las de la biblioteca propia se transfieren al runner por concesión y versión cuando el capítulo las referencia; las externas y ausentes se señalan en el documento. Las imágenes se cargan en la biblioteca y el editor ofrece referencias para incorporarlas. Una prueba de extremo a extremo verificó las imágenes extraídas y de biblioteca dentro del Word. Quedan pendientes la revisión visual y otras plataformas.
+
+## Análisis con Pi
+
+El análisis acepta los datos guardados y las fuentes extraídas o históricas disponibles; el runner procesa segmentos y combina resultados sin inferir datos ausentes. La propuesta queda separada hasta su aplicación explícita, que exige la versión y fuentes originales y limpia las etapas dependientes. La selección del modelo y el consentimiento se vinculan a la versión del informe. La generación del índice usa la plantilla y las palabras objetivo guardadas, permite revisar la propuesta y aplicarla con control de versión. Las referencias históricas de biblioteca aún no se incorporan a esa tarea y se avisa antes de continuar sin ellas. Los parámetros también pueden proponerse con Pi y aplicarse después de revisión; aplicarlos limpia el contenido de los capítulos. Las referencias históricas de biblioteca aún no se incorporan a esta tarea. Quedan pendientes la generación y revisión de capítulos con Pi, la interacción de preguntas y la conservación de imágenes durante la extracción.

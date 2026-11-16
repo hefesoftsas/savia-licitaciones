@@ -1,0 +1,1 @@
+export function startOpportunityScheduler(options: {send: (signal: AbortSignal) => Promise<unknown>; setInterval: (callback: () => void, delay: number) => number; clearInterval: (id: number) => void}): () => void;

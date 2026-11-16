@@ -1,0 +1,79 @@
+name: Build Savia Connector
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+          - os: macos-15-intel
+            platform: darwin
+            arch: x64
+          - os: macos-15
+            platform: darwin
+            arch: arm64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+          architecture: ${{ matrix.arch }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: pnpm/action-setup@v4
+      - name: Install Linux AppImage extract dependency
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zlib1g-dev
+      - name: Install verified dependencies
+        run: node scripts/install-dependencies.mjs
+      - name: Prepare client tools
+        run: pnpm --filter savia-licitaciones run setup:client
+      - name: Prepare OpenXML
+        run: node client/scripts/prepare-openxml-helper.cjs --platform '${{ matrix.platform }}' --arch '${{ matrix.arch }}'
+      - name: Test connection lifecycle
+        run: node --test connector/test/*.test.cjs runner/test/prune-distribution.test.mjs
+      - name: Build native runner and installer
+        run: |
+          BUNDLE_DIR="$(node -e 'console.log(require("node:path").resolve("connector-build/bundle"))')"
+          OUTPUT_DIR="$(node -e 'console.log(require("node:path").resolve("connector-build/output"))')"
+          mkdir -p connector-build
+          pnpm run build:runner --output "$BUNDLE_DIR" --prepare-cache
+          pnpm run build:connector --bundle "$BUNDLE_DIR" --output "$OUTPUT_DIR"
+      - name: Speed up Windows NSIS verification
+        if: matrix.platform == 'win32'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath $env:TEMP -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP -ErrorAction SilentlyContinue
+      - name: Verify the installer in an isolated directory
+        run: |
+          INSTALLER="$(find connector-build/output/installers -maxdepth 1 \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' \) -type f -print -quit)"
+          test -n "$INSTALLER"
+          node connector/verify-installer.mjs --installer "$INSTALLER"
+      - name: Upload installers for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: savia-connector-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            connector-build/output/installers/*.exe
+            connector-build/output/installers/*.dmg
+            connector-build/output/installers/*.AppImage
+          if-no-files-found: error
+          retention-days: 14

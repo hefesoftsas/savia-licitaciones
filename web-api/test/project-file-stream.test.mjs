@@ -1,0 +1,16 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {handleProjects} from '../src/projects.js';
+function mockDb({failBatch=false}={}){
+ let stage=null,inserted=null;
+ return {get inserted(){return inserted;},prepare(sql){return {bind(...args){return {sql,args,async first(){if(sql.startsWith('SELECT id FROM projects'))return {id:'p1'};if(sql.startsWith('UPDATE desktop_file_staging SET state = \'cleaning\'')){if(stage?.state==='cleanup'){stage.state='cleaning';return {id:stage.id,object_key:stage.key,writer_done:stage.done};}return null;}if(sql.startsWith('SELECT COUNT(*) AS count'))return {count:stage?1:0,watching:0};return null;},async run(){if(sql.startsWith('INSERT INTO desktop_file_staging'))stage={id:args[0],key:args[2],state:'writing',done:0};else if(sql.startsWith('UPDATE desktop_file_staging SET writer_done'))stage.done=1;else if(sql.startsWith("UPDATE desktop_file_staging SET state='cleanup'"))stage.state='cleanup';else if(sql.startsWith('DELETE FROM desktop_file_staging'))stage=null;return {meta:{changes:1}};}};}};},async batch(statements){if(failBatch)throw Error('D1 falló');inserted=statements[0];stage=null;return [{meta:{changes:1}},{meta:{changes:1}}];}};
+}
+test('transmite el cuerpo a R2 y persiste el tamaño confirmado sin leerlo en memoria',async()=>{
+ const contents=new TextEncoder().encode('archivo de prueba'),request=new Request('http://localhost/api/projects/p1/files',{method:'POST',headers:{origin:'http://localhost','x-file-name':'archivo.txt','content-type':'text/plain'},body:contents});request.arrayBuffer=()=>{throw new Error('no se debe cargar en memoria');};let written,stream;
+ const db=mockDb(),env={BETTER_AUTH_URL:'http://localhost',FILES:{put:async(_key,body)=>{stream=body;written=new Uint8Array(await new Response(body).arrayBuffer());return {size:written.byteLength};},delete:async()=>{throw Error('no debe borrar');}},DB:db};
+ const response=await handleProjects(request,env,'owner');assert.equal(response.status,201);assert.ok(stream instanceof ReadableStream);assert.deepEqual(written,contents);const result=await response.json();assert.equal(result.file.size,contents.length);assert.equal(db.inserted.args[5],contents.length);
+});
+test('elimina el objeto si falla la transacción D1 tras la transferencia',async()=>{
+ let key,deleted;const request=new Request('http://localhost/api/projects/p1/files',{method:'POST',headers:{origin:'http://localhost','x-file-name':'a.txt'},body:'texto'});const env={BETTER_AUTH_URL:'http://localhost',FILES:{put:async(k,body)=>{key=k;await new Response(body).arrayBuffer();return {size:5};},delete:async value=>{deleted=value;}},DB:mockDb({failBatch:true})};await assert.rejects(handleProjects(request,env,'owner'),/D1 falló/);assert.equal(deleted,key);
+});
+test('si falla R2 no publica una fila de proyecto',async()=>{
+ const request=new Request('http://localhost/api/projects/p1/files',{method:'POST',headers:{origin:'http://localhost','x-file-name':'a.txt'},body:'texto'}),db=mockDb();const env={BETTER_AUTH_URL:'http://localhost',FILES:{put:async()=>{throw Error('R2 falló');},delete:async()=>{}},DB:db};await assert.rejects(handleProjects(request,env,'owner'),/R2 falló/);assert.equal(db.inserted,null);
+});

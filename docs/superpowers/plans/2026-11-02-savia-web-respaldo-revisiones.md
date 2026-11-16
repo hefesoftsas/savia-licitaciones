@@ -1,0 +1,14 @@
+# Captura de informes de duplicados y rechazo
+
+Los informes web de duplicados y causales de rechazo y las extracciones de causales forman parte del historial del proyecto. Capturarlos junto con sus documentos, conservando explícitamente los hallazgos retirados. Las tareas en curso se restauran interrumpidas, sin credenciales ni concesiones. Los informes eliminados no se recrean.
+
+1. Construir una fuente privada para `duplicate-check.analyze`, `rejection-check.analyze` y `rejection-check.extract`, incluidos informes y marcas de hallazgos retirados. Verificar propiedad, cambios de filas y ETag, ausencias y borrados en curso.
+2. Validar y transportar las capturas con sumas de origen, sin exponer rutas de R2. Preservar documentos desaparecidos como no disponibles y remapear los identificadores usados en resultados y en las estructuras del informe, sin sustituir texto libre.
+3. Restaurar tareas y marcas de eliminación con recibos idempotentes; no sobrescribir ediciones posteriores ni recrear informes retirados. Mantener compatibilidad con capturas anteriores.
+4. Verificar en Miniflare dos cuentas, alteraciones durante captura, tareas interrumpidas, hallazgos retirados y reintentos; probar también runner empaquetado. No desplegar ni ejecutar inferencia real.
+
+**Avance:** la fuente y el transporte privado recogen tareas, informes y marcas de hallazgos retirados con propiedad, ETag y revisión. El adaptador local prepara las descargas y detecta cambios. Un módulo separado remapea los campos de identificadores usados por los informes de duplicados y rechazo sin sustituir texto libre; las pruebas cubren también referencias ausentes. Miniflare verificó aislamiento y cambios en archivos o marcas. Todavía faltan la importación idempotente, la integración con los comandos y las pruebas del recorrido completo: estos informes siguen fuera de la captura disponible al usuario.
+
+La API ya importa tareas e informes mediante recibos idempotentes y conserva los hallazgos retirados sin reinsertarlos en reintentos posteriores. El runner valida sumas, referencias y marcas antes de enviar. Las pruebas de Miniflare cubren aislamiento, concurrencia, carga interrumpida, datos alterados y eliminación posterior. Aún falta conectar estos componentes a los comandos y verificar el recorrido completo con una distribución empaquetada.
+
+**Integración:** los comandos de captura y restauración incluyen los tres tipos de tarea y los informes disponibles. Miniflare verificó el traslado entre cuentas, la conservación de hallazgos retirados, documentos remapeados, tareas interrumpidas, reintentos, cambios durante la captura y compatibilidad con capturas anteriores. El recorrido también pasó con el runner empaquetado en macOS ARM. Las verificaciones de revisión y ETag detectan cambios observados, pero no convierten D1 y R2 en una instantánea atómica. Quedan pendientes pruebas en Windows y otras plataformas y una recuperación completa de cuenta.

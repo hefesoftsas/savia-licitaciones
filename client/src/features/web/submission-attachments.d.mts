@@ -1,0 +1,1 @@
+export function uploadSubmissionAttachment(options:{projectId:string;requestId:string;file:File;key:string;send:(url:string,options?:RequestInit & {json?:unknown})=>Promise<any>}):Promise<{file:{id:string;name:string;size:number;sha256:string;contentType:string;createdAt:string}}>;

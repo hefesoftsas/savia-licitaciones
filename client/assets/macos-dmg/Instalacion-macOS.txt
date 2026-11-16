@@ -1,0 +1,12 @@
+Instalación de Savia en macOS
+
+1. Arrastra Savia Licitaciones a la carpeta Aplicaciones.
+2. Abre Savia desde Aplicaciones. El agente ya está incluido.
+
+Esta versión aún no está firmada ni notarizada por Apple. Si macOS indica que no puede abrirla, revisa las opciones en Ajustes del Sistema > Privacidad y seguridad.
+
+Si la versión descargada de una fuente de confianza aparece como dañada por la cuarentena de macOS, ejecuta en Terminal:
+
+  xattr -dr com.apple.quarantine "/Applications/Savia Licitaciones.app"
+
+Después abre la aplicación desde Aplicaciones.

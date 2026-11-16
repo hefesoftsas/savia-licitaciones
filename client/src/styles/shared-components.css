@@ -1,0 +1,879 @@
+/* [559-728] floating-toolbar + drag-handle + group/separator/button variants + settings-page override */
+.floating-toolbar {
+  position: absolute;
+  right: 42px;
+  bottom: 28px;
+  left: 42px;
+  z-index: 20;
+  display: flex;
+  width: max-content;
+  max-width: calc(100% - 84px);
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 0 auto;
+  padding: 5px;
+  color: var(--savia-text);
+  background: color-mix(in srgb, var(--card) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 92%, transparent);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+  backdrop-filter: blur(18px);
+  -webkit-app-region: no-drag;
+}
+
+.floating-toolbar.is-dragging {
+  user-select: none;
+}
+
+.floating-toolbar.is-docked {
+  position: static;
+  flex: 0 0 auto;
+  align-self: stretch;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 10px 0 0;
+  border: 0;
+  border-top: 1px solid var(--savia-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--savia-text-soft) var(--savia-border-soft);
+}
+.floating-toolbar.is-docked::-webkit-scrollbar { height: 6px; }
+.floating-toolbar.is-docked::-webkit-scrollbar-track { background: var(--savia-border-soft); border-radius: 4px; }
+.floating-toolbar.is-docked::-webkit-scrollbar-thumb { background: var(--savia-text-soft); border-radius: 4px; }
+.floating-toolbar.is-docked:focus-visible { outline: 2px solid var(--savia-primary); outline-offset: -2px; }
+.floating-toolbar.is-docked .floating-toolbar-group:first-child { margin-right: auto; }
+.duplicate-check-page:has(> .floating-toolbar.is-docked),
+.blind-check-page.is-upload:has(> .floating-toolbar.is-docked) { grid-template-rows: auto minmax(0, 1fr) auto; }
+.duplicate-check-page:has(> .review-upload-content):has(> .floating-toolbar.is-docked) { grid-template-rows: minmax(0, 1fr) auto; }
+.blind-check-page.is-upload:has(> .blind-upload-content):has(> .floating-toolbar.is-docked) { grid-template-rows: minmax(0, 1fr) auto; }
+.duplicate-check-page:has(> .floating-toolbar.is-docked) > .duplicate-analysis-panel { grid-row: 1 / 3; }
+.rejection-check-page:has(> .floating-toolbar.is-docked) { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.rejection-check-page:has(> .upload-board):has(> .floating-toolbar.is-docked) { grid-template-rows: auto minmax(0, 1fr) auto; }
+.rejection-check-page:has(> .rejection-documents-content):has(> .floating-toolbar.is-docked) { grid-template-rows: minmax(0, 1fr) auto; }
+.rejection-check-page:has(> .rejection-check-result-panel):has(> .floating-toolbar.is-docked) { grid-template-rows: minmax(0, 1fr) auto; }
+.rejection-check-page:has(> .floating-toolbar.is-docked) > .rejection-check-result-panel { grid-row: 1; height: auto; }
+
+.floating-toolbar-drag-handle {
+  display: inline-grid;
+  width: 26px;
+  height: 32px;
+  flex: 0 0 26px;
+  place-items: center;
+  color: var(--savia-text-muted);
+  touch-action: none;
+  cursor: grab;
+  background: transparent;
+  border: 0;
+  border-radius: var(--savia-radius-pill);
+  opacity: 0.78;
+}
+
+.floating-toolbar-drag-handle:hover,
+.floating-toolbar.is-dragging .floating-toolbar-drag-handle {
+  color: var(--savia-primary);
+  background: transparent;
+  opacity: 1;
+}
+
+.floating-toolbar.is-dragging .floating-toolbar-drag-handle {
+  cursor: grabbing;
+}
+
+.floating-toolbar-drag-handle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.floating-toolbar-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.floating-toolbar-separator {
+  display: block;
+  width: 1px;
+  height: 28px;
+  margin: 0 8px;
+  background: var(--savia-border-soft);
+}
+
+.floating-toolbar-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 13px;
+  color: var(--savia-text-soft);
+  font-weight: 550;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius);
+  transition: color var(--savia-duration-fast) ease, background var(--savia-duration-fast) ease,
+    border-color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.floating-toolbar-button:hover:not(:disabled) {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+  border-color: color-mix(in srgb, var(--savia-border) 12%, transparent);
+  transform: translateY(-1px);
+}
+
+.floating-toolbar-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
+.floating-toolbar-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.floating-toolbar-button.is-primary {
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border-color: color-mix(in srgb, var(--savia-border) 20%, transparent);
+  box-shadow: none;
+}
+
+.floating-toolbar-button.is-primary:hover:not(:disabled) {
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.floating-toolbar-button.is-ai:not(:disabled) {
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border-color: color-mix(in srgb, var(--savia-border) 22%, transparent);
+  box-shadow: none;
+}
+
+.floating-toolbar-button.is-ai:hover:not(:disabled) {
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border-color: color-mix(in srgb, var(--savia-border) 30%, transparent);
+}
+
+.floating-toolbar-button.is-ghost {
+  color: var(--savia-text-muted);
+}
+
+.floating-toolbar-button.is-ghost:disabled {
+  cursor: default;
+  opacity: 0.82;
+}
+
+.floating-toolbar-button.is-danger {
+  color: var(--savia-danger);
+}
+
+.floating-toolbar-button.is-danger:hover:not(:disabled) {
+  color: var(--savia-danger);
+  background: color-mix(in srgb, var(--savia-warning) 8%, transparent);
+  border-color: color-mix(in srgb, var(--savia-warning-border) 16%, transparent);
+}
+
+.floating-toolbar-button.is-warning {
+  color: var(--savia-warning);
+}
+
+.floating-toolbar-button.is-warning:hover:not(:disabled) {
+  color: var(--savia-warning);
+  background: color-mix(in srgb, var(--savia-warning) 9%, transparent);
+  border-color: color-mix(in srgb, var(--savia-warning-border) 18%, transparent);
+}
+
+.floating-toolbar-button.is-success {
+  color: var(--savia-success);
+}
+
+.floating-toolbar-button.is-success:hover:not(:disabled) {
+  color: var(--savia-success);
+  background: color-mix(in srgb, var(--savia-success) 10%, transparent);
+  border-color: color-mix(in srgb, var(--savia-success-border) 20%, transparent);
+}
+
+.floating-toolbar-icon {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+}
+
+.floating-toolbar-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.settings-page > .floating-toolbar:not(.is-docked) {
+  position: fixed;
+  right: 42px;
+  bottom: 28px;
+  left: calc(286px + 42px);
+  z-index: 30;
+}
+
+.app-shell:has(.sidebar.is-collapsed) .settings-page > .floating-toolbar:not(.is-docked) {
+  left: calc(88px + 42px);
+}
+
+/* [741-750] (rewritten) panel/empty-panel base card (trimmed from hero-panel/stage-card/category-card dead code) */
+.panel,
+.empty-panel {
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 88%, transparent);
+  border-radius: var(--savia-radius-xl);
+  box-shadow: none;
+}
+
+/* [804-853] primary-action/secondary-action/danger-action/text-button */
+.primary-action,
+.secondary-action,
+.danger-action,
+.text-button {
+  border: 0;
+  cursor: pointer;
+  transition: transform var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease,
+    background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease,
+    color var(--savia-duration-fast) ease;
+}
+
+.primary-action {
+  min-height: 32px;
+  padding: 6px 11px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--primary-foreground);
+  font-weight: 600;
+  background: var(--primary);
+  border-radius: var(--ui-radius);
+  box-shadow: none;
+}
+
+.primary-action:hover:not(:disabled) {
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+.primary-action:active:not(:disabled) {
+  box-shadow: none;
+  transform: translateY(0) scale(0.98);
+}
+
+.secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  gap: 6px;
+  padding: 6px 11px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--savia-primary);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--card) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 18%, transparent);
+  border-radius: var(--ui-radius);
+}
+
+.secondary-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border-color: color-mix(in srgb, var(--savia-border) 30%, transparent);
+  transform: translateY(-1px);
+}
+
+.secondary-action:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.danger-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  gap: 6px;
+  padding: 6px 11px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--savia-danger);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--savia-warning) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--savia-warning-border) 16%, transparent);
+  border-radius: var(--ui-radius);
+}
+
+.danger-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--savia-warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--savia-warning-border) 28%, transparent);
+  transform: translateY(-1px);
+}
+
+.danger-action:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.primary-action:disabled,
+.secondary-action:disabled,
+.danger-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
+}
+
+.text-button {
+  color: var(--savia-primary);
+  font-weight: 600;
+  background: transparent;
+}
+
+.text-button:hover:not(:disabled) {
+  color: var(--savia-primary-deep);
+}
+
+/* [928-1101] secondary-menu-page/list-panel/list-head/list/row/empty (SecondaryMenuPage.tsx) */
+.secondary-menu-page {
+  overflow: auto;
+}
+
+.secondary-menu-list-panel {
+  width: min(960px, 100%);
+  margin: 0 auto;
+  overflow: hidden;
+  padding: 28px;
+  background: color-mix(in srgb, var(--card) 95%, transparent);
+  border-radius: var(--savia-radius-xl);
+  box-shadow: none;
+}
+
+.secondary-menu-list-head {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  overflow: hidden;
+  padding: 28px 30px 26px 32px;
+  background:
+    var(--card);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--savia-radius-xl);
+}
+
+.secondary-menu-list-head::before {
+  position: absolute;
+  top: 26px;
+  bottom: 24px;
+  left: 0;
+  width: 4px;
+  content: '';
+  background: var(--primary);
+  border-radius: var(--ui-radius);
+}
+
+.secondary-menu-list-head::after {
+  position: absolute;
+  right: 30px;
+  bottom: 0;
+  width: 132px;
+  height: 1px;
+  content: '';
+  background: var(--card);
+}
+
+.secondary-menu-list-head > div {
+  position: relative;
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.secondary-menu-list-head span {
+  color: var(--savia-text);
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.secondary-menu-list-head p {
+  max-width: 660px;
+  margin: 0;
+  color: var(--savia-text-muted);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.secondary-menu-list {
+  display: grid;
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid var(--savia-border-soft);
+  border-radius: var(--savia-radius-xl);
+}
+
+.secondary-menu-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  min-height: 92px;
+  padding: 20px 26px;
+  color: var(--savia-text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--savia-border-soft);
+  transition: background var(--savia-duration-fast) ease;
+}
+
+.secondary-menu-row:last-child {
+  border-bottom: 0;
+}
+
+.secondary-menu-row:hover {
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+}
+
+.secondary-menu-row-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  color: var(--savia-primary);
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 12%, transparent);
+  border-radius: 13px;
+  transition: transform var(--savia-duration-fast) ease;
+}
+
+.secondary-menu-row:hover .secondary-menu-row-icon {
+  transform: scale(1.06);
+}
+
+.secondary-menu-row-icon svg {
+  width: 21px;
+  height: 21px;
+}
+
+.secondary-menu-row-copy {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.secondary-menu-row-copy strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--savia-text);
+  font-size: 16.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.secondary-menu-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  color: var(--savia-primary);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-radius: var(--ui-radius);
+}
+
+.secondary-menu-row-copy small {
+  overflow: hidden;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  line-height: 1.65;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.secondary-menu-row-arrow {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--savia-text-muted);
+  border-radius: var(--ui-radius);
+  transition: color var(--savia-duration-fast) ease, background var(--savia-duration-fast) ease,
+    transform var(--savia-duration-fast) ease;
+}
+
+.secondary-menu-row-arrow svg {
+  width: 17px;
+  height: 17px;
+}
+
+.secondary-menu-row:hover .secondary-menu-row-arrow {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  transform: translateX(2px);
+}
+
+.secondary-menu-empty {
+  display: grid;
+  gap: 8px;
+  padding: 28px 24px;
+  color: var(--savia-text-soft);
+}
+
+.secondary-menu-empty strong {
+  color: var(--savia-text);
+}
+
+
+/*
+ * Shared progress bar (shared/ui/ProgressBar.tsx): --progress controls width; semantic colors represent
+ * body-generation phases, and is-active enables an optional shimmer.
+ */
+.savia-progress-track {
+  position: relative;
+  display: block;
+  height: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-radius: var(--savia-radius-pill);
+}
+
+.savia-progress-track > span {
+  display: block;
+  width: var(--progress, 0%);
+  height: 100%;
+  background: var(--primary);
+  border-radius: inherit;
+}
+
+.savia-progress-track.is-success {
+  background: color-mix(in srgb, var(--savia-success) 12%, transparent);
+}
+
+.savia-progress-track.is-success > span {
+  background: var(--savia-success);
+}
+
+.savia-progress-track.is-warning {
+  background: color-mix(in srgb, var(--savia-warning) 14%, transparent);
+}
+
+.savia-progress-track.is-warning > span {
+  background: var(--savia-warning);
+}
+
+.savia-progress-track.is-sky {
+  background: color-mix(in srgb, var(--primary) 13%, transparent);
+}
+
+.savia-progress-track.is-sky > span {
+  background: var(--primary);
+}
+
+.savia-progress-track.is-violet {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.savia-progress-track.is-violet > span {
+  background: var(--primary);
+}
+
+.savia-progress-track.is-active::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--card) 42%, transparent), transparent);
+  animation: savia-progress-sweep 1.35s linear infinite;
+}
+
+@keyframes savia-progress-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Shared empty-state card (shared/ui/EmptyState.tsx): dashed card, title/description, and optional guidance button. */
+.savia-empty-state {
+  display: grid;
+  grid-column: 1 / -1;
+  justify-items: center;
+  gap: 8px;
+  padding: 42px 24px;
+  color: var(--savia-text-soft);
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--savia-border) 24%, transparent);
+  border-radius: var(--savia-radius-xl);
+}
+
+.savia-empty-state strong {
+  color: var(--savia-text);
+  font-size: 16px;
+}
+
+/*
+ * Clickable option cards (shared/ui/OptionCardList.tsx): whole-card buttons with left icon and right arrow;
+ * is-highlighted marks the recommended or previous choice.
+ */
+.savia-option-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.savia-option-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 14px;
+  color: var(--savia-text);
+  font: inherit;
+  text-align: left;
+  background: var(--savia-surface);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--savia-radius-md);
+  cursor: pointer;
+  transition: background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease, box-shadow var(--savia-duration-fast) ease;
+}
+
+/* Use an inset shadow for a 2px outline so highlighting does not change card dimensions. */
+.savia-option-card.is-highlighted {
+  background: color-mix(in srgb, var(--primary) 4%, transparent);
+  border-color: var(--savia-primary);
+  box-shadow: none;
+}
+
+.savia-option-card:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  border-color: var(--savia-primary);
+}
+
+.savia-option-card:focus-visible {
+  outline: none;
+  box-shadow: var(--savia-focus-ring);
+}
+
+.savia-option-card.is-highlighted:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--savia-primary), var(--savia-focus-ring);
+}
+
+.savia-option-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.savia-option-card-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--savia-text-soft);
+  background: var(--savia-bg);
+  border: 1px solid var(--savia-border-soft);
+  border-radius: 10px;
+  transition: color var(--savia-duration-fast) ease, background var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease;
+}
+
+.savia-option-card-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.savia-option-card.is-highlighted .savia-option-card-icon,
+.savia-option-card:hover:not(:disabled) .savia-option-card-icon {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-color: transparent;
+}
+
+.savia-option-card-body {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.savia-option-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.savia-option-card-title strong {
+  font-size: 14px;
+}
+
+.savia-option-card-badge {
+  padding: 1px 8px;
+  color: var(--savia-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-radius: var(--ui-radius);
+}
+
+.savia-option-card-description {
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.savia-option-card-arrow {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--savia-text-muted);
+  transition: color var(--savia-duration-fast) ease, transform var(--savia-duration-fast) ease;
+}
+
+.savia-option-card.is-highlighted .savia-option-card-arrow {
+  color: var(--savia-primary);
+}
+
+.savia-option-card:hover:not(:disabled) .savia-option-card-arrow {
+  color: var(--savia-primary);
+  transform: translateX(2px);
+}
+
+/* Inline loading indicator (shared/ui/InlineSpinner.tsx), moved from Settings to shared code after reuse by knowledge and other features. */
+.inline-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid color-mix(in srgb, var(--savia-border) 22%, transparent);
+  border-top-color: var(--savia-primary);
+  border-radius: var(--ui-radius);
+  animation: savia-spin 780ms linear infinite;
+}
+
+@keyframes savia-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* [6358-6366] (rewritten) panel/empty-panel h3 (trimmed from stage-card/category-card dead code) */
+.panel h3,
+.empty-panel h3 {
+  margin: 18px 0 10px;
+  color: var(--savia-text);
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+/* [6368-6375] (rewritten) panel/empty-panel p (trimmed from stage-card/category-card dead code) */
+.panel p,
+.empty-panel p {
+  margin: 0;
+  color: var(--savia-text-soft);
+  line-height: 1.75;
+}
+
+/* [6383-6386] panel/empty-panel padding */
+.panel,
+.empty-panel {
+  padding: 26px;
+}
+
+/* [6442-6444] empty-panel min-height */
+.empty-panel {
+  min-height: 230px;
+}
+
+/* [10961-10974] tooltip-content/tooltip-arrow (Radix Tooltip via FloatingToolbar.tsx) */
+.tooltip-content {
+  z-index: 30;
+  padding: 8px 10px;
+  color: var(--primary-foreground);
+  font-size: 13px;
+  background: var(--overlay-ink);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 24%, transparent);
+  border-radius: var(--savia-radius-md);
+  box-shadow: none;
+}
+
+.tooltip-arrow {
+  fill: var(--foreground);
+}
+
+/* Sidebar remote-content browser dialog (shared/ui/EntryBrowserDialog.tsx). */
+.entry-browser-nav {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.entry-browser-nav-button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  padding: 0 0 2px;
+  color: var(--savia-text-soft);
+  font-size: 22px;
+  line-height: 1;
+  background: var(--savia-surface);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--savia-radius-md);
+  transition: color var(--savia-duration-fast) ease, border-color var(--savia-duration-fast) ease,
+    background var(--savia-duration-fast) ease;
+}
+
+.entry-browser-nav-button:hover:not(:disabled) {
+  color: var(--savia-primary);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border-color: color-mix(in srgb, var(--savia-border) 24%, transparent);
+}
+
+.entry-browser-nav-button:disabled {
+  color: var(--savia-text-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.entry-browser-select {
+  height: 38px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 0 42px 0 14px;
+  color: var(--savia-text);
+  background-color: var(--savia-surface);
+  border: 1px solid var(--savia-border);
+  border-radius: var(--savia-radius-md);
+}
+
+.entry-browser-loading {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--savia-text-soft);
+}
+
+.entry-browser-empty {
+  flex: 1 1 auto;
+  align-content: center;
+}

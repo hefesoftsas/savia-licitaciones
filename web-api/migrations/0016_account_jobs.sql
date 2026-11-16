@@ -1,0 +1,2 @@
+CREATE TABLE account_jobs (id TEXT PRIMARY KEY NOT NULL, owner_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE, kind TEXT NOT NULL, client_request_id TEXT NOT NULL, payload_json TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, runner_id TEXT REFERENCES runners(id), lease_hash TEXT, lease_expires_at INTEGER, result_json TEXT, credential_id TEXT NOT NULL REFERENCES provider_credentials(id), UNIQUE(owner_id, client_request_id));
+CREATE INDEX account_jobs_claim ON account_jobs(owner_id, state, created_at);

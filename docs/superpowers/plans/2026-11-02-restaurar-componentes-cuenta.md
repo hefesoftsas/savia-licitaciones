@@ -1,0 +1,11 @@
+# Restauración coordinada de componentes de cuenta
+
+La captura coordinada actual reúne diez componentes parciales. El comando de recuperación valida antes de escribir el índice, el tipo y la integridad de todas las capturas, y después llama a los restauradores existentes. Se conserva su comportamiento ante ediciones, elementos retirados y conflictos; una caída puede dejar componentes restaurados y el usuario puede repetir la operación. El resultado muestra por componente los recuentos y conflictos que devuelven esos restauradores.
+
+Las preferencias se aplican al final y requieren la revisión actual indicada expresamente: restaurarlas sustituye los valores de destino. Si su respuesta se pierde, el usuario debe consultar nuevamente la revisión y decidir si reintenta. La operación no restaura proyectos, credenciales ni datos omitidos; no se presenta como restauración completa ni transacción atómica. La validación previa comprueba integridad y tipo, mientras que los restauradores aplican validaciones específicas antes de sus propias escrituras.
+
+1. Probar índice y capturas inválidos antes de cualquier escritura, orden, reintentos, información de resultados y revisión explícita de preferencias.
+2. Conectar restauradores existentes en el CLI y el paquete sin modificar sus reglas de conflicto; documentar límites y recuperación tras interrupciones.
+3. Verificar con Miniflare, dos cuentas, datos no vacíos, reintentos, datos modificados y corrupción; comprobar el paquete independiente.
+
+**Estado:** `restore-account-components` verifica índice, hashes, tipos y revisión de preferencias antes de escribir; invoca los restauradores y muestra cada resultado. Una prueba con Miniflare y el runner empaquetado en macOS recuperó una imagen entre cuentas, rechazó una captura alterada antes de modificar el destino y verificó que un reintento no recrea una imagen retirada. Las preferencias se aplican al final con control de revisión. La validación específica de cada componente sigue ocurriendo antes de las escrituras de ese componente, por lo que un error posterior puede dejar cambios parciales. Proyectos, credenciales y otros datos siguen fuera del conjunto; falta probar el paquete en Windows y Linux.

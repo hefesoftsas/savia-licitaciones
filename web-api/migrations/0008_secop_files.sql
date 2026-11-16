@@ -1,0 +1,1 @@
+CREATE TABLE project_secop_files (project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, document_id TEXT NOT NULL, file_id TEXT NOT NULL REFERENCES project_files(id) ON DELETE CASCADE, PRIMARY KEY(project_id, document_id));

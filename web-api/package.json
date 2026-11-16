@@ -1,0 +1,22 @@
+{
+  "name": "@savia/web-api",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "better-auth": "1.7.14"
+  },
+  "devDependencies": {
+    "miniflare": "5.20261023.2-beta",
+    "wrangler": "4.155.0"
+  },
+  "scripts": {
+    "dev": "wrangler dev --local --ip 127.0.0.1 --port 8788",
+    "test": "node --test test/*.test.mjs",
+    "migrate:local": "wrangler d1 migrations apply DB --local",
+    "dev:site": "wrangler dev --local --ip 127.0.0.1 --port 8788 --config wrangler.web.local.jsonc",
+    "migrate:site": "wrangler d1 migrations apply DB --local --config wrangler.web.local.jsonc"
+  }
+}

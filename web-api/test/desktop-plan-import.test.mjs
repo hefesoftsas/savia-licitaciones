@@ -1,0 +1,273 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath,pathToFileURL } from 'node:url';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { DatabaseSync } from 'node:sqlite';
+import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { createRequire } from 'node:module';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+test('migra originales y ofertas grandes, reanuda interrupciones y evita duplicados',{timeout:180000},async()=>{
+ const build=await mkdtemp(join(tmpdir(),'savia-import-large-'));let worker;
+ try{
+  execFileSync('pnpm',['exec','wrangler','deploy','--dry-run','--outdir',build],{cwd:root,stdio:'pipe',env:{...process.env,CLOUDFLARE_SEND_METRICS:'false'}});
+  worker=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile(join(build,'index.js'),'utf8'),compatibilityDate:'2026-10-30',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'large-desktop-import'},r2Buckets:['FILES'],bindings:{AUTH_ALLOW_REGISTRATION:'true',BETTER_AUTH_SECRET:'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz',BETTER_AUTH_URL:'http://localhost'}}));
+  const db=await worker.getD1Database('DB');for(const file of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(join(root,'migrations',file),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await db.prepare(sql).run();
+  const req=(path,options={})=>worker.dispatchFetch(`http://localhost${path}`,options),post=(path,body,headers={})=>req(path,{method:'POST',headers:{origin:'http://localhost','content-type':'application/json',...headers},body:JSON.stringify(body)});
+  async function signup(name){const response=await post('/api/auth/sign-up/email',{name,email:`${name}@example.com`,password:'password-123456'});assert.equal(response.status,200);return response.headers.get('set-cookie').split(';')[0];}
+  const alice=await signup('alice'),bob=await signup('bob'),pair=await (await post('/api/runner-pairings',{}, {cookie:alice})).json(),runner=await (await post('/api/runners/pair',{code:pair.code,name:'Equipo'})).json();
+  const dbFile=join(build,'desktop.sqlite'),desktop=new DatabaseSync(dbFile);desktop.exec("PRAGMA user_version=64; CREATE TABLE technical_plan_meta(id INTEGER,outline_project_name TEXT,tender_files_json TEXT); CREATE TABLE technical_plan_outline_nodes(node_id TEXT,parent_node_id TEXT,sort_order INTEGER,title TEXT);");
+  desktop.prepare('INSERT INTO technical_plan_meta VALUES(1,?,?)').run('Plan grande',JSON.stringify([{id:'medium',fileName:'medio.pdf',sourceOriginalPath:'technical-plan/tender-originals/medio.pdf'},{id:'large',fileName:'grande.pdf',sourceOriginalPath:'technical-plan/tender-originals/grande.pdf'}]));desktop.close();
+  const medium=Buffer.alloc(25*1024*1024+1,1),large=Buffer.alloc(50*1024*1024+1,2),require=createRequire(resolve(root,'../client/package.json')),{createCompanyArchive}=require('./electron/services/companyBackupArchive.cjs');
+  const backup=join(build,'backup.savia');await writeFile(backup,createCompanyArchive({companyName:'Empresa',schemaVersion:64,files:[{path:'workspace/savia.sqlite',bytes:await readFile(dbFile)},{path:'workspace/technical-plan/tender-originals/medio.pdf',bytes:medium},{path:'workspace/technical-plan/tender-originals/grande.pdf',bytes:large}]}));
+  const config=join(build,'runner.json');await writeFile(config,JSON.stringify({server:(await worker.ready).origin,runnerId:runner.runner.id,token:runner.token}));const cli=process.env.SAVIA_TEST_RUNNER_CLI||resolve(root,'../runner/cli.mjs'),execute=promisify(execFile),args=[cli,'import-plan','--backup',backup,'--project','active','--config',config];
+  const imported=JSON.parse((await execute(process.execPath,args,{timeout:120000})).stdout),again=JSON.parse((await execute(process.execPath,args,{timeout:120000})).stdout);
+  assert.equal(imported.importedDocuments,2);assert.deepEqual(imported.missingDocuments,[]);assert.equal(again.project.id,imported.project.id);assert.equal(again.importedDocuments,2);
+  const files=(await (await req(`/api/projects/${imported.project.id}/files`,{headers:{cookie:alice}})).json()).files;assert.equal(files.length,2);assert.equal((await req(`/api/projects/${imported.project.id}/files`,{headers:{cookie:bob}})).status,404);
+  for(const [name,original] of [['medio.pdf',medium],['grande.pdf',large]]){const file=files.find(item=>item.name===name);assert.equal(file.size,original.length);const response=await req(`/api/projects/${imported.project.id}/files/${file.id}`,{headers:{cookie:alice}}),hash=createHash('sha256');assert.equal(response.status,200);for await(const chunk of response.body)hash.update(chunk);assert.equal(hash.digest('hex'),createHash('sha256').update(original).digest('hex'));}
+  for(const file of files)assert.equal((await req(`/api/projects/${imported.project.id}/files/${file.id}`,{method:'DELETE',headers:{origin:'http://localhost',cookie:alice}})).status,204);
+  const removed=JSON.parse((await execute(process.execPath,args,{timeout:120000})).stdout);assert.equal(removed.importedDocuments,0);assert.deepEqual(removed.removedDocuments,['medio.pdf','grande.pdf']);
+  const {transferDesktopOfferDocuments}=await import(pathToFileURL(join(dirname(cli),'desktop-offer-transfer.mjs')).href),{transferDesktopPlanDocument}=await import(pathToFileURL(join(dirname(cli),'desktop-plan-documents.mjs')).href);
+  const offerAuth={authorization:`Bearer ${runner.token}`,'idempotency-key':'offer-large'};const offerProjectResponse=await post('/api/runner/imports/technical-plan',{title:'Oferta grande',nodes:[]},offerAuth);assert.equal(offerProjectResponse.status,201);const offerProject=(await offerProjectResponse.json()).project;
+  const offerHash=createHash('sha256').update(large).digest('hex'),offerData={documents:[{id:'large-offer',name:'Oferta grande.pdf',kind:'managed',createdAt:'2026-01-01',bytes:large,size:large.length,sha256:offerHash}],links:[],orphanLinks:[],presentation:[{id:'item',documentId:'large-offer',sortOrder:0,size:large.length,digest:offerHash,state:'ready',reviewRequired:false}]},offerArgs={data:offerData,workflow:{requirements:[]},supports:[],server:(await worker.ready).origin,token:runner.token,requestId:'offer-large'};
+  let partFailures=0;const interruptedFetch=async(url,options)=>{if(String(url).includes('/multipart/part/1')&&partFailures++<3)return new Response('interrupted',{status:503});return fetch(url,options);};
+  await assert.rejects(transferDesktopOfferDocuments({...offerArgs,transferFile:args=>transferDesktopPlanDocument({...args,fetchImpl:interruptedFetch})}),/HTTP 503/);assert.equal(partFailures,3);assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM project_files WHERE project_id=?').bind(offerProject.id).first()).n,0);
+  await assert.rejects(transferDesktopOfferDocuments({...offerArgs,send:async()=>{throw new Error('conexión interrumpida antes de metadatos');}}),/interrumpida/);assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM project_files WHERE project_id=?').bind(offerProject.id).first()).n,1);assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM project_offer_documents WHERE project_id=?').bind(offerProject.id).first()).n,0);
+  await assert.rejects(transferDesktopOfferDocuments({...offerArgs,send:async(url,options)=>{const response=await fetch(url,{...options,headers:{...options.headers,authorization:`Bearer ${runner.token}`}});assert.equal(response.status,201);throw new Error('respuesta perdida');}}),/respuesta perdida/);const replayed=await transferDesktopOfferDocuments(offerArgs);assert.equal(replayed.documents,1);assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM project_files WHERE project_id=?').bind(offerProject.id).first()).n,1);const offerView=await(await req(`/api/projects/${offerProject.id}/offer-documents`,{headers:{cookie:alice}})).json();assert.equal(offerView.documents.length,1);assert.equal(offerView.presentation[0].state,'ready');assert.equal(offerView.presentation[0].digest,offerHash);const download=await req(`/api/projects/${offerProject.id}/files/${offerView.documents[0].fileId}`,{headers:{cookie:alice}}),downloadHash=createHash('sha256');assert.equal(download.status,200);for await(const chunk of download.body)downloadHash.update(chunk);assert.equal(downloadHash.digest('hex'),offerHash);assert.equal((await req(`/api/projects/${offerProject.id}/offer-documents`,{headers:{cookie:bob}})).status,404);
+ }finally{await worker?.dispose();await rm(build,{recursive:true,force:true});}
+});
+test('un runner importa un plan nuevo de forma atómica, aislada e idempotente', async () => {
+ const build = await mkdtemp(join(tmpdir(), 'savia-import-api-')); let worker;
+ try {
+  execFileSync('pnpm', ['exec', 'wrangler', 'deploy', '--dry-run', '--outdir', build], { cwd: root, stdio: 'pipe', env: { ...process.env, CLOUDFLARE_SEND_METRICS: 'false' } });
+  worker = new Miniflare(convertV4MiniflareOptions({ modules: true, script: await readFile(join(build, 'index.js'), 'utf8'), compatibilityDate: '2026-10-30', compatibilityFlags: ['nodejs_compat'], d1Databases: { DB: 'import-test' }, r2Buckets: ['FILES'], bindings: {AUTH_ALLOW_REGISTRATION:'true', BETTER_AUTH_SECRET: 'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz', BETTER_AUTH_URL: 'http://localhost' } }));
+  const db = await worker.getD1Database('DB'); for (const file of (await readdir(join(root, 'migrations'))).filter(x => x.endsWith('.sql')).sort()) for (const sql of (await readFile(join(root, 'migrations', file), 'utf8')).split(';').map(x => x.trim()).filter(Boolean)) await db.prepare(sql).run();
+  const req = (path, options = {}) => worker.dispatchFetch(`http://localhost${path}`, options), post = (path, body, headers = {}) => req(path, { method: 'POST', headers: { origin: 'http://localhost', 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  async function signup(name) { const r = await post('/api/auth/sign-up/email', { name, email: `${name}@example.com`, password: 'password-123456' }); assert.equal(r.status, 200); return r.headers.get('set-cookie').split(';')[0]; }
+  const alice = await signup('alice'), bob = await signup('bob');
+  const pair = await (await post('/api/runner-pairings', {}, { cookie: alice })).json(), runner = await (await post('/api/runners/pair', { code: pair.code, name: 'Equipo' })).json(), auth = { authorization: `Bearer ${runner.token}`, 'idempotency-key': 'import-1' };
+  const node = (id, parentId, sortOrder, content) => ({ id, parentId, sortOrder, title: id, description: '', content, contentMode: 'manual-fill', contentModeNote: '', sourceRequirementId: '', sourceRequirementTitle: '' });
+  const body = { title: 'Plan importado', nodes: [node('child', 'root', 0, 'Texto niño'), node('root', null, 0, 'Texto raíz')] };
+  assert.equal((await post('/api/runner/imports/technical-plan', body)).status, 401);
+  const concurrent = await Promise.all([post('/api/runner/imports/technical-plan', body, auth), post('/api/runner/imports/technical-plan', body, auth)]); assert.deepEqual(concurrent.map(response => response.status).sort(), [200, 201]); const project = (await concurrent[0].json()).project; assert.equal((await concurrent[1].json()).project.id, project.id);
+  assert.equal((await (await post('/api/runner/imports/technical-plan', body, auth)).json()).project.id, project.id);
+  assert.equal((await post('/api/runner/imports/technical-plan', { ...body, title: 'Distinto' }, auth)).status, 409);
+  const plan = await (await req(`/api/projects/${project.id}/technical-plan`, { headers: { cookie: alice } })).json();
+  assert.equal(plan.outline[0].id, 'root'); assert.equal(plan.outline[0].content, 'Texto raíz'); assert.equal(plan.outline[0].children[0].id, 'child'); assert.equal(plan.outline[0].children[0].content, 'Texto niño');
+  assert.equal((await req(`/api/projects/${project.id}/technical-plan`, { headers: { cookie: bob } })).status, 404);
+  const chatPath = '/api/runner/imports/technical-plan/import-1/chat', messages = [{ id:'u', role:'user', content:'Pregunta privada', status:'complete', createdAt:'2026-01-01', followupsJson:null }, { id:'a', role:'assistant', content:'Respuesta', status:'running', createdAt:'2026-01-01', followupsJson:'{"questions":["Otra?"]}' }];
+  assert.equal((await post(chatPath, { messages })).status, 401);
+  assert.equal((await post(chatPath, { messages: [] }, auth)).status, 400);
+  assert.equal((await post(chatPath, { messages: [{ ...messages[0], content: 42 }] }, auth)).status, 400);
+  const chats = await Promise.all([post(chatPath, { messages }, auth), post(chatPath, { messages }, auth)]); assert.deepEqual(chats.map(x => x.status).sort(), [200, 201]);
+  assert.equal((await post(chatPath, { messages:[{ ...messages[0], content:'distinto' }] }, auth)).status, 409);
+  const chatView = `/api/projects/${project.id}/imported-chat`;
+  assert.deepEqual((await (await req(chatView, { headers:{cookie:alice} })).json()).messages, messages);
+  assert.equal((await req(chatView, { headers:{cookie:bob} })).status, 404);
+  assert.equal((await req(chatView)).status, 401);
+  const analysisPath = '/api/runner/imports/technical-plan/import-1/analyses', historicalAnalyses = [{ id: 'projectOverview', label: 'Resumen', status: 'success', content: 'Texto del análisis ñ', error: null, sortOrder: 0 }, { id: 'other', label: 'Otros datos', status: 'error', content: 'Borrador', error: 'Interrumpido', sortOrder: 1 }];
+  assert.equal((await post(analysisPath, { analyses: historicalAnalyses })).status, 401);
+  const analysisResponses = await Promise.all([post(analysisPath, { analyses: historicalAnalyses }, auth), post(analysisPath, { analyses: historicalAnalyses }, auth)]); assert.deepEqual(analysisResponses.map(response => response.status).sort(), [200, 201]);
+  assert.equal((await post(analysisPath, { analyses: [historicalAnalyses[1]] }, auth)).status, 409);
+  const analysisView = await (await req(`/api/projects/${project.id}/technical-analyses`, { headers: { cookie: alice } })).json(); assert.deepEqual(analysisView.importedAnalyses, historicalAnalyses); assert.equal(analysisView.analyses.length, 0);
+  assert.equal((await req(`/api/projects/${project.id}/technical-analyses`, { headers: { cookie: bob } })).status, 404);
+  const factPath = '/api/runner/imports/technical-plan/import-1/facts', importedGroups = [{ id: 'uno', title: 'Razón social', content: '  Empresa ñ\n' }, { id: 'dos', title: 'Vacío', content: '' }];
+  assert.equal((await post(factPath, { groups: importedGroups })).status, 401);
+  const factResponses = await Promise.all([post(factPath, { groups: importedGroups }, auth), post(factPath, { groups: importedGroups }, auth)]);
+  assert.deepEqual(factResponses.map(response => response.status).sort(), [200, 201]);
+  assert.equal((await post(factPath, { groups: [{ ...importedGroups[0], content: 'distinto' }] }, auth)).status, 409);
+  let facts = await (await req(`/api/projects/${project.id}/technical-facts`, { headers: { cookie: alice } })).json();
+  assert.deepEqual(facts.groups, importedGroups); assert.equal(facts.current, false); assert.equal(facts.importReviewPending, true); assert.equal(facts.importedFromDesktop, true);
+  assert.equal((await req(`/api/projects/${project.id}/technical-facts`, { headers: { cookie: bob } })).status, 404);
+  assert.equal((await post(`/api/projects/${project.id}/technical-facts/review-import`, { revision: facts.revision, planVersion: facts.planVersion + 1, reviewSnapshot: facts.reviewSnapshot }, { cookie: alice })).status, 409);
+  assert.equal((await post(`/api/projects/${project.id}/technical-facts/review-import`, { revision: facts.revision, planVersion: facts.planVersion, reviewSnapshot: {} }, { cookie: alice })).status, 409);
+  await db.prepare('INSERT INTO project_files (id, project_id, name, content_type, object_key, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind('new-source', project.id, 'nuevo.txt', 'text/plain', 'test/new-source', 0, new Date().toISOString()).run();
+  assert.equal((await post(`/api/projects/${project.id}/technical-facts/review-import`, { revision: facts.revision, planVersion: facts.planVersion, reviewSnapshot: facts.reviewSnapshot }, { cookie: alice })).status, 409);
+  await db.prepare('DELETE FROM project_files WHERE id = ?').bind('new-source').run();
+  assert.equal((await post(`/api/projects/${project.id}/technical-facts/review-import`, { revision: facts.revision, planVersion: facts.planVersion, reviewSnapshot: facts.reviewSnapshot }, { cookie: alice })).status, 200);
+  facts = await (await req(`/api/projects/${project.id}/technical-facts`, { headers: { cookie: alice } })).json(); assert.equal(facts.current, true); assert.equal(facts.importReviewPending, false); assert.equal(facts.importedFromDesktop, true); assert.deepEqual(facts.groups, importedGroups);
+  const kept = await (await req(`/api/projects/${project.id}/technical-plan`, { headers: { cookie: alice } })).json(); assert.equal(kept.outline[0].content, 'Texto raíz'); assert.equal(kept.outline[0].children[0].content, 'Texto niño');
+  const sourceKey = 'a'.repeat(64), filePath = `/api/runner/imports/technical-plan/import-1/files/${sourceKey}`, data = Buffer.from('PDF original ñ'), hash = createHash('sha256').update(data).digest('hex');
+  const upload = (path, bytes, digest = hash, runnerAuth = auth, name = 'Pliego ñ.pdf') => req(path, { method: 'POST', headers: { ...runnerAuth, 'content-type': 'application/pdf', 'x-file-name': encodeURIComponent(name), 'x-content-sha256': digest }, body: bytes });
+  assert.equal((await upload(filePath, data, '0'.repeat(64))).status, 400);
+  const files = await Promise.all([upload(filePath, data, hash, auth, ' Pliego ñ.pdf '), upload(filePath, data, hash, auth, ' Pliego ñ.pdf ')]); assert.deepEqual(files.map(response => response.status).sort(), [200, 201]); const uploaded = (await files[0].json()).file; assert.equal(uploaded.name, ' Pliego ñ.pdf '); assert.equal((await files[1].json()).file.id, uploaded.id);
+  assert.equal(await (await req(`/api/projects/${project.id}/files/${uploaded.id}`, { headers: { cookie: alice } })).text(), data.toString());
+  assert.equal((await req(`/api/projects/${project.id}/files/${uploaded.id}`, { headers: { cookie: bob } })).status, 404);
+  assert.equal((await upload(filePath, Buffer.from('cambio'), createHash('sha256').update('cambio').digest('hex'))).status, 409);
+  assert.equal((await (await req(`/api/projects/${project.id}/files`, { headers: { cookie: alice } })).json()).files.length, 1);
+  const contested = `/api/runner/imports/technical-plan/import-1/files/${'c'.repeat(64)}`, otherData = Buffer.from('otro contenido'), otherHash = createHash('sha256').update(otherData).digest('hex');
+  const contestedResponses = await Promise.all([upload(contested, data), upload(contested, otherData, otherHash)]); assert.deepEqual(contestedResponses.map(response => response.status).sort(), [201, 409]);
+  assert.equal((await (await req(`/api/projects/${project.id}/files`, { headers: { cookie: alice } })).json()).files.length, 2);
+
+  const otherPair = await (await post('/api/runner-pairings', {}, { cookie: bob })).json(), otherRunner = await (await post('/api/runners/pair', { code: otherPair.code, name: 'Otro' })).json();
+  assert.equal((await upload(filePath, data, hash, { authorization: `Bearer ${otherRunner.token}` })).status, 404);
+  assert.equal((await post(chatPath, { messages }, { authorization: `Bearer ${otherRunner.token}` })).status, 404);
+  const bucket = await worker.getR2Bucket('FILES'), beforeKeys = (await bucket.list()).objects.map(item => item.key).sort(); assert.equal(beforeKeys.length, 2);
+  const historical = { requirementId: 'historical-requirement', factId: 'fact', label: 'Liquidez', value: '1,5', page: 1, title: 'Requisito', source: 'Pliego', operator: 'gte', threshold: '1', interpretedValue: '1.5', documentsHash: 'original', updatedAt: '2026-01-01', certificate: { name: 'Antiguo.pdf', issuedOn: '2025-01-01' } };
+  const historicalPath = `/api/runner/imports/technical-plan/import-1/rup-comparisons/${createHash('sha256').update(historical.requirementId).digest('hex')}`;
+  const sendHistorical = async (path, details, headers = auth) => { const form = new FormData(); form.set('metadata', JSON.stringify(details)); form.set('pdf', new Blob(['%PDF histórico'], { type: 'application/pdf' }), 'source.pdf'); const request = new Request(`http://localhost${path}`, { method: 'POST', headers, body: form }); return worker.dispatchFetch(request.url, { method: 'POST', headers: Object.fromEntries(request.headers), body: await request.arrayBuffer() }); };
+  assert.equal((await sendHistorical(historicalPath, historical, { authorization: `Bearer ${otherRunner.token}` })).status, 404);
+  const concurrentComparisons = await Promise.all([sendHistorical(historicalPath, historical), sendHistorical(historicalPath, historical)]); assert.deepEqual(concurrentComparisons.map(response => response.status).sort(), [200, 201]);
+  assert.equal((await sendHistorical(historicalPath, { ...historical, value: '2' })).status, 409);
+  const history = (await (await req(`/api/projects/${project.id}/imported-rup-comparisons`, { headers: { cookie: alice } })).json()).comparisons; assert.equal(history.length, 1); assert.equal(history[0].requirementId, null);
+  const storedComparison = await db.prepare('SELECT owner_id, object_key FROM imported_rup_comparisons WHERE id = ?').bind(history[0].id).first();
+  await db.prepare("INSERT INTO desktop_file_staging (id, owner_id, object_key, state, lease_until, writer_done, created_at) VALUES ('stale-comparison', ?, ?, 'cleanup', 0, 1, 0)").bind(storedComparison.owner_id, storedComparison.object_key).run();
+  const { cleanupDesktopUploads } = await import('../src/desktop-file-cleanup.js'); await cleanupDesktopUploads({ DB: db, FILES: bucket }, storedComparison.owner_id); assert.ok(await bucket.get(storedComparison.object_key));
+  const afterHistory = (await bucket.list()).objects.map(item => item.key).sort(); assert.equal(afterHistory.length, beforeKeys.length + 1);
+  const failureComparison = { ...historical, requirementId: 'failure', label: 'FALLA' }, failureComparisonPath = `/api/runner/imports/technical-plan/import-1/rup-comparisons/${createHash('sha256').update('failure').digest('hex')}`;
+  await db.exec("CREATE TRIGGER reject_comparison BEFORE INSERT ON imported_rup_comparisons WHEN NEW.snapshot_json LIKE '%FALLA%' BEGIN SELECT RAISE(ABORT, 'simulated failure'); END");
+  let comparisonFailure; try { comparisonFailure = await sendHistorical(failureComparisonPath, failureComparison); } catch { /* Miniflare may surface D1 failures directly. */ }
+  if (comparisonFailure) assert.equal(comparisonFailure.status, 500);
+  assert.deepEqual((await bucket.list()).objects.map(item => item.key).sort(), afterHistory); await db.exec('DROP TRIGGER reject_comparison');
+  await db.exec("CREATE TRIGGER reject_import_file BEFORE INSERT ON project_files WHEN NEW.name = 'FALLA.txt' BEGIN SELECT RAISE(ABORT, 'simulated failure'); END");
+  let fileFailure; try { fileFailure = await upload(`/api/runner/imports/technical-plan/import-1/files/${'b'.repeat(64)}`, data, hash, auth, 'FALLA.txt'); } catch { /* Simulated D1 error can surface directly. */ }
+  if (fileFailure) assert.equal(fileFailure.status, 500);
+  assert.deepEqual((await bucket.list()).objects.map(item => item.key).sort(), afterHistory);
+  await db.exec('DROP TRIGGER reject_import_file');
+
+  assert.equal((await post('/api/runner/imports/technical-plan', { title: 'Ciclo', nodes: [node('a', 'b', 0, ''), node('b', 'a', 0, '')] }, { ...auth, 'idempotency-key': 'invalid' })).status, 400);
+  assert.equal((await (await req('/api/projects', { headers: { cookie: alice } })).json()).projects.length, 1);
+  await db.exec("CREATE TRIGGER reject_import_node BEFORE INSERT ON project_technical_plan_nodes WHEN NEW.title = 'FALLA' BEGIN SELECT RAISE(ABORT, 'simulated failure'); END");
+  let failure; try { failure = await post('/api/runner/imports/technical-plan', { title: 'Fallida', nodes: [node('FALLA', null, 0, '')] }, { ...auth, 'idempotency-key': 'fails-atomically' }); } catch { /* Worker surfaced the simulated storage error. */ }
+  if (failure) assert.equal(failure.status, 500);
+  assert.equal((await (await req('/api/projects', { headers: { cookie: alice } })).json()).projects.length, 1);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM desktop_plan_imports WHERE request_id = ?').bind('fails-atomically').first()).count, 0);
+  await db.exec('DROP TRIGGER reject_import_node');
+
+  const userData = join(build, 'desktop-user-data'), workspace = join(userData, 'workspace'); await mkdir(workspace, { recursive: true });
+  await writeFile(join(userData, 'user_config.json'), JSON.stringify({ company_workspaces: { activeId: 'default', companies: [{ id: 'default', name: 'Empresa' }] } }));
+  const localDb = join(workspace, 'savia.sqlite'), fixture = new DatabaseSync(localDb);
+  fixture.exec("PRAGMA user_version = 64; CREATE TABLE technical_plan_meta (id INTEGER, outline_project_name TEXT, tender_files_json TEXT); INSERT INTO technical_plan_meta VALUES (1, 'Importado desde respaldo', NULL); CREATE TABLE technical_plan_outline_nodes (node_id TEXT, parent_node_id TEXT, sort_order INTEGER, title TEXT, description TEXT, content_mode TEXT, content TEXT); INSERT INTO technical_plan_outline_nodes VALUES ('desktop-id', NULL, 0, 'Capítulo real', '', 'manual-fill', 'Texto íntegro'); CREATE TABLE technical_plan_global_fact_groups (group_id TEXT, title TEXT, content TEXT, sort_order INTEGER); INSERT INTO technical_plan_global_fact_groups VALUES ('fact1', 'Dato', 'Valor guardado', 0);");
+  fixture.exec("ALTER TABLE technical_plan_outline_nodes ADD COLUMN source_requirement_id TEXT; UPDATE technical_plan_outline_nodes SET source_requirement_id = 'req-desktop'; CREATE TABLE technical_plan_secop_context (id INTEGER, process_id TEXT); INSERT INTO technical_plan_secop_context VALUES (1, 'proceso-1'); CREATE TABLE secop_tender_workflow (process_id TEXT, work_stage TEXT, updated_at TEXT); INSERT INTO secop_tender_workflow VALUES ('proceso-1', 'preparing', '2026-01-01T00:00:00Z'); CREATE TABLE secop_tender_tasks (id TEXT, process_id TEXT, title TEXT, due_date TEXT, completed INTEGER, created_at TEXT, updated_at TEXT); INSERT INTO secop_tender_tasks VALUES ('tarea-1', 'proceso-1', 'Firmar', '2026-03-01', 1, '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'); CREATE TABLE secop_tender_requirements (id TEXT, process_id TEXT, title TEXT, source TEXT, evidence TEXT, status TEXT, category TEXT, created_at TEXT, updated_at TEXT); INSERT INTO secop_tender_requirements VALUES ('req-desktop', 'proceso-1', 'Garantía', 'Pliego', 'Anexo', 'meets', 'legal', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');");
+  fixture.exec("CREATE TABLE technical_plan_project_active (id INTEGER, project_id TEXT); INSERT INTO technical_plan_project_active VALUES (1,'active'); CREATE TABLE tender_chat_messages (id TEXT, project_id TEXT, role TEXT, content TEXT, status TEXT, created_at TEXT, followups_json TEXT); INSERT INTO tender_chat_messages VALUES ('message-1','active','user','Consulta histórica','complete','2026-01-01',NULL),('message-2','active','assistant','Respuesta histórica','complete','2026-01-01',NULL),('message-other','other','user','Mensaje ajeno','complete','2026-01-01',NULL);");
+  fixture.exec('CREATE TABLE economic_offer_drafts (process_id TEXT, draft_json TEXT, updated_at TEXT)');
+  fixture.prepare('INSERT INTO economic_offer_drafts VALUES (?, ?, ?)').run('proceso-1', JSON.stringify({ budget: '100', items: [{ id: 'item-1', name: '', quantity: '2', price: '10', rate: '0', cost: '' }] }), '2026-01-03T00:00:00Z');
+  fixture.exec("CREATE TABLE rup_requirement_comparisons (requirement_id TEXT, process_id TEXT, fact_id TEXT, certificate_stored_name TEXT, certificate_name TEXT, certificate_issued_on TEXT, fact_label TEXT, fact_value TEXT, fact_page INTEGER, requirement_title TEXT, requirement_source TEXT, operator TEXT, threshold TEXT, updated_at TEXT, imported_hash TEXT, interpreted_value TEXT); INSERT INTO rup_requirement_comparisons VALUES ('req-desktop','proceso-1','fact-1','old.pdf','RUP anterior.pdf','2025-01-01','Liquidez','1,5',1,'Garantía','Pliego','gte','1','2026-01-01','hash','1.5'), ('retired','proceso-1','fact-2','missing.pdf','Ausente.pdf','','Patrimonio','10',2,'Requisito eliminado','Pliego','gte','5','2026-01-02','','');");
+  fixture.exec("PRAGMA user_version=69; CREATE TABLE secop_submission_records(id TEXT,process_id TEXT,date TEXT,reference TEXT,version TEXT,note TEXT,package_id TEXT,receipt_id TEXT,created_at TEXT); INSERT INTO secop_submission_records VALUES('sub','proceso-1','2026-11-05','RAD','v1','','pkg','receipt','2026'); CREATE TABLE secop_submission_files(id TEXT,process_id TEXT,owner_id TEXT,role TEXT,name TEXT,stored_name TEXT,size INTEGER,sha256 TEXT,created_at TEXT); CREATE TABLE secop_submission_requests(id TEXT,process_id TEXT,kind TEXT,title TEXT,due_date TEXT,note TEXT,status TEXT,task_id TEXT,created_at TEXT,updated_at TEXT); INSERT INTO secop_submission_requests VALUES('req','proceso-1','correction','Subsanar','','nota','reviewed','tarea-1','2026','2026'); CREATE TABLE secop_submission_results(id TEXT,process_id TEXT,result TEXT,note TEXT,created_at TEXT); INSERT INTO secop_submission_results VALUES('result','proceso-1','awarded','','2026');");
+  await mkdir(join(workspace,'submission-evidence'),{recursive:true});for(const [id,owner,role,content] of [['att','req','request','anexo'],['pkg','sub','package','oferta'],['receipt','sub','receipt','acuse']]){await writeFile(join(workspace,'submission-evidence',`${id}.pdf`),content);fixture.prepare('INSERT INTO secop_submission_files VALUES(?,?,?,?,?,?,?,?,?)').run(id,'proceso-1',owner,role,`${id}.pdf`,`${id}.pdf`,content.length,createHash('sha256').update(content).digest('hex'),'2026');}
+  fixture.prepare('UPDATE technical_plan_meta SET tender_files_json = ? WHERE id = 1').run(JSON.stringify([{ id: 'doc-escritorio', fileName: 'Pliego ñ.pdf', sourceOriginalPath: 'technical-plan/tender-originals/doc.pdf' }, { id: 'perdido', fileName: 'Ausente.pdf', sourceOriginalPath: 'technical-plan/tender-originals/missing.pdf' }])); fixture.prepare('UPDATE technical_plan_outline_nodes SET content = ? WHERE node_id = ?').run('Texto íntegro\n![Plano](savia-asset://imported-images/technical-plan-a/plano.png)\n![Foto](savia-asset://imported-images/technical-plan-a/foto.webp)', 'desktop-id'); fixture.exec("CREATE TABLE technical_plan_bid_items (item_id TEXT, label TEXT, status TEXT, content TEXT, error TEXT, sort_order INTEGER); INSERT INTO technical_plan_bid_items VALUES ('projectOverview', 'Resumen', 'success', 'Análisis del escritorio', NULL, 0);"); fixture.close();
+  await mkdir(join(workspace, 'technical-plan', 'tender-originals'), { recursive: true }); await writeFile(join(workspace, 'technical-plan', 'tender-originals', 'doc.pdf'), '%PDF fichero original');
+  const historicPdf = Buffer.from('%PDF fuente histórica'); await mkdir(join(workspace, 'credential-library', 'rup'), { recursive: true }); await writeFile(join(workspace, 'credential-library', 'rup', 'old.pdf'), historicPdf);
+  const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR6cAAAAASUVORK5CYII=', 'base64'); await mkdir(join(workspace, 'imported-images', 'technical-plan-a'), { recursive: true }); await writeFile(join(workspace, 'imported-images', 'technical-plan-a', 'plano.png'), image);
+  await writeFile(join(workspace, 'imported-images', 'technical-plan-a', 'foto.webp'), await readFile(join(root, '../client/assets/content-template-preview/visual-master-plan-scene.webp')));
+  const backupFile = join(build, 'respaldo.savia'), execute = promisify(execFile), cli = process.env.SAVIA_TEST_RUNNER_CLI || resolve(root, '../runner/cli.mjs');
+  await execute(process.execPath, [cli, 'create-backup', '--user-data', userData, '--company', 'default', '--output', backupFile]);
+  const config = join(build, 'runner.json'); await writeFile(config, JSON.stringify({ server: (await worker.ready).origin, runnerId: runner.runner.id, token: runner.token }));
+  const args = [cli, 'import-plan', '--backup', backupFile, '--project', 'active', '--config', config];
+  const imported = JSON.parse((await execute(process.execPath, args)).stdout), repeated = JSON.parse((await execute(process.execPath, args)).stdout);
+  assert.equal(imported.project.id, repeated.project.id);
+  assert.equal(imported.importedDocuments, 1); assert.equal(imported.missingDocuments.length, 1); assert.equal(repeated.importedDocuments, 1); assert.equal(imported.importedAssets, 2); assert.equal(repeated.importedAssets, 2);
+  assert.equal(imported.importedFactGroups, 1);
+  assert.equal(imported.importedChatMessages, 2); assert.equal(repeated.importedChatMessages, 2);
+  const importedChat = (await (await req(`/api/projects/${imported.project.id}/imported-chat`, { headers:{cookie:alice} })).json()).messages; assert.deepEqual(importedChat.map(item => item.content), ['Consulta histórica','Respuesta histórica']);
+
+  assert.equal(imported.importedTasks, 1); assert.equal(imported.importedRequirements, 1);
+  assert.equal(imported.importedEconomicOffer, true);
+  const importedOffer = (await (await req(`/api/projects/${imported.project.id}/economic-offer`, { headers: { cookie: alice } })).json()).offer;
+  assert.equal(importedOffer.draft.currency, ''); assert.equal(importedOffer.draft.items[0].name, ''); assert.equal(importedOffer.calculation, null); assert.match(importedOffer.error, /descripción/);
+  const correctedOffer = { ...importedOffer.draft, currency: 'COP', items: [{ ...importedOffer.draft.items[0], name: 'Servicio' }] };
+  const updatedOffer = await req(`/api/projects/${imported.project.id}/economic-offer`, { method: 'PUT', headers: { cookie: alice, origin: 'http://localhost', 'content-type': 'application/json' }, body: JSON.stringify({ draft: correctedOffer, version: importedOffer.version }) }); assert.equal(updatedOffer.status, 200); assert.equal((await updatedOffer.json()).offer.calculation.total, '20.00');
+  const migratedWorkflow = await (await req(`/api/projects/${imported.project.id}/workflow`, { headers: { cookie: alice } })).json(); assert.equal(migratedWorkflow.stage, 'preparing');
+  const migratedTasks = (await (await req(`/api/projects/${imported.project.id}/workflow/tasks`, { headers: { cookie: alice } })).json()).items; assert.equal(migratedTasks[0].completed, true); assert.equal(migratedTasks[0].dueDate, '2026-03-01');
+  assert.equal(imported.submission.requests,1);assert.equal(imported.submission.attachments,1);assert.equal(imported.submission.submissions,1);assert.equal(repeated.submission.submissions,1);const tracking=await db.prepare('SELECT task_id,status FROM project_submission_requests WHERE project_id=?').bind(imported.project.id).first();assert.equal(tracking.task_id,migratedTasks[0].id);assert.equal(tracking.status,'reviewed');assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM project_submission_evidence WHERE project_id=?').bind(imported.project.id).first()).n,2);
+  const migratedRequirements = (await (await req(`/api/projects/${imported.project.id}/workflow/requirements`, { headers: { cookie: alice } })).json()).items; assert.equal(migratedRequirements[0].status, 'meets'); assert.equal(migratedRequirements[0].evidence, 'Anexo');
+  assert.equal(imported.importedComparisons, 2); assert.equal(imported.missingComparisonSources, 1);
+  const comparisonPath = `/api/projects/${imported.project.id}/imported-rup-comparisons`;
+  const comparisonResponse = await req(comparisonPath, { headers: { cookie: alice } }); assert.equal(comparisonResponse.status, 200); const comparisons = (await comparisonResponse.json()).comparisons; assert.equal(comparisons.length, 2);
+  const linked = comparisons.find(item => item.label === 'Liquidez'), unlinked = comparisons.find(item => item.label === 'Patrimonio');
+  assert.equal(linked.requirementId, migratedRequirements[0].id); assert.equal(linked.interpretedValue, '1.5'); assert.equal(linked.hasSource, true); assert.equal(unlinked.requirementId, null); assert.equal(unlinked.hasSource, false); assert.equal(unlinked.missingReason, 'not_found');
+  assert.equal((await req(comparisonPath, { headers: { cookie: bob } })).status, 404);
+  assert.equal((await req(`${comparisonPath}/${linked.id}/pdf`, { headers: { cookie: bob } })).status, 404);
+  assert.deepEqual(Buffer.from(await (await req(`${comparisonPath}/${linked.id}/pdf`, { headers: { cookie: alice } })).arrayBuffer()), historicPdf);
+  const mappedRequirement = await db.prepare('SELECT source_id, requirement_id FROM desktop_requirement_id_map WHERE project_id = ?').bind(imported.project.id).first(); assert.equal(mappedRequirement.source_id, 'req-desktop'); assert.equal(mappedRequirement.requirement_id, migratedRequirements[0].id);
+  const mappedTask = await db.prepare('SELECT source_id, task_id FROM desktop_task_id_map WHERE project_id = ?').bind(imported.project.id).first(); assert.equal(mappedTask.source_id, 'tarea-1'); assert.equal(mappedTask.task_id, migratedTasks[0].id);
+  const taskUpdate = await req(`/api/projects/${imported.project.id}/workflow/tasks/${migratedTasks[0].id}`, { method: 'PATCH', headers: { cookie: alice, origin: 'http://localhost', 'content-type': 'application/json' }, body: JSON.stringify({ version: 1, completed: false }) }); assert.equal(taskUpdate.status, 200);
+  const migratedFacts = await (await req(`/api/projects/${imported.project.id}/technical-facts`, { headers: { cookie: alice } })).json(); assert.equal(migratedFacts.importReviewPending, true); assert.equal(migratedFacts.groups[0].content, 'Valor guardado');
+  assert.equal(imported.importedAnalyses, 1); const migratedAnalyses = await (await req(`/api/projects/${imported.project.id}/technical-analyses`, { headers: { cookie: alice } })).json(); assert.equal(migratedAnalyses.importedAnalyses[0].content, 'Análisis del escritorio'); assert.equal(migratedAnalyses.analyses.length, 0);
+  const importedFiles = (await (await req(`/api/projects/${imported.project.id}/files`, { headers: { cookie: alice } })).json()).files; assert.equal(importedFiles.length, 1); assert.equal(importedFiles[0].name, 'Pliego ñ.pdf');
+  const download = await req(`/api/projects/${imported.project.id}/files/${importedFiles[0].id}`, { headers: { cookie: alice } });
+  assert.match(download.headers.get('content-disposition'), /filename\*=UTF-8''Pliego%20%C3%B1.pdf/);
+  assert.equal(await download.text(), '%PDF fichero original');
+
+  const importedPlan = await (await req(`/api/projects/${imported.project.id}/technical-plan`, { headers: { cookie: alice } })).json(); assert.equal(importedPlan.outline[0].id, 'desktop-id'); assert.match(importedPlan.outline[0].content, /^Texto íntegro/); assert.equal(importedPlan.outline[0].source_requirement_id, migratedRequirements[0].id);
+  const asset = await db.prepare('SELECT id FROM project_plan_assets WHERE project_id = ? AND content_type = ?').bind(imported.project.id, 'image/png').first(); assert.ok(asset); const assetDownload = await req(`/api/projects/${imported.project.id}/plan-assets/${asset.id}`, { headers: { cookie: alice } }); assert.deepEqual(Buffer.from(await assetDownload.arrayBuffer()), image);
+  if (process.env.SAVIA_TEST_OPENXML === '1') {
+   const { runOnce } = await import(process.env.SAVIA_TEST_RUNNER_WORK_LOOP || new URL('../../runner/work-loop.mjs', import.meta.url)), { createWordExportHandler } = await import(process.env.SAVIA_TEST_EXPORT_MODULE || new URL('../../runner/technical-plan-export.mjs', import.meta.url));
+   const jobResponse = await post(`/api/projects/${imported.project.id}/jobs`, { kind: 'technical-plan.export-word', payload: { planVersion: importedPlan.version, language: 'es' } }, { cookie: alice, 'idempotency-key': 'export-image' }); assert.equal(jobResponse.status, 201); const job = (await jobResponse.json()).job;
+   const originalFetch = globalThis.fetch; try { globalThis.fetch = (url, options) => worker.dispatchFetch(url, options); const outcome = await runOnce({ server: 'http://localhost', token: runner.token, handlers: { 'technical-plan.export-word': createWordExportHandler() }, retryDelayMs: 1 }); assert.equal(outcome.state, 'succeeded'); assert.equal(outcome.jobId, job.id); } finally { globalThis.fetch = originalFetch; }
+   const artifact = await req(`/api/projects/${imported.project.id}/jobs/${job.id}/artifact`, { headers: { cookie: alice } }); assert.equal(artifact.status, 200);
+   const Zip = createRequire(new URL('../../client/package.json', import.meta.url))('adm-zip'), zip = new Zip(Buffer.from(await artifact.arrayBuffer())), embedded = zip.getEntries().filter(entry => /^(?:word\/)?media\//.test(entry.entryName)); assert.equal(embedded.length, 2); assert.ok(embedded.some(entry => entry.getData().equals(image))); assert.ok(embedded.every(entry => entry.getData().subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')))); assert.match(zip.readAsText('word/document.xml'), /Texto íntegro/);
+  }
+  assert.equal((await (await req('/api/projects', { headers: { cookie: alice } })).json()).projects.length, 2);
+
+  assert.equal((await post('/api/runner/imports/technical-plan/import-1/facts', { groups: importedGroups }, { authorization: `Bearer ${otherRunner.token}` })).status, 404);
+  assert.equal((await post(analysisPath, { analyses: historicalAnalyses }, { authorization: `Bearer ${otherRunner.token}` })).status, 404);
+  const conflictPlan = (await (await post('/api/runner/imports/technical-plan', body, { ...auth, 'idempotency-key': 'existing-facts' })).json()).project;
+  const fixtureWorkflow = { stage: 'preparing', stageUpdatedAt: '2026-01-01T00:00:00Z', tasks: [{ id: 'task', title: 'Firma', dueDate: '', completed: false, createdAt: '2026-01-01', updatedAt: '2026-01-01' }], requirements: [{ id: 'requirement', title: 'FALLA', source: '', evidence: '', status: 'pending', category: 'general', createdAt: '2026-01-01', updatedAt: '2026-01-01' }] };
+  const workflowImport = '/api/runner/imports/technical-plan/existing-facts/workflow';
+  assert.equal((await post(workflowImport, fixtureWorkflow, { authorization: `Bearer ${otherRunner.token}` })).status, 404);
+  await post(`/api/projects/${conflictPlan.id}/workflow/tasks`, { title: 'Tarea propia' }, { cookie: alice });
+  assert.equal((await post(workflowImport, fixtureWorkflow, auth)).status, 409);
+  assert.equal((await (await req(`/api/projects/${conflictPlan.id}/workflow/tasks`, { headers: { cookie: alice } })).json()).items[0].title, 'Tarea propia');
+  const failurePlan = (await (await post('/api/runner/imports/technical-plan', body, { ...auth, 'idempotency-key': 'workflow-failure' })).json()).project;
+  await db.exec("CREATE TRIGGER reject_workflow_requirement BEFORE INSERT ON project_requirements WHEN NEW.title = 'FALLA' BEGIN SELECT RAISE(ABORT, 'simulated failure'); END");
+  let workflowFailure; try { workflowFailure = await post('/api/runner/imports/technical-plan/workflow-failure/workflow', fixtureWorkflow, auth); } catch { /* Miniflare may surface a D1 error directly. */ }
+  if (workflowFailure) assert.equal(workflowFailure.status, 500);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM desktop_workflow_imports WHERE request_id = ?').bind('workflow-failure').first()).count, 0);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM project_tasks WHERE project_id = ?').bind(failurePlan.id).first()).count, 0);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM desktop_requirement_id_map WHERE project_id = ?').bind(failurePlan.id).first()).count, 0);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM desktop_task_id_map WHERE project_id = ?').bind(failurePlan.id).first()).count, 0);
+  await db.exec('DROP TRIGGER reject_workflow_requirement');
+  assert.equal((await post('/api/runner/imports/technical-plan/workflow-failure/workflow', fixtureWorkflow, auth)).status, 201);
+  const secondWorkflowProject = (await (await post('/api/runner/imports/technical-plan', body, { ...auth, 'idempotency-key': 'workflow-second' })).json()).project;
+  assert.equal((await post('/api/runner/imports/technical-plan/workflow-second/workflow', fixtureWorkflow, auth)).status, 201);
+  const mappedBoth = (await db.prepare('SELECT project_id, requirement_id FROM desktop_requirement_id_map WHERE source_id = ? AND project_id IN (?, ?)').bind('requirement', failurePlan.id, secondWorkflowProject.id).all()).results;
+  assert.equal(mappedBoth.length, 2); assert.notEqual(mappedBoth[0].requirement_id, mappedBoth[1].requirement_id);
+  const mappedTasks = (await db.prepare('SELECT project_id, task_id FROM desktop_task_id_map WHERE source_id = ? AND project_id IN (?, ?)').bind('task', failurePlan.id, secondWorkflowProject.id).all()).results;
+  assert.equal(mappedTasks.length, 2); assert.notEqual(mappedTasks[0].task_id, mappedTasks[1].task_id);
+  const removedTask = mappedTasks.find(item => item.project_id === failurePlan.id).task_id;
+  await db.prepare('DELETE FROM project_tasks WHERE id = ?').bind(removedTask).run();
+  assert.equal((await post('/api/runner/imports/technical-plan/workflow-failure/workflow', fixtureWorkflow, auth)).status, 200);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM project_tasks WHERE id = ?').bind(removedTask).first()).count, 0);
+  assert.equal((await db.prepare('SELECT task_id FROM desktop_task_id_map WHERE project_id = ? AND source_id = ?').bind(failurePlan.id, 'task').first()).task_id, removedTask);
+  const fixtureOffer = { draft: { currency: 'COP', budget: '', items: [{ id: 'i', name: 'FALLA', quantity: '1', price: '12', cost: '', rate: '0' }] }, updatedAt: '2026-01-01' };
+  const conflictOfferPath = '/api/runner/imports/technical-plan/existing-facts/economic-offer', failureOfferPath = '/api/runner/imports/technical-plan/workflow-failure/economic-offer';
+  assert.equal((await post(conflictOfferPath, fixtureOffer, { authorization: `Bearer ${otherRunner.token}` })).status, 404);
+  assert.equal((await req(`/api/projects/${conflictPlan.id}/economic-offer`, { method: 'PUT', headers: { cookie: alice, origin: 'http://localhost', 'content-type': 'application/json' }, body: JSON.stringify({ draft: fixtureOffer.draft, version: 0 }) })).status, 200);
+  assert.equal((await post(conflictOfferPath, fixtureOffer, auth)).status, 409);
+  await db.exec("CREATE TRIGGER reject_offer BEFORE INSERT ON economic_offer_drafts WHEN NEW.draft_json LIKE '%FALLA%' BEGIN SELECT RAISE(ABORT, 'simulated failure'); END");
+  let offerFailure; try { offerFailure = await post(failureOfferPath, fixtureOffer, auth); } catch { /* Miniflare may surface a D1 error directly. */ }
+  if (offerFailure) assert.equal(offerFailure.status, 500);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM desktop_offer_imports WHERE request_id = ?').bind('workflow-failure').first()).count, 0);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM economic_offer_drafts WHERE project_id = ?').bind(failurePlan.id).first()).count, 0);
+  await db.exec('DROP TRIGGER reject_offer');
+  assert.equal((await post(failureOfferPath, fixtureOffer, auth)).status, 201);
+  assert.equal((await post(failureOfferPath, fixtureOffer, auth)).status, 200);
+  assert.equal((await post(failureOfferPath, { ...fixtureOffer, updatedAt: '2026-01-02' }, auth)).status, 409);
+  await db.prepare('INSERT INTO project_global_facts (project_id, revision, groups_json, snapshot_json, updated_at) VALUES (?, 1, ?, ?, ?)').bind(conflictPlan.id, '[{"id":"own","title":"Propio","content":"Conservar"}]', '{}', new Date().toISOString()).run();
+  assert.equal((await post('/api/runner/imports/technical-plan/existing-facts/facts', { groups: importedGroups }, auth)).status, 409);
+  assert.equal((await db.prepare('SELECT groups_json FROM project_global_facts WHERE project_id = ?').bind(conflictPlan.id).first()).groups_json, '[{"id":"own","title":"Propio","content":"Conservar"}]');
+  await db.exec("CREATE TRIGGER reject_import_analyses BEFORE INSERT ON desktop_analysis_imports WHEN NEW.request_id = 'existing-facts' BEGIN SELECT RAISE(ABORT, 'simulated analysis failure'); END");
+  let analysisFailure; try { analysisFailure = await post('/api/runner/imports/technical-plan/existing-facts/analyses', { analyses: historicalAnalyses }, auth); } catch { /* Miniflare can surface the injected storage error directly. */ }
+  if (analysisFailure) assert.equal(analysisFailure.status, 500);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM desktop_analysis_imports WHERE request_id = ?').bind('existing-facts').first()).count, 0);
+  await db.exec('DROP TRIGGER reject_import_analyses');
+  assert.equal((await post('/api/runner/imports/technical-plan/existing-facts/analyses', { analyses: historicalAnalyses }, auth)).status, 201);
+
+  assert.equal((await req(`/api/projects/${imported.project.id}/files/${importedFiles[0].id}`, { method: 'DELETE', headers: { origin: 'http://localhost', cookie: alice } })).status, 204);
+  const afterRemoval = JSON.parse((await execute(process.execPath, args)).stdout);
+  assert.equal(afterRemoval.importedDocuments, 0); assert.deepEqual(afterRemoval.removedDocuments, ['Pliego ñ.pdf']);
+  assert.equal((await (await req(comparisonPath, { headers: { cookie: alice } })).json()).comparisons.length, 2);
+  assert.equal((await (await req(`/api/projects/${imported.project.id}/workflow/tasks`, { headers: { cookie: alice } })).json()).items[0].completed, false);
+  assert.equal((await db.prepare('SELECT requirement_id FROM desktop_requirement_id_map WHERE project_id = ? AND source_id = ?').bind(imported.project.id, 'req-desktop').first()).requirement_id, migratedRequirements[0].id);
+  assert.equal((await (await req(`/api/projects/${imported.project.id}/economic-offer`, { headers: { cookie: alice } })).json()).offer.draft.items[0].name, 'Servicio');
+  assert.equal((await (await req(`/api/projects/${imported.project.id}/files`, { headers: { cookie: alice } })).json()).files.length, 0);
+  assert.equal((await req(`/api/runners/${runner.runner.id}`, { method: 'DELETE', headers: { origin: 'http://localhost', cookie: alice } })).status, 204);
+  assert.equal((await post('/api/runner/imports/technical-plan', body, { ...auth, 'idempotency-key': 'revoked' })).status, 401);
+ } finally { await worker?.dispose(); await rm(build, { recursive: true, force: true }); }
+});

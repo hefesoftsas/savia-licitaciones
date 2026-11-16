@@ -1,0 +1,7 @@
+# Amazon Bedrock: investigación previa
+
+Pi incluye Bedrock mediante ConverseStream y permite tokens Bearer. La documentación de AWS indica que las claves están vinculadas a una región y que las temporales caducan. El código de Pi instalado también consulta `AWS_PROFILE`, `AWS_REGION`, credenciales AWS y `AWS_BEDROCK_SKIP_AUTH` del entorno, y el SDK puede resolver endpoints mediante configuración del equipo. Todavía no se ha demostrado que un token y una región suministrados por el cliente prevalezcan en todas esas condiciones sin filtrar la credencial a un endpoint distinto. No se ha habilitado Bedrock ni se ha invocado inferencia.
+
+Antes de conectarlo se debe fijar el destino y la región, impedir cualquier fallback a credenciales locales y a autenticación omitida, probar el transporte real de Pi y el aislamiento por cuenta bajo configuraciones AWS hostiles y soportar la renovación o reemplazo de credenciales temporales. No se debe crear un proveedor que asuma que un perfil local pertenece al cliente web. Fuentes: https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html y el código instalado de `@earendil-works/pi-ai/dist/api/bedrock-converse-stream.js`.
+
+Kimi Code, que también aparece en Pi, sigue fuera de esta integración: sus directrices describen la suscripción como de uso personal interactivo y excluyen ejecución automatizada no interactiva y reventa de capacidades. No se infiere que esto aplique a las API estándar de Kimi ya integradas. Fuente: https://www.kimi.com/en/help/kimi-code/community-guidelines.

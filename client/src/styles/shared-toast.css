@@ -1,0 +1,186 @@
+/* [8787-8969] app-toast-viewport/app-toast + variants + keyframes (ToastProvider.tsx) */
+.app-toast-viewport {
+  position: fixed;
+  right: 28px;
+  top: 28px;
+  bottom: auto;
+  z-index: var(--savia-z-toast);
+  display: grid;
+  gap: 12px;
+  width: min(380px, calc(100vw - 32px));
+  max-width: calc(100vw - 40px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  outline: none;
+  pointer-events: auto;
+}
+
+.app-toast {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'title close'
+    'description close';
+  column-gap: 16px;
+  row-gap: 5px;
+  align-items: center;
+  padding: 15px 14px 15px 18px;
+  color: var(--savia-text);
+  user-select: text;
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 92%, transparent);
+  border-radius: var(--savia-radius-lg);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+  backdrop-filter: none;
+}
+
+.app-toast.has-actions {
+  grid-template-areas:
+    'title close'
+    'description close'
+    'actions actions';
+}
+
+.app-toast[data-state='open'] {
+  animation: toast-slide-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-toast[data-state='closed'] {
+  animation: toast-hide 120ms ease-in forwards;
+}
+
+.app-toast[data-swipe='move'] {
+  transform: translateX(var(--radix-toast-swipe-move-x));
+}
+
+.app-toast[data-swipe='cancel'] {
+  transform: translateX(0);
+  transition: transform var(--savia-duration) ease-out;
+}
+
+.app-toast[data-swipe='end'] {
+  animation: toast-swipe-out 120ms ease-out forwards;
+}
+
+.app-toast-title {
+  grid-area: title;
+  min-width: 0;
+  color: var(--savia-text);
+  font-size: 14px;
+  font-weight: 500;
+  user-select: text;
+}
+
+.app-toast-description {
+  grid-area: description;
+  min-width: 0;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  user-select: text;
+  white-space: normal;
+}
+
+.app-toast-close {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  grid-area: close;
+  place-items: center;
+  color: var(--savia-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--savia-radius-pill);
+  user-select: none;
+}
+
+.app-toast-close:hover {
+  color: var(--savia-text);
+  background: color-mix(in srgb, var(--overlay-ink) 6%, transparent);
+}
+
+.app-toast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  grid-area: actions;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 6px;
+}
+
+.app-toast-action {
+  height: 32px;
+  padding: 0 12px;
+  color: var(--savia-text-soft);
+  font-size: 13px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--overlay-ink) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--savia-border) 90%, transparent);
+  border-radius: var(--savia-radius-pill);
+}
+
+.app-toast-action:hover {
+  color: var(--savia-text);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-color: color-mix(in srgb, var(--savia-border) 20%, transparent);
+}
+
+.app-toast-action.is-primary {
+  color: var(--primary-foreground);
+  background: linear-gradient(135deg, var(--savia-primary) 0%, var(--savia-primary-hover) 100%);
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+}
+
+.app-toast-action.is-primary:hover {
+  color: var(--primary-foreground);
+  background: linear-gradient(135deg, var(--savia-primary-deep) 0%, var(--savia-primary-hover) 100%);
+}
+
+.app-toast.is-success {
+  border-color: color-mix(in srgb, var(--savia-success-border) 18%, transparent);
+}
+
+.app-toast.is-success .app-toast-title {
+  color: var(--savia-success);
+}
+
+.app-toast.is-error {
+  border-color: color-mix(in srgb, var(--savia-warning-border) 20%, transparent);
+}
+
+.app-toast.is-error .app-toast-title {
+  color: var(--savia-danger);
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(100% + 28px));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toast-hide {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes toast-swipe-out {
+  from {
+    transform: translateX(var(--radix-toast-swipe-end-x));
+  }
+  to {
+    transform: translateX(calc(100% + 28px));
+  }
+}

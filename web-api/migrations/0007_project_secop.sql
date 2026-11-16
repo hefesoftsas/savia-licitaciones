@@ -1,0 +1,1 @@
+CREATE TABLE project_secop (project_id TEXT PRIMARY KEY NOT NULL REFERENCES projects(id) ON DELETE CASCADE, owner_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE, source TEXT NOT NULL, external_id TEXT NOT NULL, process_json TEXT NOT NULL, UNIQUE(owner_id, source, external_id));

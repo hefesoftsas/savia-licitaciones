@@ -1,0 +1,1 @@
+CREATE TABLE secop_import_selection (project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, document_id TEXT NOT NULL, sort_order INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','failed','imported','queued')), updated_at TEXT NOT NULL, PRIMARY KEY(project_id,document_id));

@@ -1,0 +1,7 @@
+# Exclusión por configuración del runner
+
+Un servicio y una ejecución manual no deben manipular a la vez las concesiones y bandejas del mismo runner. Coordinar `run`, `run-once`, `pair`, exportación y descarte de bandejas mediante un bloqueo local exclusivo por ruta de configuración; configuraciones distintas pueden operar a la vez. La recuperación de un bloqueo de un proceso terminado debe ser segura ante intentos simultáneos. Un proceso activo o un bloqueo cuya propiedad no se pueda verificar impiden la operación; no adivinar que el PID ya no existe.
+
+Probar concurrencia real entre procesos, terminación abrupta, recuperación simultánea, permisos, rutas y operaciones CLI. No imprimir el token ni habilitar servicios alojados.
+
+**Estado:** bloqueo por ruta canónica para ejecución, emparejamiento y modificaciones de bandeja; instalación del servicio comprueba antes el bloqueo y no lo mantiene mientras inicia el servicio. Pruebas entre procesos cubren terminación abrupta, competencia por un bloqueo anterior, rutas alternativas, estados ilegibles y el CLI; el paquete macOS ARM64 pasó las mismas pruebas de integración. Los bloqueos vacíos recientes esperan 30 segundos antes de poder recuperarse. Un directorio de recuperación abandonado o un propietario imposible de verificar puede requerir intervención manual con todas las instancias detenidas. No se ha probado Windows ni Linux real.

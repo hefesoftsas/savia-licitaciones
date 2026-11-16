@@ -1,0 +1,6 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import React from 'react';import {renderToStaticMarkup} from 'react-dom/server';import {createServer} from 'vite';import {fileURLToPath} from 'node:url';import {resolve} from 'node:path';
+const root=resolve(fileURLToPath(new URL('..',import.meta.url)));
+test('representa el calendario, recuentos y selección en ambos idiomas',async()=>{
+ const server=await createServer({configFile:resolve(root,'vite.web.config.ts'),root,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},appType:'custom'});
+ try{const {AgendaCalendarView}=await server.ssrLoadModule('/src/features/web/WebAgendaCalendar.tsx');const props={year:2024,month:2,selected:'2024-02-29',counts:{'2024-02-29':2},onShift(){},onSelect(){},onClear(){}};const render=language=>renderToStaticMarkup(React.createElement(AgendaCalendarView,{...props,language}));const es=render('es');assert.match(es,/2024-02-29, 2 eventos/);assert.match(es,/aria-pressed="true"/);assert.match(es,/Mostrar todas las fechas/);assert.match(es,/Mes anterior/);const en=render('en');assert.match(en,/2024-02-29, 2 events/);assert.match(en,/Show all dates/);}finally{await server.close();}
+});
