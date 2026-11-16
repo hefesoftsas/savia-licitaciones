@@ -1309,11 +1309,20 @@
 .web-official-document-body { flex:1; min-width:0; }
 .web-import-progress { display:flex; flex-direction:column; gap:5px; margin-top:8px; color:var(--web-muted); font-size:12px; }
 .web-import-progress progress { display:block; width:100%; height:5px; border:0; accent-color:var(--web-link); }
-.web-chat-processing { display:flex; align-items:center; gap:10px; max-width:420px; padding:10px 12px; border:1px solid var(--web-border); border-radius:10px; background:var(--web-surface, var(--web-bg)); }
+.web-chat-processing { display:flex; flex-direction:column; gap:10px; max-width:520px; padding:12px 14px; border:1px solid var(--web-border); border-radius:10px; background:var(--web-surface, var(--web-bg)); }
+.web-chat-processing-header { display:flex; align-items:center; gap:10px; }
 .web-chat-processing-spinner { flex:none; color:var(--web-muted); animation:web-chat-processing-spin 1s linear infinite; }
 .web-chat-processing-copy { flex:1; min-width:0; }
+.web-chat-processing-status { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
 .web-chat-processing-copy p { margin:0; line-height:1.4; }
-.web-chat-processing-copy p + p { margin-top:2px; font-size:12px; color:var(--web-muted); }
+.web-chat-processing-copy > p { margin-top:2px; font-size:12px; color:var(--web-muted); }
+.web-chat-processing-timer { font-size:12px; font-variant-numeric:tabular-nums; color:var(--web-muted); }
+.web-chat-processing-cancel { flex:none; margin-left:auto; border-color:var(--web-border-soft, var(--web-border)); color:var(--web-muted); background:var(--web-bg); }
+.web-chat-processing-cancel:hover:not(:disabled) { background:var(--web-hover-bg); color:var(--web-text); border-color:var(--web-input-border, var(--web-border)); }
+.web-chat-processing-activity { border-top:1px solid var(--web-border); padding-top:10px; }
+.web-chat-processing-activity .web-analysis-activity { padding:0; }
+.web-chat-processing-activity .web-analysis-activity p { margin:6px 0; font-size:12px; }
+.web-chat-processing-activity .web-analysis-stages { margin:6px 0 4px; }
 @keyframes web-chat-processing-spin { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion:reduce) { .web-chat-processing-spinner { animation:none; } }
 

@@ -9,11 +9,47 @@ import {WebChatReset} from './WebChatReset';
 import {WebChatFollowUps} from './WebChatFollowUps';
 import {WebChatUsage,type ChatUsage} from './WebChatUsage';
 import {WebJobProgress} from './WebJobProgress';
+import {WebAnalysisActivity} from './WebAnalysisActivity';
 
-export function WebChatProcessing({state,progress,language,busy,onCancel}:{state:string;progress?:string|null;language:'es'|'en';busy:boolean;onCancel:()=>void}){const en=language==='en';return <div className="web-chat-processing"><LoaderCircle className="web-chat-processing-spinner" size={18} aria-hidden="true"/><div className="web-chat-processing-copy"><p role="status">{state==='queued'?(en?'Waiting for your runner…':'Esperando a tu runner…'):(en?'Preparing an answer…':'Preparando la respuesta…')}</p><WebJobProgress state={state} progress={progress} language={language}/></div><ActionButton type="button" icon={Square} iconOnly variant="ghost" disabled={busy} onClick={onCancel}>{en?'Cancel response':'Cancelar respuesta'}</ActionButton></div>;}
-type ChatJob={id:string;kind:string;state:string;progress?:string|null;payload:{question?:string;fileIds?:string[]};result:{unreadableSources?:{id:string;fileName:string;reason?:string}[];readableSourceCount?:number;answer?:string;followUps?:string[];usage?:ChatUsage;model?:string;message?:string;error?:string}|null};
-type Props={language:'es'|'en';files:{id:string;name:string;deleting?:number|boolean}[];selectedFiles:string[];onFiles:(ids:string[])=>void;credentials:{id:string;provider:string;model:string}[];credential:string;onCredential:(id:string)=>void;question:string;onQuestion:(text:string)=>void;continueChat:boolean;onContinue:(value:boolean)=>void;hasPrevious:boolean;jobs:ChatJob[];busy:boolean;onSend:(text:string)=>void;onCancel:(id:string)=>void;onClear:()=>Promise<boolean>;onCredentials:()=>void;children?:ReactNode};
-export function WebProjectChat({language,files,selectedFiles,onFiles,credentials,credential,onCredential,question,onQuestion,continueChat,onContinue,hasPrevious,jobs,busy,onSend,onCancel,onClear,onCredentials,children}:Props){
+function formatElapsed(ms:number):string{
+ const totalSeconds=Math.max(0,Math.floor(ms/1000));
+ const minutes=Math.floor(totalSeconds/60);
+ const seconds=totalSeconds%60;
+ return `${minutes}:${String(seconds).padStart(2,'0')}`;
+}
+
+type WebChatProcessingProps={state:string;progress?:string|null;language:'es'|'en';busy:boolean;onCancel:()=>void;projectId?:string;jobId?:string;createdAt?:string;updatedAt?:string;runnerName?:string|null};
+export function WebChatProcessing({state,progress,language,busy,onCancel,projectId,jobId,createdAt,updatedAt,runnerName}:WebChatProcessingProps){
+ const en=language==='en',active=state==='queued'||state==='running';
+ const parsedCreatedAt=createdAt?Date.parse(createdAt):Number.NaN;
+ const fallbackStartRef=useRef<number>(Date.now());
+ const startMs=Number.isFinite(parsedCreatedAt)?parsedCreatedAt:fallbackStartRef.current;
+ const [nowMs,setNowMs]=useState<number>(()=>Date.now());
+ useEffect(()=>{
+  if(!active)return;
+  setNowMs(Date.now());
+  const timer=setInterval(()=>setNowMs(Date.now()),1000);
+  return()=>clearInterval(timer);
+ },[active,startMs]);
+ const elapsed=formatElapsed(nowMs-startMs);
+ return <div className="web-chat-processing" data-state={state}>
+  <div className="web-chat-processing-header">
+   <LoaderCircle className="web-chat-processing-spinner" size={18} aria-hidden="true"/>
+   <div className="web-chat-processing-copy">
+    <div className="web-chat-processing-status">
+     <p role="status">{state==='queued'?(en?'Waiting for your runner…':'Esperando a tu runner…'):(en?'Preparing an answer…':'Preparando la respuesta…')}</p>
+     {active&&<span className="web-chat-processing-timer" aria-label={en?`Elapsed time ${elapsed}`:`Tiempo transcurrido ${elapsed}`}>{elapsed}</span>}
+    </div>
+    <WebJobProgress state={state} progress={progress} language={language}/>
+   </div>
+   <ActionButton type="button" className="web-chat-processing-cancel" icon={Square} variant="outline" size="sm" disabled={busy} onClick={onCancel} aria-label={en?'Cancel response':'Cancelar respuesta'}>{en?'Cancel':'Cancelar'}</ActionButton>
+  </div>
+  {projectId&&jobId&&<div className="web-chat-processing-activity"><WebAnalysisActivity projectId={projectId} jobId={jobId} language={language} state={state} progress={progress} runnerName={runnerName} updatedAt={updatedAt}/></div>}
+ </div>;
+}
+type ChatJob={id:string;kind:string;state:string;progress?:string|null;createdAt?:string;updatedAt?:string;runnerName?:string|null;payload:{question?:string;fileIds?:string[]};result:{unreadableSources?:{id:string;fileName:string;reason?:string}[];readableSourceCount?:number;answer?:string;followUps?:string[];usage?:ChatUsage;model?:string;message?:string;error?:string}|null};
+type Props={projectId?:string;language:'es'|'en';files:{id:string;name:string;deleting?:number|boolean}[];selectedFiles:string[];onFiles:(ids:string[])=>void;credentials:{id:string;provider:string;model:string}[];credential:string;onCredential:(id:string)=>void;question:string;onQuestion:(text:string)=>void;continueChat:boolean;onContinue:(value:boolean)=>void;hasPrevious:boolean;jobs:ChatJob[];busy:boolean;onSend:(text:string)=>void;onCancel:(id:string)=>void;onClear:()=>Promise<boolean>;onCredentials:()=>void;children?:ReactNode};
+export function WebProjectChat({projectId,language,files,selectedFiles,onFiles,credentials,credential,onCredential,question,onQuestion,continueChat,onContinue,hasPrevious,jobs,busy,onSend,onCancel,onClear,onCredentials,children}:Props){
  const en=language==='en',[documentsOpen,setDocumentsOpen]=useState(false),[search,setSearch]=useState(''),[optionsOpen,setOptionsOpen]=useState(false);
  const input=useRef<HTMLTextAreaElement>(null),messages=useRef<HTMLDivElement>(null),options=useRef<HTMLDivElement>(null);
  const available=files.filter(file=>!file.deleting&&!/\.zip$/i.test(file.name));
@@ -30,7 +66,7 @@ export function WebProjectChat({language,files,selectedFiles,onFiles,credentials
   {hasPrevious&&<label className="web-chat-continuity"><input type="checkbox" checked={continueChat} onChange={event=>onContinue(event.target.checked)}/>{en?'Use the previous conversation with these documents':'Continuar la conversación con estos documentos'}</label>}</PopoverContent></Popover></div></div>
 
   <div className="web-chat-messages" ref={messages} role="region" tabIndex={0} aria-label={en?'Conversation':'Conversación'}>{children}
-   {!chat.length?<div className="web-chat-empty"><MessageCircle size={28}/><h3>{en?'What would you like to know?':'¿Qué quieres saber de este proyecto?'}</h3><p>{en?'Choose your documents and ask about requirements, dates or the scope of the tender.':'Elige tus documentos y pregunta por los requisitos, las fechas o el objeto de la licitación.'}</p><div>{[en?'Summarize the purpose of this tender.':'Resume el objeto de esta licitación.',en?'Which documents must I submit?':'¿Qué documentos debo presentar?'].map(text=><Button variant="outline" size="sm" key={text} onClick={()=>{onQuestion(text);input.current?.focus();}}>{text}</Button>)}</div></div>:[...chat].reverse().map(job=><article className="web-chat-turn" key={job.id}><div className="web-chat-user"><span>{en?'You':'Tú'}</span><p>{job.payload.question}</p></div><div className="web-chat-assistant"><strong>Savia</strong>{!!job.result?.unreadableSources?.length&&<details className="web-chat-source-warning"><summary>{en?`Partial answer · ${job.result.readableSourceCount} readable documents, ${job.result.unreadableSources.length} could not be read`:`Respuesta parcial · ${job.result.readableSourceCount} documentos legibles, ${job.result.unreadableSources.length} no se pudieron leer`}</summary><p>{en?'These files were not used. Upload a version with selectable text to include them.':'Estos archivos no se usaron. Sube una versión con texto seleccionable para incluirlos.'}</p><ul>{job.result.unreadableSources.map(file=><li key={file.id}><strong>{file.fileName}</strong>{file.reason&&<span> — {file.reason}</span>}</li>)}</ul></details>}{job.result?.answer?<><MarkdownRenderer allowRawHtml={false}>{job.result.answer}</MarkdownRenderer><details className="web-chat-usage-details"><summary>{en?'Usage details':'Detalle del consumo'}</summary><WebChatUsage language={language} usage={job.result.usage} model={job.result.model}/></details><WebChatFollowUps job={job} jobs={jobs} selectedFiles={selectedFiles} continueChat={continueChat} busy={busy} language={language} onSelect={text=>{onSend(text);input.current?.focus();}}/></>:['queued','running'].includes(job.state)?<WebChatProcessing state={job.state} progress={job.progress} language={language} busy={busy} onCancel={()=>onCancel(job.id)}/>:<p role="status">{status[job.state]||job.state}</p>}{(job.result?.message||job.result?.error)&&<p role="alert">{job.result.message||job.result.error}</p>}</div></article>)}
+   {!chat.length?<div className="web-chat-empty"><MessageCircle size={28}/><h3>{en?'What would you like to know?':'¿Qué quieres saber de este proyecto?'}</h3><p>{en?'Choose your documents and ask about requirements, dates or the scope of the tender.':'Elige tus documentos y pregunta por los requisitos, las fechas o el objeto de la licitación.'}</p><div>{[en?'Summarize the purpose of this tender.':'Resume el objeto de esta licitación.',en?'Which documents must I submit?':'¿Qué documentos debo presentar?'].map(text=><Button variant="outline" size="sm" key={text} onClick={()=>{onQuestion(text);input.current?.focus();}}>{text}</Button>)}</div></div>:[...chat].reverse().map(job=><article className="web-chat-turn" key={job.id}><div className="web-chat-user"><span>{en?'You':'Tú'}</span><p>{job.payload.question}</p></div><div className="web-chat-assistant"><strong>Savia</strong>{!!job.result?.unreadableSources?.length&&<details className="web-chat-source-warning"><summary>{en?`Partial answer · ${job.result.readableSourceCount} readable documents, ${job.result.unreadableSources.length} could not be read`:`Respuesta parcial · ${job.result.readableSourceCount} documentos legibles, ${job.result.unreadableSources.length} no se pudieron leer`}</summary><p>{en?'These files were not used. Upload a version with selectable text to include them.':'Estos archivos no se usaron. Sube una versión con texto seleccionable para incluirlos.'}</p><ul>{job.result.unreadableSources.map(file=><li key={file.id}><strong>{file.fileName}</strong>{file.reason&&<span> — {file.reason}</span>}</li>)}</ul></details>}{job.result?.answer?<><MarkdownRenderer allowRawHtml={false}>{job.result.answer}</MarkdownRenderer><details className="web-chat-usage-details"><summary>{en?'Usage details':'Detalle del consumo'}</summary><WebChatUsage language={language} usage={job.result.usage} model={job.result.model}/></details><WebChatFollowUps job={job} jobs={jobs} selectedFiles={selectedFiles} continueChat={continueChat} busy={busy} language={language} onSelect={text=>{onSend(text);input.current?.focus();}}/></>:['queued','running'].includes(job.state)?<WebChatProcessing state={job.state} progress={job.progress} language={language} busy={busy} onCancel={()=>onCancel(job.id)} projectId={projectId} jobId={job.id} createdAt={job.createdAt} updatedAt={job.updatedAt} runnerName={job.runnerName}/>:<p role="status">{status[job.state]||job.state}</p>}{(job.result?.message||job.result?.error)&&<p role="alert">{job.result.message||job.result.error}</p>}</div></article>)}
   </div>
   <form className="web-chat-composer" onSubmit={event=>{event.preventDefault();onSend(question);}}>
 
