@@ -1236,3 +1236,56 @@ test('no inicia inferencia si todos los documentos carecen de texto',async()=>{
  let called=false;const handler=createTenderChatHandler({parse:async()=>{const e=new Error('scan');e.code='pdf_text_layer_missing';throw e;},createAiService:()=>{called=true;throw Error('unexpected inference');}});
  await assert.rejects(handler({question:'Resume',fileIds:['scan'],language:'es',dataProcessingConsent:true},{job:{id:'all-scans',projectId:'p'},getCredential:async()=>({provider:'opencode-go',model:'fixture',secret:'fixture'}),getFileInfo:async()=>({name:'escaneado.pdf',contentType:'application/pdf',bytes:new TextEncoder().encode('%PDF-1.7').buffer})}),/escaneado.pdf.*OCR/);assert.equal(called,false);
 });
+
+test('emite progreso y actividad en cada fase de tender-chat sin filtrar secretos ni contenido', { timeout: 30_000 }, async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'savia-chat-activity-'));
+  const stages = [], activities = [];
+  let calls = 0;
+  try {
+    const handler = createTenderChatHandler({
+      temporaryRoot,
+      createAiService: ({ configStore }) => ({
+        getConfig: () => configStore.load(),
+        getTextQueueStatus: () => ({ active: 0, queued: 0, limit: 1 }),
+        async runAgentChatCompletion(request) {
+          calls++;
+          const context = { config: configStore.load(), requestBody: { ...request.body, stream: false }, requestId: `activity-${calls}` };
+          request.onRequestStart?.(context);
+          const message = calls === 1
+            ? { role: 'assistant', content: null, tool_calls: [{ id: 'read-1', type: 'function', function: { name: 'read', arguments: JSON.stringify({ path: 'sources/1.md' }) } }] }
+            : { role: 'assistant', content: 'El plazo es de dos meses.\n<suggested_questions>[]</suggested_questions>' };
+          return request.consumeResponse(new Response(JSON.stringify({ id: `activity-${calls}`, object: 'chat.completion', choices: [{ index: 0, message, finish_reason: calls === 1 ? 'tool_calls' : 'stop' }] }), { headers: { 'content-type': 'application/json' } }), context);
+        },
+      }),
+    });
+    const result = await handler(
+      { question: '¿Cuál es el plazo?', fileIds: ['doc-1'], language: 'es', dataProcessingConsent: true },
+      {
+        job: { id: 'chat-activity-job', projectId: 'project-activity' },
+        signal: new AbortController().signal,
+        knowledgeDocumentIds: ['know-1'],
+        reportProgress: stage => stages.push(stage),
+        reportActivity: (code, details) => activities.push({ code, details }),
+        getCredential: async () => ({ provider: 'opencode-go', model: 'fixture', secret: 'fixture-secret-key' }),
+        getFileInfo: async () => ({ name: 'pliego.txt', contentType: 'text/plain', bytes: new TextEncoder().encode('Contenido confidencial del pliego: plazo dos meses.').buffer }),
+        getKnowledgeDocumentInfo: async () => ({ name: 'guia.txt', contentType: 'text/plain', bytes: new TextEncoder().encode('Contenido confidencial de biblioteca.').buffer }),
+      },
+    );
+    assert.equal(result.answer, 'El plazo es de dos meses.');
+    assert.equal(stages[0], 'preparing');
+    assert.ok(stages.includes('reading'));
+    assert.equal(stages.at(-1), 'generating');
+    assert.deepEqual(
+      activities.map(item => item.code),
+      ['document.start', 'document.end', 'document.start', 'document.end', 'tool.read.start', 'tool.read.end'],
+    );
+    assert.equal(activities[0].details.document, 'pliego.txt');
+    assert.equal(activities[2].details.document, '[Biblioteca] guia.txt');
+    assert.equal(activities[4].details.path, 'sources/1.md');
+    const serialized = JSON.stringify({ stages, activities });
+    assert.ok(!serialized.includes('fixture-secret-key'));
+    assert.ok(!serialized.includes('Contenido confidencial'));
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});

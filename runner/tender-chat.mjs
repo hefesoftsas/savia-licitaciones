@@ -49,6 +49,7 @@ export async function extractTenderSources(fileIds, context, app, config, workDi
     context.signal?.throwIfAborted();
     const file = await (context.getFileStream ? context.getFileStream(id) : context.getFileInfo(id));
     const fileName = file.name || `Documento ${index + 1}`;
+    context.reportProgress?.('reading');
     context.reportActivity?.('document.start',{document:fileName,index:index+1,total:fileIds.length});
     let streamedPath;
     try {
@@ -120,7 +121,13 @@ export function createTenderChatHandler({ createAiService = aiModule.createAiSer
       const knowledgeIds = context.knowledgeDocumentIds || [];
       if (knowledgeIds.length) {
         const mimeTypes = { txt: 'text/plain', md: 'text/markdown', markdown: 'text/markdown', pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', doc: 'application/msword', wps: 'application/vnd.ms-works', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-        const references = await extractTenderSources(knowledgeIds, { signal: context.signal, getFileInfo: async id => { let file; try { file = await context.getKnowledgeDocumentInfo(id); } catch (error) { if ([404, 409].includes(error?.status)) fail('El documento de biblioteca cambió o ya no está disponible.', 'The library document changed or is no longer available.'); throw error; } const type = file.contentType?.split(';', 1)[0].trim().toLowerCase(); return !type || type === 'application/octet-stream' ? { ...file, contentType: mimeTypes[file.name?.split('.').pop()?.toLowerCase()] || file.contentType } : file; } }, app, config, workDir, payload.language === 'en');
+        const references = await extractTenderSources(knowledgeIds, {
+          signal: context.signal,
+          reportProgress: context.reportProgress,
+          reportConsole: context.reportConsole,
+          reportActivity: (code, details) => context.reportActivity?.(code, details?.document ? { ...details, document: `[Biblioteca] ${details.document}` } : details),
+          getFileInfo: async id => { let file; try { file = await context.getKnowledgeDocumentInfo(id); } catch (error) { if ([404, 409].includes(error?.status)) fail('El documento de biblioteca cambió o ya no está disponible.', 'The library document changed or is no longer available.'); throw error; } const type = file.contentType?.split(';', 1)[0].trim().toLowerCase(); return !type || type === 'application/octet-stream' ? { ...file, contentType: mimeTypes[file.name?.split('.').pop()?.toLowerCase()] || file.contentType } : file; },
+        }, app, config, workDir, payload.language === 'en');
         if (references.reduce((size, item) => size + item.content.length, 0) > 1_000_000) fail('Los documentos de biblioteca son demasiado extensos; selecciona menos o divídelos.', 'The library documents are too long; select fewer or split them.');
         sources.push(...references.map(reference => ({ ...reference, id: `knowledge:${reference.id}`, fileName: `[Biblioteca] ${reference.fileName}` })));
       }
@@ -154,6 +161,7 @@ ${payload.language === 'en' ? 'Source coverage is partial. These selected files 
 ${payload.language === 'en' ? 'Answer only from readable sources, disclose this limitation, and do not treat missing extraction as evidence that information is absent from the full record.' : 'Responde solo con las fuentes legibles, indica esta limitación y no confundas la falta de extracción con la ausencia de información en el expediente completo.'}` : payload.question;
       const answer = await service.send(question, config.ui_language, [...readableIds, ...knowledgeIds.map(id => `knowledge:${id}`)], payload.history || []);
       context.signal?.throwIfAborted();
+      context.reportProgress?.('generating');
       const assistant = store.list().findLast(item => item.role === 'assistant');
       return { answer, followUps: assistant?.followUps || [], usage: usage.snapshot(), ...(unreadableSources.length ? {unreadableSources, readableSourceCount:readableIds.length} : {}) };
     } finally {
