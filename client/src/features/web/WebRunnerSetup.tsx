@@ -1,12 +1,12 @@
 import {WebLoading} from './WebLoading';
-import {useEffect,useState,type ReactNode} from 'react';
+import {useEffect,useState} from 'react';
 import {CheckCircle2,Copy,Download,Monitor,RefreshCw} from 'lucide-react';
 import {ActionButton as Button} from '@/shared/ui/ActionButton';
 import {SelectField} from '@/shared/ui/SelectField';
 import {useToast} from '@/shared/ui/ToastProvider';
 import {request} from './api.mjs';
 type Runner={id:string;name:string;lastSeenAt:string|null;executionMode?:string;runningJobs:number;completedJobs:number;assignedJobs:number;maxAgents:number;supportsConcurrency:boolean};
-export function WebRunnerSetup({language,advanced,onDisconnect}:{language:'es'|'en';advanced:ReactNode;onDisconnect:(runner:Runner)=>void}){
+export function WebRunnerSetup({language,onDisconnect}:{language:'es'|'en';onDisconnect:(runner:Runner)=>void}){
  const en=language==='en',{showToast}=useToast();
  const [platform,setPlatform]=useState<'windows'|'macos'|'linux'>(()=>/Mac/i.test(navigator.platform)?'macos':/Linux/i.test(navigator.platform)&&!/Android/i.test(navigator.userAgent)?'linux':'windows');
  const [macArch,setMacArch]=useState<'arm64'|'x64'>('arm64');
@@ -36,6 +36,5 @@ export function WebRunnerSetup({language,advanced,onDisconnect}:{language:'es'|'
    <li><span className="web-runner-step-number">3</span><div><h3>{en?'We confirm the connection':'Confirmamos la conexión'}</h3><p role="status">{online?(en?'Connected. Your computer can now receive tasks.':'Conectado. Tu equipo ya puede recibir tareas.'):!checkedAt&&!statusFailed?(en?'Checking connection…':'Comprobando conexión…'):statusFailed?(en?'Could not check the connection. Try again.':'No se pudo comprobar la conexión. Inténtalo de nuevo.'):(en?'Waiting for your computer. This updates automatically.':'Esperando a tu equipo. Este estado se actualiza automáticamente.')}</p><Button icon={RefreshCw} iconOnly variant="ghost" size="sm" onClick={()=>void refresh()}>{en?'Check now':'Comprobar ahora'}</Button></div></li>
   </ol>
   {!!runners.length&&<section className="web-runner-devices"><h3>{en?'Your computers':'Tus equipos'}</h3><p className="web-runner-queue" role="status">{en?`${queuedJobs} task(s) waiting in the shared queue`:`${queuedJobs} tareas en la cola compartida`}</p>{runners.map(r=><div className="web-runner-device" key={r.id}><Monitor size={18}/><div className="web-runner-device-content"><strong>{r.name}</strong><small>{r.lastSeenAt?new Date(r.lastSeenAt).toLocaleString(language):(en?'Not started yet':'Todavía no se ha iniciado')}</small><p>{en?`${r.runningJobs} running · ${r.assignedJobs} assigned · ${r.completedJobs} completed`:`${r.runningJobs} en ejecución · ${r.assignedJobs} asignadas · ${r.completedJobs} completadas`}</p><div className="web-admin-sheet-field"><span>{en?'Simultaneous agents':'Agentes simultáneos'}</span><SelectField value={String(r.maxAgents??1)} disabled={!r.supportsConcurrency||savingRunner===r.id} fullWidth={false} aria-label={en?'Simultaneous agents':'Agentes simultáneos'} options={[1,2,3,4].map(n=>({value:String(n),label:String(n)}))} onChange={value=>void saveAgents(r,Number(value))}/></div><small>{r.supportsConcurrency?(en?'Reducing the limit does not stop tasks already running.':'Reducir el límite no detiene las tareas que ya están en ejecución.'):(en?'Update this connector to enable multiple agents.':'Actualiza este conector para usar varios agentes.')}</small></div><Button variant="ghost" size="sm" onClick={()=>onDisconnect(r)}>{en?'Disconnect':'Desconectar'}</Button></div>)}</section>}
-  <details className="web-runner-advanced"><summary>{en?'Advanced tools and desktop migration':'Herramientas avanzadas e importación del escritorio'}</summary>{advanced}</details>
  </section>;
 }
