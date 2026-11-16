@@ -52,12 +52,8 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Install verified dependencies
         run: |
-          EXTRA_FLAGS=""
-          if [ "${{ matrix.suite }}" != "connector" ]; then
-            EXTRA_FLAGS="--no-optional"
-          fi
           for attempt in 1 2 3; do
-            if node scripts/install-dependencies.mjs $EXTRA_FLAGS; then exit 0; fi
+            if node scripts/install-dependencies.mjs; then exit 0; fi
             if [ "$attempt" -lt 3 ]; then
               echo "Dependency verification failed; retrying ($attempt/3)."
               sleep $((attempt * 5))
@@ -146,7 +142,7 @@ jobs:
       - name: Install verified dependencies
         run: |
           for attempt in 1 2 3; do
-            if node scripts/install-dependencies.mjs --no-optional; then exit 0; fi
+            if node scripts/install-dependencies.mjs; then exit 0; fi
             if [ "$attempt" -lt 3 ]; then
               echo "Dependency verification failed; retrying ($attempt/3)."
               sleep $((attempt * 5))
