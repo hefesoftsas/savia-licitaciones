@@ -57,6 +57,7 @@ test('el CLI anuncia el borrador técnico solo cuando están las herramientas', 
   const dir = await mkdtemp(join(tmpdir(), 'savia-plan-cli-'));
   const server = createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
+    if (req.url === '/api/runner/config') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"items":[]}'); return; }
     server.received = JSON.parse(raw); res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"job":null}');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
