@@ -41,15 +41,19 @@ async function enqueueSecopRunnerJob(env, ownerId, projectId, portfolioId, doc, 
   if (await env.DB.prepare('SELECT 1 AS present FROM secop_zip_files WHERE project_id=? AND document_id=? LIMIT 1').bind(projectId, documentId).first()) return { imported: true };
   return { conflict: true };
 }
+function fetchPlacspDocuments(id, {url, reference} = {}) {
+  const catalanId = /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\/\d+(?:[/?#]|$)/i.exec(url || '')?.[1];
+  const pscpId = id.startsWith('pscp:') ? id : catalanId && 'pscp:' + catalanId;
+  if (pscpId) return placsp.createPlacspService().fetchPscpProcessDocuments(pscpId, {reference});
+  if (id.startsWith('licit:') && url) return fetchPlacspPortalDocuments(url);
+  return Promise.resolve([]);
+}
+
 async function resolvePlacspDocuments(env, id, row, process = {}) {
   const saved = !id.startsWith('licit:') && Array.isArray(process.documents) && process.documents.length
     ? process.documents : JSON.parse(row?.documents_json || '[]');
   if (saved.length) return saved;
-  const docs = await (id.startsWith('pscp:')
-    ? placsp.createPlacspService().fetchPscpProcessDocuments(id, {reference:row?.reference || process.reference || ''})
-    : id.startsWith('licit:') && row?.url
-      ? fetchPlacspPortalDocuments(row.url)
-      : Promise.resolve([])).catch(() => []);
+  const docs = await fetchPlacspDocuments(id, {url:row?.url, reference:row?.reference || process.reference}).catch(() => []);
   if (docs.length && row) {
     await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?')
       .bind(JSON.stringify(docs), id).run();
@@ -79,7 +83,7 @@ export async function secopDocuments(request, env, ownerId, projectId, documentI
     if (!fileTypes[doc.extension]) return Response.json({ error: 'unsupported_document' }, { status: 400 });
     let response;
     try {
-      const officialAttachment = process.id.startsWith('licit:');
+      const officialAttachment = process.id.startsWith('licit:') && new URL(safeUrl).hostname !== 'contractaciopublica.cat';
       response = await fetch(safeUrl, {
         redirect: officialAttachment ? 'manual' : 'follow',
         headers: officialAttachment ? placspDocumentHeaders(fileTypes[doc.extension]) : undefined,
@@ -430,7 +434,7 @@ export async function getPlacspDetail(env, id, {fresh = false} = {}) {
   if (fresh && isLicitTenderId(id)) {
     try {
       const tender = await getLicitTender(id);
-      try { tender.documents = await fetchPlacspPortalDocuments(tender.url); } catch { /* Keep the cached catalog. */ }
+      try { tender.documents = await fetchPlacspDocuments(id, tender); } catch { /* Keep the cached catalog. */ }
       await upsertPlacspEntries(env, [tender]);
     } catch {
       return {success:false, data:null, message:'No se pudo actualizar el expediente en licit.es.'};

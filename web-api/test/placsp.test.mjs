@@ -184,8 +184,19 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
           + '<cac:Attachment><cac:ExternalReference><cbc:URI>https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=COG-ATTACHMENT</cbc:URI>'
           + '</cac:ExternalReference></cac:Attachment></cac:LegalDocumentReference></CallForTenders>', {headers:{'content-type':'application/xml'}});
       }
+      if (url.hostname === 'contractaciopublica.cat' && url.pathname === '/qa-terrassa.json') {
+        return Response.json({publicacio:{dadesPublicacio:{plecsDeClausulesAdministratives:{ca:[
+          {id:302782745, hash:'official-hash', titol:'PCAP Terrassa.pdf'},
+        ]}}}});
+      }
+      if (url.hostname === 'contractaciopublica.cat' && url.pathname === '/portal-api/descarrega-document/302782745/official-hash') {
+        return new Response('%PDF-1.4 Terrassa', {headers:{'content-type':'application/pdf'}});
+      }
       if (url.hostname === 'analisi.transparenciacatalunya.cat') {
         const where = url.searchParams.get('$where') || '';
+        if (where === "id_intern='a772d77f-07cd-4827-8745-919be611b2e0'") {
+          return Response.json([{url_json_licitacio:{url:'https://contractaciopublica.cat/qa-terrassa.json'}}]);
+        }
         if (where.includes('SANEAMIENTO')) return Response.json(['0', '1'].map(lot => ({
           id_intern:'qa-overlap_' + lot, codi_expedient:'QA-PSCP-OVERLAP',
           denominacio:'Saneamiento municipal', enllac_publicacio:duplicatePscpUrl,
@@ -333,6 +344,24 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
     const downloaded = await req('/api/projects/' + cog.id + '/files/' + cogFile.id, {headers:{cookie}});
     assert.equal(downloaded.status, 200);
     assert.match(await downloaded.text(), /^%PDF-/);
+    const terrassaId = 'licit:507e7c83-81ed-7cb6-84be-73d55d84378e';
+    await db.prepare('INSERT INTO placsp_tenders (id, title, reference, url, synced_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(terrassaId, 'Saneamiento de Terrassa', 'ECAS 10370/2026',
+        'https://contractaciopublica.cat/ca/detall-publicacio/a772d77f-07cd-4827-8745-919be611b2e0/300934689', Date.now()).run();
+    const terrassaCatalog = await req('/api/secop/documents?source=placsp&id=' + encodeURIComponent(terrassaId), {headers:{cookie}});
+    const [terrassaPcap] = (await terrassaCatalog.json()).data.items;
+    assert.equal(terrassaPcap?.name, 'PCAP Terrassa.pdf');
+    const terrassaProject = await post('/api/projects/from-secop', {
+      process:{source:'placsp', id:terrassaId, title:'Saneamiento de Terrassa'}, documentIds:[terrassaPcap.id],
+    }, cookie);
+    assert.equal(terrassaProject.status, 201);
+    const {project:terrassa} = await terrassaProject.json();
+    const terrassaImport = await post('/api/projects/' + terrassa.id + '/secop/documents/' + terrassaPcap.id + '/import', {}, cookie);
+    assert.equal(terrassaImport.status, 201, await terrassaImport.clone().text());
+    const {file:terrassaFile} = await terrassaImport.json();
+    const terrassaDownload = await req('/api/projects/' + terrassa.id + '/files/' + terrassaFile.id, {headers:{cookie}});
+    assert.equal(await terrassaDownload.text(), '%PDF-1.4 Terrassa');
+    await db.prepare('DELETE FROM placsp_tenders WHERE id = ?').bind(terrassaId).run();
     assert.equal(atomRequests, priorAtomRequests);
     useLicit = false;
     boePortalStatus = null;
