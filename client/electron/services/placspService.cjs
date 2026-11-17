@@ -339,6 +339,13 @@ async function readStreamWithLimits(response, { softDeadlineMs = SOFT_DEADLINE_M
   }
 }
 
+function placspKeywordVariants(keyword) {
+  const term = typeof keyword === 'string' ? keyword.trim() : '';
+  if (!term) return [];
+  const floodTerms = ['inundaciones', 'inundacions'];
+  return floodTerms.includes(term.toLowerCase()) ? floodTerms : [term];
+}
+
 function escapeSoql(value) {
   return String(value).replace(/'/g, "''");
 }
@@ -517,11 +524,13 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
     if (!addLikeFilter('fase_publicacio', params.status) && !params.openOnly) {
       where.push("fase_publicacio like '%licitaci%'");
     }
-    if (typeof params.keyword === 'string' && params.keyword.trim()) {
-      const kw = escapeSoql(params.keyword.trim().toUpperCase());
-      where.push(
-        `(upper(denominacio) like '%${kw}%' OR upper(objecte_contracte) like '%${kw}%' OR upper(nom_organ) like '%${kw}%' OR upper(codi_expedient) like '%${kw}%')`
-      );
+    const keywords = placspKeywordVariants(params.keyword);
+    if (keywords.length) {
+      const columns = ['denominacio', 'objecte_contracte', 'nom_organ', 'codi_expedient'];
+      const clauses = keywords.flatMap(term => columns.map(column =>
+        `upper(${column}) like '%${escapeSoql(term.toUpperCase())}%'`
+      ));
+      where.push(`(${clauses.join(' OR ')})`);
     }
     if (params.classificationClass) {
       const cpv = String(params.classificationClass).replace(/[^0-9]/g, '').slice(0, 8);
@@ -679,6 +688,7 @@ module.exports = {
   PSCP_OPEN_PHASE,
   PLACSP_OPEN_STATUS,
   placspDeadlineCutoff,
+  placspKeywordVariants,
   parseAtomFeed,
   validatePlacspUrl,
   extractPscpDocumentsFromPublicationJson,

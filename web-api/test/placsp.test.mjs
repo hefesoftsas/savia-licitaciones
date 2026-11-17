@@ -118,6 +118,10 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
       }
       if (url.hostname === 'analisi.transparenciacatalunya.cat') {
         const where = url.searchParams.get('$where') || '';
+        if (where.includes('INUNDACIONS')) {
+          return Response.json([{id_intern:'qa-flood', denominacio:'QA Torrent', objecte_contracte:'Prevenció d’inundacions',
+            fase_publicacio:'Anunci de licitació', termini_presentacio_ofertes:'2099-01-01T12:00:00'}]);
+        }
         if (where.includes('QA PAGINATION')) {
           const offset = Number(url.searchParams.get('$offset') || 0);
           return Response.json(Array.from({length:22}, (_, i) => ({
@@ -206,6 +210,11 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
     assert.deepEqual(secondPage.items.map(item=>item.id), ['pscp:qa-page-21','pscp:qa-page-22','qa-page-atom']);
     assert.equal(secondPage.truncated, false);
     await db.prepare("DELETE FROM placsp_tenders WHERE id LIKE 'qa-page-%' OR id LIKE 'pscp:qa-page-%'").run();
+
+    const floodSearch = await post('/api/secop/search', {dataset:'placsp',keyword:'inundaciones',openOnly:true}, cookie);
+    assert.equal(floodSearch.status, 200);
+    assert.deepEqual((await floodSearch.json()).data.items.map(item=>item.id), ['pscp:qa-flood']);
+    await db.prepare('DELETE FROM placsp_tenders WHERE id = ?').bind('pscp:qa-flood').run();
 
     const searchRes = await post('/api/secop/search', {
       dataset: 'placsp',

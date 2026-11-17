@@ -274,10 +274,11 @@ export async function searchPlacspD1(env, params = {}) {
     where.push("status_code = ? AND deadline > ? AND (id NOT LIKE 'pscp:%' OR status = ?)");
     binds.push(placsp.PLACSP_OPEN_STATUS, deadlineCutoff, placsp.PSCP_OPEN_PHASE);
   }
-  if (params.keyword?.trim()) {
-    const like = `%${params.keyword.trim()}%`;
-    where.push('(title LIKE ? OR entity LIKE ? OR reference LIKE ? OR cpv_codes_json LIKE ? OR description LIKE ?)');
-    binds.push(like, like, like, like, like);
+  const keywords = placsp.placspKeywordVariants(params.keyword);
+  if (keywords.length) {
+    const columns = ['title', 'entity', 'reference', 'cpv_codes_json', 'description'];
+    where.push(`(${keywords.flatMap(() => columns.map(column => `${column} LIKE ?`)).join(' OR ')})`);
+    binds.push(...keywords.flatMap(term => columns.map(() => `%${term}%`)));
   }
   if (params.classificationClass && /^\d{4,8}$/.test(String(params.classificationClass))) {
     const prefix = `${String(params.classificationClass)}%`;
