@@ -123,8 +123,48 @@ export default function WebSecop({ language, market = 'ALL', onCreated }: { lang
   const hasExperience = rupFacts.some(fact=>/^(?:UNSPSC experiencia #\d+|CPV(?:\s+#?\d+)?|Código CPV(?:\s+#?\d+)?)(?:\s|$)/i.test(fact.label));
   const displayed = opportunityRows(results || [],rupFacts,prioritize);
   const requestId = useRef(0), appendInFlight = useRef(false);
+  const marketRef = useRef(market), prevMarketRef = useRef(market), formDatasetRef = useRef(form.dataset);
+  marketRef.current = market;
+  formDatasetRef.current = form.dataset;
   const scrollRoot = useRef<HTMLDivElement>(null), sentinel = useRef<HTMLDivElement>(null), dragged = useRef<SecopColumn | null>(null);
-  useEffect(() => { let live=true; request<Pick<Search,'dataset'|'department'|'modality'|'status'>>('/api/secop/preferences').then(data=>{if(live&&!new URLSearchParams(window.location.search).has('search'))setForm(current=>({...current,...data}));}).catch(()=>showToast(en?'Could not load saved filters.':'No se pudieron cargar los filtros guardados.','error')); return()=>{live=false;requestId.current++;}; }, []);
+  useEffect(() => {
+    let live = true;
+    request<Pick<Search, 'dataset' | 'department' | 'modality' | 'status'>>('/api/secop/preferences')
+      .then(data => {
+        if (!live || new URLSearchParams(window.location.search).has('search')) return;
+        const activeMarket = marketRef.current;
+        const dataset: SecopDataset =
+          activeMarket === 'ES'
+            ? 'placsp'
+            : activeMarket === 'CO' && data.dataset === 'placsp'
+              ? 'secop-ii'
+              : data.dataset;
+        setForm(current => ({
+          ...current,
+          ...data,
+          dataset,
+          ...(dataset !== data.dataset ? { department: [], modality: [], status: [], cpvCode: '' } : {}),
+        }));
+      })
+      .catch(() => showToast(en ? 'Could not load saved filters.' : 'No se pudieron cargar los filtros guardados.', 'error'));
+    return () => { live = false; requestId.current++; };
+  }, []);
+  useEffect(() => {
+    if (prevMarketRef.current === market) return;
+    prevMarketRef.current = market;
+    if (market === 'ES' || (market === 'CO' && formDatasetRef.current === 'placsp')) {
+      const nextDataset: SecopDataset = market === 'ES' ? 'placsp' : 'secop-ii';
+      requestId.current++;
+      appendInFlight.current = false;
+      setPageError(false);
+      setSearchError(false);
+      setLoading(false);
+      setResults(null);
+      setActive(null);
+      setTruncated(false);
+      setForm(current => ({ ...current, dataset: nextDataset, department: [], modality: [], status: [], cpvCode: '' }));
+    }
+  }, [market]);
   useEffect(()=>{let live=true;void loadOpportunityRup(request).then(facts=>{if(live)setRupFacts(facts);}).catch(()=>{if(live)setRupFailed(true);});return()=>{live=false;};},[]);
   const spainDataset = isSpainMarket(form.dataset, undefined, market);
   const columnLabel = (key: SecopColumn) => key === 'department' && spainDataset ? (en ? 'Territory' : 'Territorio') : labels[language][key];
@@ -132,7 +172,7 @@ export default function WebSecop({ language, market = 'ALL', onCreated }: { lang
     ? [{ value: 'placsp', label: 'PLACSP (España)' }, { value: 'secop-ii', label: 'SECOP II' }, { value: 'contratos', label: en ? 'Contracts (SECOP II)' : 'Contratos (SECOP II)' }, { value: 'secop-i', label: 'SECOP I' }]
     : [{ value: 'secop-ii', label: 'SECOP II' }, { value: 'placsp', label: 'PLACSP (España)' }, { value: 'contratos', label: en ? 'Contracts' : 'Contratos' }, { value: 'secop-i', label: 'SECOP I' }];
   const persist = (value:Search) => request('/api/secop/preferences',{method:'PUT',json:{dataset:value.dataset,department:value.department,modality:value.modality,status:value.status}}).catch(()=>showToast(en?'Could not save filters.':'No se pudieron guardar los filtros.','error'));
-  const execute = async (search:SecopSearchParams, append=false, fresh=false) => { if(append&&appendInFlight.current)return; const id=++requestId.current; appendInFlight.current=append; setPageError(false); if(!append)setSearchError(false); setLoading(true); try { const result=await request<{data:{items:SecopProcess[];truncated:boolean}}>('/api/secop/search',{method:'POST',signal:AbortSignal.timeout(35_000),json:{...search,language,fresh}}); if(id!==requestId.current)return; setResults(previous=>append?Array.from(new Map([...(previous||[]),...result.data.items].map(item=>[`${item.source}:${item.id}`,item])).values()):result.data.items);setTruncated(result.data.truncated && result.data.items.length>0);setActive(search);setShowFilters(false); } catch {if(id===requestId.current){if(append)setPageError(true);else {setSearchError(true);setShowFilters(true);}}} finally {if(id===requestId.current){appendInFlight.current=false;setLoading(false);}} };
+  const execute = async (search:SecopSearchParams, append=false, fresh=false) => { if(append&&appendInFlight.current)return; const id=++requestId.current; appendInFlight.current=append; setPageError(false); if(!append)setSearchError(false); setLoading(true); try { const result=await request<{data:{items:SecopProcess[];truncated:boolean}}>('/api/secop/search',{method:'POST',signal:AbortSignal.timeout((search.dataset || form.dataset) === 'placsp' ? 45_000 : 35_000),json:{...search,language,fresh}}); if(id!==requestId.current)return; setResults(previous=>append?Array.from(new Map([...(previous||[]),...result.data.items].map(item=>[`${item.source}:${item.id}`,item])).values()):result.data.items);setTruncated(result.data.truncated && result.data.items.length>0);setActive(search);setShowFilters(false); } catch {if(id===requestId.current){if(append)setPageError(true);else {setSearchError(true);setShowFilters(true);}}} finally {if(id===requestId.current){appendInFlight.current=false;setLoading(false);}} };
   useEffect(()=>{if(!truncated || loading || pageError || !active || !sentinel.current || !scrollRoot.current)return;const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))void execute({...active,offset:(active.offset||0)+20},true);},{root:scrollRoot.current,rootMargin:'120px'});observer.observe(sentinel.current);return()=>observer.disconnect();},[truncated,loading,pageError,active,results]);
   const saveSearchLink=(search:SecopSearchParams)=>{const url=new URL(window.location.href),params=url.searchParams;for(const key of ['dataset','keyword','cpvCode','department','modality','status','fromDate','minValue','maxValue','sortBy','sortDirection','filters'])params.delete(key);params.set('search','1');for(const key of ['dataset','keyword','cpvCode','fromDate','minValue','maxValue','sortBy','sortDirection'] as const){const value=search[key];if(value!==undefined&&value!==null&&String(value)!=='')params.set(key,String(value));}for(const key of ['department','modality','status'] as const){const value=search[key];if(Array.isArray(value))value.forEach(item=>params.append(key,item));}if(search.columnFilters&&Object.keys(search.columnFilters).length)params.set('filters',JSON.stringify(search.columnFilters));window.history.pushState(null,'',url);window.dispatchEvent(new Event('savia:route-detail'));};
   useEffect(()=>{const restore=()=>{const p=new URLSearchParams(window.location.search);if(p.get('view')!=='secop'||p.get('opportunity')==='suggestions'||!p.has('search'))return;const dataset=(['secop-ii','secop-i','contratos','placsp'].includes(p.get('dataset')||'')?p.get('dataset'):(market==='ES'?'placsp':'secop-ii')) as SecopDataset;const safe=(key:string)=>(p.get(key)||'').slice(0,300);const next:Search={dataset,keyword:safe('keyword'),cpvCode:safe('cpvCode'),department:p.getAll('department').slice(0,50),modality:p.getAll('modality').slice(0,50),status:p.getAll('status').slice(0,50),fromDate:safe('fromDate'),minValue:safe('minValue'),maxValue:safe('maxValue')};let columnFilters={};try{const parsed=JSON.parse(p.get('filters')||'{}');if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))columnFilters=Object.fromEntries(Object.entries(parsed).filter(([key,value])=>columns.includes(key as SecopColumn)&&typeof value==='string').slice(0,columns.length));}catch{/* Ignore malformed link filters. */}const sortBy=columns.includes(p.get('sortBy') as SecopColumn)?p.get('sortBy') as SecopColumn:'publicationDate';const sortDirection=p.get('sortDirection')==='asc'?'asc':'desc';const order:SecopSearchParams={sortBy,sortDirection,columnFilters};setForm(next);setQuery(order);setDraft(columnFilters);void execute({...next,...order,minValue:next.minValue?Number(next.minValue):undefined,maxValue:next.maxValue?Number(next.maxValue):undefined,offset:0});};restore();window.addEventListener('popstate',restore);return()=>window.removeEventListener('popstate',restore);},[]);
