@@ -205,3 +205,76 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
     await rm(build, { recursive: true, force: true });
   }
 });
+
+test('placspService recupera entradas completas cuando el stream Atom se corta por soft deadline o maxBytes', async () => {
+  const encoder = new TextEncoder();
+  const completePrefix = SAMPLE_ATOM.replace(/<\/feed>\s*$/, '');
+  const truncatedSecondEntry = `
+  <entry>
+    <id>https://contrataciondelsectorpublico.gob.es/sindicacion/licitacionesPerfilContratante/999999</id>
+    <title>Entrada incompleta que se corta a mitad`;
+
+  // 1. Soft deadline hit mid-second-entry: should cancel reader and return the 1st complete entry
+  let softCancelled = false;
+  const softStream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(completePrefix));
+      controller.enqueue(encoder.encode(truncatedSecondEntry));
+    },
+    cancel() {
+      softCancelled = true;
+    },
+  });
+  const softService = placsp.createPlacspService({
+    fetchImpl: async () => new Response(softStream, { status: 200, headers: { 'content-type': 'application/atom+xml' } }),
+  });
+  const softParsed = await softService.fetchFeedPage(placsp.DEFAULT_FEED_URL, { timeoutMs: 5000, softDeadlineMs: 40 });
+  assert.equal(softCancelled, true);
+  assert.equal(softParsed.entries.length, 1);
+  assert.equal(softParsed.entries[0].reference, 'EXP-2026-001');
+  assert.equal(softParsed.nextUrl, 'https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_643/page2.atom');
+
+  // 2. Max byte cap hit mid-second-entry: should cancel reader and return the 1st complete entry
+  let bytesCancelled = false;
+  const bytesStream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(completePrefix));
+      controller.enqueue(encoder.encode(truncatedSecondEntry));
+      controller.enqueue(encoder.encode('x'.repeat(500)));
+      controller.close();
+    },
+    cancel() {
+      bytesCancelled = true;
+    },
+  });
+  const bytesService = placsp.createPlacspService({
+    fetchImpl: async () => new Response(bytesStream, { status: 200, headers: { 'content-type': 'application/atom+xml' } }),
+  });
+  const bytesParsed = await bytesService.fetchFeedPage(placsp.DEFAULT_FEED_URL, {
+    timeoutMs: 5000,
+    softDeadlineMs: 5000,
+    maxBytes: encoder.encode(completePrefix).byteLength + 10,
+  });
+  assert.equal(bytesCancelled, true);
+  assert.equal(bytesParsed.entries.length, 1);
+  assert.equal(bytesParsed.entries[0].reference, 'EXP-2026-001');
+
+  // 3. Soft deadline hit with 0 complete </entry> tags: should throw TimeoutError
+  let emptyCancelled = false;
+  const emptyStream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('<?xml version="1.0"?><feed><updated>2026-11-15T10:00:00Z</updated><entry><title>Solo inicio'));
+    },
+    cancel() {
+      emptyCancelled = true;
+    },
+  });
+  const emptyService = placsp.createPlacspService({
+    fetchImpl: async () => new Response(emptyStream, { status: 200, headers: { 'content-type': 'application/atom+xml' } }),
+  });
+  await assert.rejects(
+    () => emptyService.fetchFeedPage(placsp.DEFAULT_FEED_URL, { timeoutMs: 5000, softDeadlineMs: 30 }),
+    err => err?.name === 'TimeoutError'
+  );
+  assert.equal(emptyCancelled, true);
+});

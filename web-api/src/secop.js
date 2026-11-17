@@ -200,7 +200,7 @@ function placspRowToProcess(row) {
   };
 }
 
-export async function syncPlacspFeed(env, { force = false, maxPages = 2 } = {}) {
+export async function syncPlacspFeed(env, { force = false, maxPages = 1 } = {}) {
   const now = Date.now();
   const state = await env.DB.prepare('SELECT last_synced_at, entry_count FROM placsp_sync_state WHERE id = 1').first();
   if (!force && state?.last_synced_at && now - state.last_synced_at < PLACSP_SYNC_TTL_MS && state.entry_count > 0) {

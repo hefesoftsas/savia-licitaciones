@@ -10,6 +10,8 @@
  */
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const SOFT_DEADLINE_MS = 18_000;
+const MAX_FEED_BYTES = 2_000_000;
 const USER_AGENT = 'savia-licitaciones';
 const DEFAULT_FEED_URL = 'https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom';
 const AGGREGATED_FEED_URL = 'https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_1044/PlataformasAgregadasSinMenores.atom';
@@ -259,29 +261,116 @@ function parseAtomFeed(xmlText) {
   return { updated, nextUrl, entries };
 }
 
-function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
-  async function fetchFeedPage(url = DEFAULT_FEED_URL, timeoutMs = REQUEST_TIMEOUT_MS) {
-    const response = await fetchImpl(url, {
-      method: 'GET',
-      headers: { 'User-Agent': USER_AGENT, Accept: 'application/atom+xml, application/xml, text/xml' },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) {
-      throw Object.assign(new Error(`PLACSP feed request failed: HTTP ${response.status}`), {
-        status: response.status,
-        transient: [502, 503, 504].includes(response.status),
-      });
+function truncatePartialAtomFeed(xml) {
+  const closeTag = '</entry>';
+  const lastIdx = xml.lastIndexOf(closeTag);
+  if (lastIdx === -1) return null;
+  return `${xml.slice(0, lastIdx + closeTag.length)}\n</feed>`;
+}
+
+async function readStreamWithLimits(response, { softDeadlineMs = SOFT_DEADLINE_MS, maxBytes = MAX_FEED_BYTES } = {}) {
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    return response.text();
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let text = '';
+  let totalBytes = 0;
+  let softTimedOut = false;
+  let softTimer;
+
+  const deadlinePromise = new Promise(resolve => {
+    softTimer = setTimeout(() => {
+      softTimedOut = true;
+      resolve({ timedOut: true });
+    }, softDeadlineMs);
+  });
+
+  try {
+    while (true) {
+      const result = await Promise.race([reader.read(), deadlinePromise]);
+      if (result?.timedOut || softTimedOut) {
+        text += decoder.decode();
+        const partial = truncatePartialAtomFeed(text);
+        await reader.cancel().catch(() => {});
+        if (partial) return partial;
+        throw Object.assign(new Error('PLACSP feed request timed out'), { name: 'TimeoutError' });
+      }
+      const { done, value } = result;
+      if (done) {
+        text += decoder.decode();
+        return text;
+      }
+      if (value) {
+        totalBytes += value.byteLength;
+        text += decoder.decode(value, { stream: true });
+        if (totalBytes >= maxBytes) {
+          text += decoder.decode();
+          const partial = truncatePartialAtomFeed(text);
+          await reader.cancel().catch(() => {});
+          if (partial) return partial;
+          throw new Error(`PLACSP feed exceeded ${maxBytes} bytes before completing any entry`);
+        }
+      }
     }
-    const xml = await response.text();
-    return parseAtomFeed(xml);
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      text += decoder.decode();
+      const partial = truncatePartialAtomFeed(text);
+      if (partial) return partial;
+    }
+    throw error;
+  } finally {
+    clearTimeout(softTimer);
+    try { reader.releaseLock(); } catch { /* ignore */ }
+  }
+}
+
+function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
+  async function fetchFeedPage(url = DEFAULT_FEED_URL, timeoutOrOptions = REQUEST_TIMEOUT_MS, extraOptions = {}) {
+    const opts = typeof timeoutOrOptions === 'object' && timeoutOrOptions !== null
+      ? timeoutOrOptions
+      : { timeoutMs: timeoutOrOptions, ...extraOptions };
+    const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
+    const softDeadlineMs = opts.softDeadlineMs ?? Math.min(SOFT_DEADLINE_MS, timeoutMs);
+    const maxBytes = opts.maxBytes ?? MAX_FEED_BYTES;
+
+    const controller = new AbortController();
+    const hardTimer = setTimeout(() => {
+      controller.abort(Object.assign(new Error('The operation timed out'), { name: 'TimeoutError' }));
+    }, timeoutMs);
+
+    try {
+      const response = await fetchImpl(url, {
+        method: 'GET',
+        headers: { 'User-Agent': USER_AGENT, Accept: 'application/atom+xml, application/xml, text/xml' },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw Object.assign(new Error(`PLACSP feed request failed: HTTP ${response.status}`), {
+          status: response.status,
+          transient: [502, 503, 504].includes(response.status),
+        });
+      }
+      const xml = await readStreamWithLimits(response, { softDeadlineMs, maxBytes });
+      return parseAtomFeed(xml);
+    } finally {
+      clearTimeout(hardTimer);
+    }
   }
 
-  async function fetchLatestEntries({ feedUrl = DEFAULT_FEED_URL, maxPages = 2, timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
+  async function fetchLatestEntries({
+    feedUrl = DEFAULT_FEED_URL,
+    maxPages = 2,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+    softDeadlineMs,
+    maxBytes,
+  } = {}) {
     const byId = new Map();
     let currentUrl = feedUrl;
     let feedUpdated = '';
     for (let page = 0; page < maxPages && currentUrl; page++) {
-      const parsed = await fetchFeedPage(currentUrl, timeoutMs);
+      const parsed = await fetchFeedPage(currentUrl, { timeoutMs, softDeadlineMs, maxBytes });
       if (page === 0) feedUpdated = parsed.updated;
       for (const entry of parsed.entries) {
         if (!byId.has(entry.id)) byId.set(entry.id, entry);
