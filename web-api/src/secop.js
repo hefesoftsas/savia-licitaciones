@@ -230,6 +230,7 @@ export async function syncPlacspFeed(env, { force = false, maxPages = 1 } = {}) 
   try {
     const api = placsp.createPlacspService();
     const { updated, entries } = await api.fetchLatestEntries({ maxPages });
+    if (!entries.length) throw new Error('Las fuentes de contratación no devolvieron oportunidades.');
     await upsertPlacspEntries(env, entries, now);
     const totalRow = await env.DB.prepare('SELECT COUNT(*) AS cnt FROM placsp_tenders').first();
     const entryCount = totalRow?.cnt || 0;

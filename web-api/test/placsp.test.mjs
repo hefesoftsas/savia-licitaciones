@@ -335,6 +335,7 @@ test('placspService.searchPscpSocrata construye consultas SoQL válidas y mapea 
   const res = await service.searchPscpSocrata({
     keyword: "servicios d'software",
     classificationClass: '722',
+    columnFilters: {entity: 'Girona', value: '90000', deadline: '2026-12-01'},
     department: 'Barcelona',
     modality: 'Obert',
     fromDate: '2026-11-01',
@@ -361,6 +362,10 @@ test('placspService.searchPscpSocrata construye consultas SoQL válidas y mapea 
   assert.ok(where.includes("data_publicacio_anunci >= '2026-11-01T00:00:00'"), where);
   assert.ok(where.includes('valor_estimat_contracte >= 50000'), where);
   assert.ok(where.includes('valor_estimat_contracte <= 250000'), where);
+  assert.ok(where.includes("upper(nom_organ) like '%GIRONA%'"), where);
+  assert.ok(where.includes('valor_estimat_contracte = 90000'), where);
+  assert.ok(where.includes("termini_presentacio_ofertes >= '2026-12-01T00:00:00'"), where);
+  assert.ok(where.includes("termini_presentacio_ofertes < '2026-12-02T00:00:00'"), where);
   assert.equal(parsedUrl.searchParams.get('$limit'), '3');
   assert.equal(parsedUrl.searchParams.get('$offset'), '4');
   assert.equal(parsedUrl.searchParams.get('$order'), 'valor_estimat_contracte ASC');
@@ -375,4 +380,19 @@ test('placspService.searchPscpSocrata construye consultas SoQL válidas y mapea 
   assert.equal(res.items[0].classificationCode, '72200000');
   assert.deepEqual(res.items[0].cpvCodes, ['72200000']);
   assert.equal(res.items[0].url, 'https://contractaciopublica.cat/ca/detall-publicacio/1001');
+});
+
+test('PLACSP carga las oportunidades de PSCP cuando Atom responde vacío', async () => {
+  const urls = [];
+  const service = placsp.createPlacspService({
+    fetchImpl: async url => {
+      urls.push(url);
+      return url === placsp.DEFAULT_FEED_URL
+        ? new Response('<feed><updated>2026-11-17T12:00:00Z</updated></feed>')
+        : Response.json([{id_intern: '1234', denominacio: 'Obres municipals'}]);
+    },
+  });
+  const {entries} = await service.fetchLatestEntries({maxPages: 1});
+  assert.deepEqual(entries.map(item => item.id), ['pscp:1234']);
+  assert.equal(new URL(urls[1]).hostname, 'analisi.transparenciacatalunya.cat');
 });

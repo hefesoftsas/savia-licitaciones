@@ -535,6 +535,25 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
       deadline: 'termini_presentacio_ofertes',
       department: 'lloc_execucio',
     };
+    for (const [key, value] of Object.entries(params.columnFilters || {})) {
+      const column = socrataSortMap[key];
+      const filter = String(value).trim();
+      if (!column || !filter) continue;
+      if (key === 'value' && Number.isFinite(Number(filter))) {
+        where.push(`valor_estimat_contracte = ${Number(filter)}`);
+      } else if (key === 'publicationDate' || key === 'deadline') {
+        const day = filter.slice(0, 10);
+        const start = Date.parse(`${day}T00:00:00Z`);
+        if (!Number.isFinite(start) || new Date(start).toISOString().slice(0, 10) !== day) return { items: [], truncated: false };
+        const end = new Date(start + 86_400_000).toISOString().slice(0, 10);
+        where.push(`${column} >= '${day}T00:00:00' AND ${column} < '${end}T00:00:00'`);
+      } else if (key === 'value') {
+        return { items: [], truncated: false };
+      } else {
+        addLikeFilter(column, filter);
+      }
+    }
+
     const orderCol = socrataSortMap[params.sortBy] || 'data_publicacio_anunci';
     const orderDir = params.sortDirection === 'asc' ? 'ASC' : 'DESC';
 
@@ -588,6 +607,9 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
         }
         throw error;
       }
+    }
+    if (!byId.size && fallbackToSocrata && feedUrl === DEFAULT_FEED_URL) {
+      return fetchPscpSocrataEntries({ timeoutMs: Math.min(timeoutMs, 15_000) });
     }
     return { updated: feedUpdated, entries: [...byId.values()] };
   }
