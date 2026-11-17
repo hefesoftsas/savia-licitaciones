@@ -10,7 +10,7 @@ test('captura hechos y análisis del proyecto y detecta cambios',async()=>{
   const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');
   for(const file of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${file}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES (?,?,?,0,0,0)').bind('alice','Alice','alice@example.com').run();
-  await DB.prepare('INSERT INTO projects VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+  await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
   await DB.prepare('INSERT INTO project_global_facts(project_id,revision,groups_json,snapshot_json,updated_at,mode) VALUES (?,?,?,?,?,?)').bind('p',1,JSON.stringify([{id:'fact',title:'Hecho',content:'Contenido'}]),'{}','2026','manual').run();
   await DB.prepare('INSERT INTO project_technical_analyses(project_id,category,revision,content,review_id,source_file_ids_json,source_snapshot_json,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind('p','project-overview',1,'Análisis anterior','review','[]','{}','2026').run();
   const env={DB,FILES},req=()=>new Request('http://localhost/capture'),runner={ownerId:'alice'};

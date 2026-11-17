@@ -12,7 +12,7 @@ test('recupera hechos y análisis como contenido pendiente de revisión y permit
   const DB=await worker.getD1Database('DB');
   for(const file of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${file}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES (?,?,?,0,0,0)').bind('alice','Alice','alice@example.com').run();
-  await DB.prepare('INSERT INTO projects VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+  await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
   await DB.prepare('INSERT INTO project_technical_plans(project_id,version,updated_at) VALUES (?,?,?)').bind('p',1,'2026').run();
   await DB.prepare('INSERT INTO desktop_plan_imports VALUES (?,?,?,?,?,?)').bind('alice','req','hash','p','mutation','2026').run();
   const context={facts:{groups:[{id:'f',title:'Hecho',content:'Contenido'}]},analyses:[{category:'project-overview',content:'Análisis anterior'}],importedAnalyses:[]};

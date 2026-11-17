@@ -12,7 +12,7 @@ test('recupera revisiones privadas, remapea vínculos y respeta eliminaciones y 
   const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');
   for(const f of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${f}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   for(const id of ['alice','bob'])await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,0,0,0)').bind(id,id,`${id}@example.com`).run();
-  await DB.prepare('INSERT INTO projects VALUES(?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+  await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
   await DB.prepare('INSERT INTO desktop_plan_imports VALUES(?,?,?,?,?,?)').bind('alice','request','hash','p','mutation','2026').run();
   await DB.prepare('INSERT INTO desktop_plan_file_imports VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').bind('alice','request',hash('original'),'new-file','p','hash','oferta.docx','application/octet-stream',1,'source','mutation','2026').run();
   await DB.prepare('INSERT INTO project_files VALUES(?,?,?,?,?,?,?)').bind('new-file','p','oferta.docx','application/octet-stream','source',1,'2026').run();

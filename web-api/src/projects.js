@@ -3,8 +3,9 @@ import {uploadProjectFile} from './project-web-upload.js';
 import {projectWebMultipart} from './project-web-multipart.js';
 import {cleanupDesktopUploads, uploadLeaseMs} from './desktop-file-cleanup.js';
 
-export async function handleProjects(request, env, userId) {
+export async function handleProjects(request, env, userId, tenantCountry) {
   const url = new URL(request.url);
+  const fixedCountry = tenantCountry === 'ES' || tenantCountry === 'CO' ? tenantCountry : null;
   const multipart = /^\/api\/projects\/([^/]+)\/files\/multipart\/(start|complete|abort|part)(?:\/([^/]+))?$/.exec(url.pathname);
   if (multipart) return projectWebMultipart(request, env, userId, multipart[1], multipart[2], multipart[3]);
   const fileMatch = /^\/api\/projects\/([^/]+)\/files(?:\/([^/]+))?$/.exec(url.pathname);
@@ -22,12 +23,25 @@ export async function handleProjects(request, env, userId) {
     try { payload = await request.json(); } catch { return Response.json({ error: 'invalid_json' }, { status: 400 }); }
     const title = typeof payload?.title === 'string' ? payload.title.trim() : '';
     if (!title || title.length > 300) return Response.json({ error: 'invalid_title' }, { status: 400 });
+    const market = payload?.market ?? 'ALL';
+    if (!['CO', 'ES', 'ALL'].includes(market)) return Response.json({ error: 'invalid_market' }, { status: 400 });
+    const country = fixedCountry ?? (market === 'ALL' ? 'CO' : market);
     const project = { id: crypto.randomUUID(), title, createdAt: new Date().toISOString() };
-    await env.DB.prepare('INSERT INTO projects (id, owner_id, title, created_at) VALUES (?, ?, ?, ?)')
-      .bind(project.id, userId, project.title, project.createdAt).run();
+    await env.DB.prepare('INSERT INTO projects (id, owner_id, title, created_at, country) VALUES (?, ?, ?, ?, ?)')
+      .bind(project.id, userId, project.title, project.createdAt, country).run();
     return Response.json({ project }, { status: 201 });
   }
   if (request.method === 'GET' && !match[1]) {
+    const market = url.searchParams.get('market') ?? 'ALL';
+    if (!['CO', 'ES', 'ALL'].includes(market)) return Response.json({ error: 'invalid_market' }, { status: 400 });
+    const country = fixedCountry ?? (market === 'ALL' ? null : market);
+    const countryFilter = country ? `AND CASE
+      WHEN opportunity.source = 'placsp' THEN 'ES'
+      WHEN opportunity.source IN ('secop-i', 'secop-ii', 'contratos') THEN 'CO'
+      WHEN json_extract(opportunity.process_json, '$.country') IN ('CO', 'ES')
+        THEN json_extract(opportunity.process_json, '$.country')
+      ELSE COALESCE(p.country, ?)
+    END = ?` : '';
     const result = await env.DB.prepare(`SELECT p.id, p.title, p.created_at AS createdAt,
       (SELECT COUNT(*) FROM project_files f WHERE f.project_id=p.id) AS fileCount,
       (SELECT json_extract(s.process_json,'$.entity') FROM project_secop s WHERE s.project_id=p.id AND s.owner_id=p.owner_id) AS tenderEntity,
@@ -53,8 +67,10 @@ export async function handleProjects(request, env, userId) {
        OR EXISTS(SELECT 1 FROM technical_batch_drafts d WHERE d.project_id=p.id AND length(trim(d.content))>0)
        OR EXISTS(SELECT 1 FROM economic_offer_drafts e WHERE e.project_id=p.id)
        OR EXISTS(SELECT 1 FROM project_submission_records s WHERE s.project_id=p.id)) AS hasOffer
-      FROM projects p WHERE p.owner_id = ? ORDER BY p.created_at DESC, p.id`)
-      .bind(userId).all();
+      FROM projects p
+      LEFT JOIN project_secop opportunity ON opportunity.project_id = p.id AND opportunity.owner_id = p.owner_id
+      WHERE p.owner_id = ? ${countryFilter} ORDER BY p.created_at DESC, p.id`)
+      .bind(userId, ...(country ? [fixedCountry ?? 'CO', country] : [])).all();
     return Response.json({ projects: result.results });
   }
   if (request.method === 'GET' && match[1]) {

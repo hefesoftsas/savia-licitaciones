@@ -13,7 +13,7 @@ test('OCR aislado por proyecto respeta concesión, fuentes y versión',async()=>
  try{const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES'),env={DB,FILES,BETTER_AUTH_URL:'https://example.test'};
  for(const file of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(join(root,'migrations',file),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
  for(const u of ['alice','bob'])await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,0,0,0)').bind(u,u,`${u}@example.test`).run();
- for(const [id,owner] of [['p','alice'],['q','alice'],['r','bob']])await DB.prepare('INSERT INTO projects VALUES(?,?,?,?)').bind(id,owner,id,'2026').run();
+ for(const [id,owner] of [['p','alice'],['q','alice'],['r','bob']])await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind(id,owner,id,'2026').run();
  await DB.prepare('INSERT INTO runners(id,owner_id,name,token_hash,created_at) VALUES(?,?,?,?,?)').bind('runner','alice','local','hash','2026').run();
  const upload=await projectFeasibilityUploads(new Request('https://example.test/uploads',{method:'POST',headers:{origin:'https://example.test','idempotency-key':'source','x-file-name':'pliego.txt'},body:'contenido'}),env,'alice','p');assert.equal(upload.status,201);const source=(await upload.json()).source.sourceKey;
  await DB.prepare('INSERT INTO project_feasibility_reports VALUES(?,?,?,?,?)').bind('p','alice',JSON.stringify({sourceFiles:[{sourceKey:source,sourceType:'original'}]}),1,'2026').run();

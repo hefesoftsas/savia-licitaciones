@@ -13,7 +13,7 @@ async function setup() {
     for (const statement of sql.split(';').map(s => s.trim()).filter(Boolean)) await DB.prepare(statement).run();
   }
   for (const id of ['alice', 'bob']) await DB.prepare('INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt) VALUES (?,?,?,0,0,0)').bind(id,id,`${id}@example.com`).run();
-  for (const [id,owner] of [['a','alice'],['b','bob']]) await DB.prepare('INSERT INTO projects VALUES (?,?,?,?)').bind(id,owner,`Proyecto ${id}`,'2026-01-01').run();
+  for (const [id,owner] of [['a','alice'],['b','bob']]) await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind(id,owner,`Proyecto ${id}`,'2026-01-01').run();
   for (const [id,project] of [['file-a','a'],['file-b','b']]) {
     await FILES.put(`key-${id}`, id);
     await DB.prepare('INSERT INTO project_files VALUES (?,?,?,?,?,?,?)').bind(id,project,`${id}.txt`,'text/plain',`key-${id}`,id.length,'2026-01-01').run();

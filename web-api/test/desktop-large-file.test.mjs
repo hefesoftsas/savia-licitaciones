@@ -19,7 +19,7 @@ test('importa un archivo de más de 25 MiB por flujo, verifica hash y conserva r
   const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');
   for(const f of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(join(root,'migrations',f),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   for(const id of ['alice','bob']){await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,0,0,0)').bind(id,id,`${id}@example.com`).run();await DB.prepare('INSERT INTO runners(id,owner_id,name,token_hash,created_at) VALUES(?,?,?,?,?)').bind(id,id,id,createHash('sha256').update(id==='alice'?'a'.repeat(64):'b'.repeat(64)).digest('hex'),'2026').run();}
-  await DB.prepare('INSERT INTO projects VALUES(?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+  await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
   await DB.prepare('INSERT INTO desktop_plan_imports VALUES(?,?,?,?,?,?)').bind('alice','req','hash','p','mutation','2026').run();
   const data=Buffer.alloc(25*1024*1024+17,0x61), hash=createHash('sha256').update(data).digest('hex'),url=`http://localhost/api/runner/imports/technical-plan/req/files/${'c'.repeat(64)}`;
   const upload=(token,sha=hash)=>worker.dispatchFetch(url,{method:'POST',headers:{authorization:`Bearer ${token.repeat(64)}`,'x-file-name':'grande.txt','x-content-sha256':sha,'x-savia-stream-size':String(data.length),'content-type':'text/plain'},body:data});

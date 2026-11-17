@@ -999,7 +999,7 @@ const apiWorker = {
     if (url.pathname === '/api/projects' || url.pathname.startsWith('/api/projects/')) {
       const session = await getScopedSession();
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
-      return privateResponse((await handleProjects(request, env, session.workspaceId)) ?? new Response('Not found', { status: 404 }));
+      return privateResponse((await handleProjects(request, env, session.workspaceId, session.tenant?.country)) ?? new Response('Not found', { status: 404 }));
     }
     return new Response('Not found', { status: 404 });
   },

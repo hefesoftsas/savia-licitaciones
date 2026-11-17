@@ -13,7 +13,7 @@ test('recupera SECOP y sus vínculos con reintentos sin duplicar el proceso',asy
   const DB=await worker.getD1Database('DB');
   for(const file of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${file}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES (?,?,?,0,0,0)').bind('alice','Alice','alice@example.com').run();
-  await DB.prepare('INSERT INTO projects VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+  await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
   await DB.prepare('INSERT INTO desktop_plan_imports VALUES (?,?,?,?,?,?)').bind('alice','req','hash','p','mutation','2026').run();
   await DB.prepare('INSERT INTO project_files VALUES (?,?,?,?,?,?,?)').bind('new-file','p','pliego.pdf','application/pdf','key',4,'2026').run();
   const key=createHash('sha256').update('old-file').digest('hex');

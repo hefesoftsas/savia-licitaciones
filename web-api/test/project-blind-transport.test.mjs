@@ -12,7 +12,7 @@ test('captura inspecciones y correcciones privadas con sus dos informes y detect
   const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');
   for(const f of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${f}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   for(const id of ['alice','bob'])await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,0,0,0)').bind(id,id,`${id}@example.com`).run();
-  await DB.prepare('INSERT INTO projects VALUES(?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+  await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
   const job=async(id,kind,state,payload)=>DB.prepare('INSERT INTO jobs(id,project_id,owner_id,kind,client_request_id,payload_json,state,created_at,updated_at,result_json) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id,'p','alice',kind,id,JSON.stringify(payload),state,'2026','2026',null).run();
   await job('inspection','blind-check.inspect','succeeded',{fileIds:['f'],bidFileId:'f',profile:{name:'perfil'}});
   await job('correction','blind-check.fix-report','succeeded',{inspectionJobId:'inspection',fileIds:['f'],reportVersion:1,fixRules:['properties']});

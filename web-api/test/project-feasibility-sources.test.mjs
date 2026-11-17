@@ -12,7 +12,7 @@ test('archivos de viabilidad aislados por proyecto, propietario y operaciones id
  try{const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES'),env={DB,FILES,BETTER_AUTH_URL:'https://example.test'};
   for(const file of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(join(root,'migrations',file),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   for(const user of ['alice','bob'])await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,0,0,0)').bind(user,user,`${user}@example.test`).run();
-  for(const [id,owner] of [['p','alice'],['q','alice'],['r','bob']])await DB.prepare('INSERT INTO projects VALUES(?,?,?,?)').bind(id,owner,id,'2026').run();
+  for(const [id,owner] of [['p','alice'],['q','alice'],['r','bob']])await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind(id,owner,id,'2026').run();
   const upload=(owner,project,key,body='hello')=>projectFeasibilityUploads(new Request('https://example.test/upload',{method:'POST',headers:{origin:'https://example.test','idempotency-key':key,'x-file-name':'prueba.txt'},body}),env,owner,project);
   assert.equal((await upload('bob','p','x')).status,404);
   const a=await upload('alice','p','same');assert.equal(a.status,201);const source=(await a.json()).source;

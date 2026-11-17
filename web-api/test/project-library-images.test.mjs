@@ -11,7 +11,7 @@ test('localiza imágenes mencionadas por el plan y limita la descarga a su propi
   const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');
   for(const file of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${file}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES (?,?,?,0,0,0)').bind('alice','Alice','alice@example.com').run();
-  await DB.prepare('INSERT INTO projects VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+  await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
   const id='00000000-0000-4000-8000-000000000001',ref=`/api/image-library/${id}/file`,content=`![Imagen](${ref})`;
   await DB.prepare('INSERT INTO project_technical_plan_nodes(project_id,node_id,parent_node_id,sort_order,title,description,content_mode,content,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').bind('p','node',null,0,'Capítulo','','manual-fill',content,'success','2026','2026').run();
   await FILES.put('private-image','data');

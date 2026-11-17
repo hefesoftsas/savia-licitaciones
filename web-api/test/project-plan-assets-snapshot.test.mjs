@@ -11,7 +11,7 @@ test('captura solo los recursos de plan de la cuenta y detecta cambios en R2', a
     const DB = await worker.getD1Database('DB'), FILES = await worker.getR2Bucket('FILES');
     for (const file of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort()) for (const sql of (await readFile(new URL(`../migrations/${file}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean)) await DB.prepare(sql).run();
     await DB.prepare('INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt) VALUES (?,?,?,0,0,0)').bind('alice','Alice','alice@example.com').run();
-    await DB.prepare('INSERT INTO projects VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+    await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
     const bytes = Buffer.from([137,80,78,71,13,10,26,10]), hash = createHash('sha256').update(bytes).digest('hex'), ref='agent-image.png';
     await FILES.put('private-asset-key',bytes);
     await DB.prepare('INSERT INTO project_plan_assets VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').bind('asset-id','alice','p','req','source',ref,'agent',hash,'image/png',bytes.length,'private-asset-key','mutation','2026').run();

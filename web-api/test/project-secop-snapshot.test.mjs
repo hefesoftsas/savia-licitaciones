@@ -10,7 +10,7 @@ test('captura el proceso SECOP, alertas y correspondencia de documentos por cuen
   const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');
   for(const file of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${file}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES (?,?,?,0,0,0)').bind('alice','Alice','alice@example.com').run();
-  await DB.prepare('INSERT INTO projects VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+  await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
   await DB.prepare('INSERT INTO project_secop VALUES (?,?,?,?,?)').bind('p','alice','secop-ii','process',JSON.stringify({id:'process',source:'secop-ii',title:'Proceso'})).run();
   await DB.prepare('INSERT INTO secop_watch_baselines_web VALUES (?,?,?,?,?,?,?,?)').bind('p','alice',JSON.stringify({status:'open'}),JSON.stringify([{id:'d',name:'Pliego'}]),'2026','',1,'mutation').run();
   await DB.prepare('INSERT INTO secop_watch_alerts_web VALUES (?,?,?,?,?,?,?,?,?)').bind('alert','p','alice','Proceso','status','"old"','"new"','2026',1).run();

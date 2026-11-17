@@ -10,7 +10,7 @@ test('captura el borrador por cuenta y lo recupera sin sobrescribir ediciones',{
  try{
   const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');for(const f of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(`../migrations/${f}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await DB.prepare(sql).run();
   for(const owner of ['alice','bob'])await DB.prepare('INSERT INTO "user"(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,0,0,0)').bind(owner,owner,`${owner}@example.com`).run();
-  await DB.prepare('INSERT INTO projects VALUES(?,?,?,?)').bind('p','alice','Proyecto','2026').run();await DB.prepare('INSERT INTO projects VALUES(?,?,?,?)').bind('target','bob','Destino','2026').run();
+  await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('target','bob','Destino','2026').run();
   await DB.prepare('INSERT INTO desktop_plan_imports VALUES(?,?,?,?,?,?)').bind('bob','req','hash','target','mutation','2026').run();
   const draft={criteria:'Experiencia',custom:'Fechas',options:{rejectionCheck:true,typoCheck:false,logicCheck:true},updatedAt:'2026'};await DB.prepare('INSERT INTO rejection_drafts VALUES(?,?,?,?,?,?)').bind('p',draft.criteria,draft.custom,JSON.stringify(draft.options),1,draft.updatedAt).run();
   const env={DB,FILES},capture=()=>runnerProjectCapture(new Request('http://localhost/capture'),env,{ownerId:'alice'},'p');

@@ -20,7 +20,7 @@ test('captura fuentes de conocimiento del plan y detecta cambios y referencias a
     const DB=await worker.getD1Database('DB'),FILES=await worker.getR2Bucket('FILES');
     for(const file of (await readdir(new URL('../migrations/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort()) for(const sql of (await readFile(new URL(`../migrations/${file}`,import.meta.url),'utf8')).split(';').map(x=>x.trim()).filter(Boolean)) await DB.prepare(sql).run();
     await DB.prepare('INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt) VALUES (?,?,?,0,0,0)').bind('alice','Alice','alice@example.com').run();
-    await DB.prepare('INSERT INTO projects VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
+    await DB.prepare('INSERT INTO projects (id,owner_id,title,created_at) VALUES (?,?,?,?)').bind('p','alice','Proyecto','2026').run();
     await DB.prepare('INSERT INTO knowledge_folders(id,owner_id,name,created_at) VALUES (?,?,?,?)').bind('folder','alice','Fuentes','2026').run();
     await FILES.put('private-doc','data');
     await DB.prepare('INSERT INTO knowledge_documents(id,folder_id,owner_id,name,content_type,object_key,size,created_at) VALUES (?,?,?,?,?,?,?,?)').bind('doc','folder','alice','fuente.pdf','application/pdf','private-doc',4,'2026').run();
