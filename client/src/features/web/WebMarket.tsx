@@ -24,6 +24,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/shared/ui/primitives/tabs';
 import { useToast } from '@/shared/ui/ToastProvider';
 import { request } from './api.mjs';
+import { formatDateValue, formatNumberValue } from './secop/secopValue.mjs';
+import type { ProcurementMarket } from '@/shared/types/secop';
 import WebPaaWatch, { type PaaState } from './WebPaaWatch';
 import { WebProjectHelp } from './WebProjectHelp';
 
@@ -75,7 +77,7 @@ function recordUrl(mode: Mode, id: string) {
   return `https://www.datos.gov.co/resource/${dataset}.json?${params}`;
 }
 
-export default function WebMarket({ language }: { language: 'es' | 'en' }) {
+export default function WebMarket({ language, market = 'ALL' }: { language: 'es' | 'en'; market?: ProcurementMarket }) {
   const en = language === 'en';
   const { showToast } = useToast();
   const currentYear = String(new Date().getFullYear());
@@ -161,7 +163,7 @@ export default function WebMarket({ language }: { language: 'es' | 'en' }) {
       ? en
         ? 'Not reported'
         : 'No informado'
-      : new Intl.NumberFormat(en ? 'en-US' : 'es-CO', { maximumFractionDigits: 2 }).format(value);
+      : formatNumberValue(value, language, { country: 'CO' });
 
   const run = async (next: Query, nextOffset: number, nextMode: Mode = mode) => {
     setLoading(true);
@@ -443,6 +445,14 @@ export default function WebMarket({ language }: { language: 'es' | 'en' }) {
         </>
       )}
 
+      {market === 'ES' && (
+        <p role="status" className="web-secop-note">
+          {en
+            ? 'Market intelligence datasets currently query Colombian public procurement open data (datos.gov.co). Use Opportunities to search Spanish PLACSP tenders.'
+            : 'Los conjuntos de inteligencia de mercado consultan actualmente datos abiertos de contratación pública de Colombia (datos.gov.co). Usa Oportunidades para buscar licitaciones de España en PLACSP.'}
+        </p>
+      )}
+
       {showFilters && (
         <form className="web-secop-filters web-market-filters" onSubmit={submit}>
           <label>
@@ -604,7 +614,7 @@ export default function WebMarket({ language }: { language: 'es' | 'en' }) {
               <strong>{money(pageStats.avgValue)}</strong>
               <small>
                 {en ? 'Queried' : 'Consulta'}:{' '}
-                {new Intl.DateTimeFormat(en ? 'en-GB' : 'es-CO', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(checkedAt))}
+                {formatDateValue(checkedAt, language, { country: 'CO', dateStyle: 'short', timeStyle: 'short' })}
               </small>
             </div>
           </div>
@@ -614,7 +624,7 @@ export default function WebMarket({ language }: { language: 'es' | 'en' }) {
             {en ? 'Keywords' : 'Palabras clave'}: <strong>{query.keyword || '—'}</strong> ·{' '}
             {mode === 'paa' ? (en ? 'Year' : 'Año') : (en ? 'Supplier' : 'Proveedor')}:{' '}
             <strong>{mode === 'paa' ? query.year || '—' : query.supplier || '—'}</strong> · {en ? 'Shown' : 'Consulta mostrada'}:{' '}
-            {new Intl.DateTimeFormat(en ? 'en-GB' : 'es-CO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(checkedAt))}
+            {formatDateValue(checkedAt, language, { country: 'CO', dateStyle: 'medium', timeStyle: 'short' })}
           </p>
 
           {mode === 'history' && (
@@ -655,7 +665,7 @@ export default function WebMarket({ language }: { language: 'es' | 'en' }) {
                   <p>
                     {en ? 'Signing dates' : 'Fechas de firma'}: {summary.from?.slice(0, 10) || '—'} – {summary.to?.slice(0, 10) || '—'} ·{' '}
                     {en ? 'Queried' : 'Consulta'}:{' '}
-                    {new Intl.DateTimeFormat(en ? 'en-GB' : 'es-CO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(summary.checkedAt))} ·{' '}
+                    {formatDateValue(summary.checkedAt, language, { country: 'CO', dateStyle: 'medium', timeStyle: 'short' })} ·{' '}
                     <a href={summary.sourceUrl} target="_blank" rel="noreferrer" className="web-link">
                       {en ? 'View source query' : 'Ver consulta de origen'}
                     </a>

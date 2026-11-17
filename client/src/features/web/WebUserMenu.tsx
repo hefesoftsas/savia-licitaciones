@@ -3,13 +3,14 @@ import {ArrowLeft, Check, ChevronRight, ChevronsUpDown, Globe2, LogOut, Monitor,
 import {Popover, PopoverTrigger, PopoverContent} from '@/shared/ui/primitives/popover';
 import {Button} from '@/shared/ui/primitives/button';
 import {COLOR_THEMES, VISUAL_STYLES} from '@/shared/theme/ThemeProvider';
+import type {ProcurementMarket} from '@/shared/types/secop';
 import type {WebAppearance} from './WebAppearance';
 
 type Props = ComponentProps<typeof WebAppearance> & {
-  user: {name: string; email: string}; error: boolean;
-  onAccount: () => void; onAdmin?: () => void; onLogout: () => void; onLanguage: (language: 'es' | 'en') => void;
+  user: {name: string; email: string}; error: boolean; market: ProcurementMarket;
+  onAccount: () => void; onAdmin?: () => void; onLogout: () => void; onLanguage: (language: 'es' | 'en') => void; onMarket: (market: ProcurementMarket) => void;
 };
-export function WebUserMenu({user, error, onAccount, onAdmin, onLogout, onLanguage, ...appearance}: Props) {
+export function WebUserMenu({user, error, market, onAccount, onAdmin, onLogout, onLanguage, onMarket, ...appearance}: Props) {
   const [open, setOpen] = useState(false), [panel, setPanel] = useState<'main'|'appearance'>('main');
   const en = appearance.language === 'en';
   const initials = user.name.trim().split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase();
@@ -27,6 +28,7 @@ export function WebUserMenu({user, error, onAccount, onAdmin, onLogout, onLangua
           <div className="web-user-mode" role="group" aria-label={en?'Color mode':'Modo de color'}>{([{value:'light',icon:Sun,label:en?'Light':'Claro'},{value:'dark',icon:Moon,label:en?'Dark':'Oscuro'},{value:'system',icon:Monitor,label:en?'System':'Sistema'}] as const).map(({value,icon:Icon,label})=><Button key={value} variant="ghost" size="sm" disabled={appearance.busy} aria-label={label} title={label} aria-pressed={appearance.theme===value} onClick={()=>appearance.onChange(value)}><Icon aria-hidden="true"/></Button>)}</div>
           <Button variant="ghost" className="web-user-action" onClick={()=>setPanel('appearance')}><Palette aria-hidden="true"/><span>{en?'Customize theme':'Personalizar tema'}</span><ChevronRight aria-hidden="true"/></Button>
           <div className="web-user-language-row"><Globe2 aria-hidden="true"/><span>{en?'Language':'Idioma'}</span><div role="group" aria-label={en?'Language':'Idioma'}>{(['es','en'] as const).map(language=><Button key={language} size="sm" variant="ghost" disabled={appearance.busy} aria-label={language==='es'?'Español':'English'} aria-pressed={appearance.language===language} onClick={()=>onLanguage(language)}>{language.toUpperCase()}</Button>)}</div></div>
+          <div className="web-user-language-row"><Globe2 aria-hidden="true"/><span>{en?'Market':'Mercado'}</span><div role="group" aria-label={en?'Procurement market':'Mercado de licitación'}>{([['ALL',en?'All':'Todo'],['ES','ES'],['CO','CO']] as const).map(([value,label])=><Button key={value} size="sm" variant="ghost" disabled={appearance.busy} aria-label={value==='ALL'?(en?'All markets':'Todos los mercados'):value==='ES'?(en?'Spain':'España'):'Colombia'} aria-pressed={market===value} onClick={()=>onMarket(value)}>{label}</Button>)}</div></div>
         </div>
         <div className="web-user-menu-section"><Button variant="ghost" className="web-user-action" onClick={()=>{setOpen(false);onLogout();}}><LogOut aria-hidden="true"/><span>{en?'Sign out':'Cerrar sesión'}</span></Button></div>
       </>:<>

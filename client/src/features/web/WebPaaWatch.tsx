@@ -3,6 +3,7 @@ import { Bell, BookmarkCheck, Check, ExternalLink, RefreshCw, Trash2 } from 'luc
 import AppDialog from '@/shared/ui/AppDialog';
 import { ActionButton as Button } from '@/shared/ui/ActionButton';
 import { request } from './api.mjs';
+import { formatDateValue } from './secop/secopValue.mjs';
 
 export type PaaHeader = { planId: string; entity: string; year: number | null; version: string; modifiedAt: string; status: string };
 export type PaaWatchItem = PaaHeader & { id: string; checkedAt: string; error: string };
@@ -28,12 +29,7 @@ export default function WebPaaWatch({
   const hasContent = !!state && (state.items.length > 0 || state.alerts.length > 0);
   if (!hasContent && !showEmpty) return null;
 
-  const fmt = (value: string) => {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime())
-      ? value
-      : new Intl.DateTimeFormat(en ? 'en-GB' : 'es-CO', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
-  };
+  const fmt = (value: string) => formatDateValue(value, language, { country: 'CO', dateStyle: 'medium', timeStyle: 'short' });
 
   const act = async (path: string, method: 'POST' | 'DELETE') => {
     setBusy(path);

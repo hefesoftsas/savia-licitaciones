@@ -1,12 +1,15 @@
-export type SecopSource = 'secop-ii' | 'secop-i';
+export type SecopSource = 'secop-ii' | 'secop-i' | 'placsp';
 export type SecopDataset = SecopSource | 'contratos';
 export type SecopCategory = 'department' | 'modality' | 'status';
+export type ProcurementMarket = 'CO' | 'ES' | 'ALL';
 
 export interface SecopProcess {
   id: string;
   portfolioId?: string;
   reference?: string;
   classificationCode?: string;
+  cpvCodes?: string[];
+  country?: 'CO' | 'ES';
   entity: string;
   title: string;
   modality?: string;
@@ -19,6 +22,7 @@ export interface SecopProcess {
   deadline?: string;
   deadlineVerified?: boolean;
   department?: string;
+  territory?: string;
   city?: string;
   url?: string;
   source: SecopSource;
@@ -41,11 +45,13 @@ export interface OpportunitySuggestionsState {
 export type SecopColumn = 'title' | 'entity' | 'modality' | 'status' | 'value' | 'publicationDate' | 'deadline' | 'department';
 export interface SecopSearchParams {
   classificationClass?: string;
+  cpvCode?: string;
   sortBy?: SecopColumn;
   sortDirection?: 'asc' | 'desc';
   columnFilters?: Partial<Record<SecopColumn, string>>;
   keyword?: string;
   department?: string | string[];
+  territory?: string | string[];
   modality?: string | string[];
   status?: string | string[];
   minValue?: number;

@@ -7,6 +7,7 @@ import { ActionButton as Button } from '@/shared/ui/ActionButton';
 import { Input } from '@/shared/ui/primitives/input';
 import { useToast } from '@/shared/ui/ToastProvider';
 import { request } from './api.mjs';
+import type { ProcurementMarket } from '@/shared/types/secop';
 
 type Certificate = { id: string; name: string; pages: number; issuedOn: string };
 type Fact = { id: string; certificateId: string; label: string; value: string; page: number; version: number };
@@ -89,14 +90,17 @@ function FactEditor({
 
 export default function WebRup({
   language,
+  market = 'ALL',
   onDirtyChange,
   credentials,
 }: {
   language: 'es' | 'en';
+  market?: ProcurementMarket;
   onDirtyChange: (dirty: boolean) => void;
   credentials: Credential[];
 }) {
   const en = language === 'en';
+  const docName = market === 'ES' ? 'ROLECE / DEUC' : market === 'CO' ? 'RUP' : 'RUP / ROLECE';
   const { showToast } = useToast();
   const [certificate, setCertificate] = useState<Certificate | null>(null);
   const [version, setVersion] = useState(0);
@@ -355,11 +359,23 @@ export default function WebRup({
     <section className="web-company-section">
       <div className="web-secop-heading web-company-heading">
         <div>
-          <h2>{en ? 'RUP certificate (Single Registry of Bidders)' : 'Certificado RUP (Registro Único de Proponentes)'}</h2>
+          <h2>
+            {market === 'ES'
+              ? en
+                ? 'ROLECE / DEUC accreditation certificate'
+                : 'Certificado ROLECE / DEUC'
+              : market === 'CO'
+                ? en
+                  ? 'RUP certificate (Single Registry of Bidders)'
+                  : 'Certificado RUP (Registro Único de Proponentes)'
+                : en
+                  ? 'Bidder registration (RUP / ROLECE)'
+                  : 'Registro de licitadores (RUP / ROLECE)'}
+          </h2>
           <p>
             {en
-              ? 'Save a copy and review its data. Savia does not verify the certificate with the chamber.'
-              : 'Guarda una copia y revisa sus datos. Savia no verifica el certificado ante la cámara.'}
+              ? 'Save a copy and review its data. Savia does not verify the certificate with the official registry.'
+              : 'Guarda una copia y revisa sus datos. Savia no verifica el certificado ante el registro oficial.'}
           </p>
         </div>
         <Button icon={RefreshCw} iconOnly type="button" size="sm" variant="outline" disabled={busy || loading} onClick={reload}>
@@ -380,8 +396,8 @@ export default function WebRup({
           <div className="web-company-card web-rup-upload-card">
             <div className="web-rup-upload-grid">
               <div className="web-rup-file-field">
-                <span>{en ? 'RUP PDF (up to 25 MiB)' : 'PDF del RUP (hasta 25 MiB)'}</span>
-                <input ref={fileInput} type="file" accept="application/pdf,.pdf" hidden aria-label={en ? 'Choose RUP PDF' : 'Seleccionar PDF del RUP'} disabled={busy || failed || conflict} onChange={event => setFile(event.target.files?.[0] || null)} />
+                <span>{en ? `${docName} PDF (up to 25 MiB)` : `PDF de ${docName} (hasta 25 MiB)`}</span>
+                <input ref={fileInput} type="file" accept="application/pdf,.pdf" hidden aria-label={en ? `Choose ${docName} PDF` : `Seleccionar PDF de ${docName}`} disabled={busy || failed || conflict} onChange={event => setFile(event.target.files?.[0] || null)} />
                 <div className="web-rup-file-choice">
                   <Button icon={Upload} type="button" size="sm" variant="outline" disabled={busy || failed || conflict} onClick={() => fileInput.current?.click()}>{en ? 'Choose PDF' : 'Seleccionar PDF'}</Button>
                   <span title={file?.name} role="status">{file?.name || (en ? 'No file selected' : 'Ningún archivo seleccionado')}</span>
@@ -435,7 +451,7 @@ export default function WebRup({
               <section className="web-company-card web-stack">
                 <div className="web-secop-heading">
                   <div>
-                    <h3>{en ? 'Analyze RUP with Pi' : 'Analizar RUP con Pi'}</h3>
+                    <h3>{en ? `Analyze ${docName} with Pi` : `Analizar ${docName} con Pi`}</h3>
                     <p>
                       {en
                         ? 'Extract UNSPSC codes, financial indicators and capacities automatically from the PDF.'

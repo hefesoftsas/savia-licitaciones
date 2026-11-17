@@ -3,14 +3,16 @@ import { useEffect, useState } from 'react';
 import {ActionButton as Button} from '@/shared/ui/ActionButton';
 import {Tooltip, TooltipContent, TooltipProvider, TooltipTrigger} from '@/shared/ui/primitives/tooltip';
 import { request } from './api.mjs';
+import { formatDateValue } from './secop/secopValue.mjs';
+import type { ProcurementMarket } from '@/shared/types/secop';
 type Alert={id:string;projectId?:string;title:string;kind:string;previous:unknown;current:unknown;createdAt:string;reviewed:boolean};
 type State={alerts:Alert[];unreadCount:number;checkedAt?:string;error?:string};
-export default function WebSecopWatch({language,projectId,showEmpty=false,onOpenProject}:{language:'es'|'en';projectId?:string;showEmpty?:boolean;onOpenProject?:(id:string)=>void}) {
+export default function WebSecopWatch({language,market='ALL',projectId,showEmpty=false,onOpenProject}:{language:'es'|'en';market?:ProcurementMarket;projectId?:string;showEmpty?:boolean;onOpenProject?:(id:string)=>void}) {
  const en=language==='en', [state,setState]=useState<State|null>(null), [loading,setLoading]=useState(false), [busy,setBusy]=useState(false), [error,setError]=useState(''), [actionError,setActionError]=useState(''), [refresh,setRefresh]=useState(0);
  const path=projectId?`/api/projects/${encodeURIComponent(projectId)}/secop-watch`:'/api/secop-watch';
  useEffect(()=>{let active=true;const load=async()=>{try{const data=await request<State>(path);if(active){setState(data);setError('');}}catch{if(active)setError(language==='en'?'Could not load updates.':'No se pudieron cargar los cambios.');}};setLoading(true);void load().finally(()=>{if(active)setLoading(false);});const timer=window.setInterval(()=>void load(),60000);return()=>{active=false;window.clearInterval(timer);};},[path,language,refresh]);
  const act=async(target:string)=>{setBusy(true);setActionError('');try{await request(target,{method:'POST',json:{}});}catch{setActionError(en?'Could not complete the check. Try again.':'No se pudo completar la revisión. Inténtalo de nuevo.');}finally{setRefresh(value=>value+1);setBusy(false);}};
- const date=(value:string)=>{const parsed=new Date(value);return Number.isNaN(parsed.getTime())?value:new Intl.DateTimeFormat(en?'en-GB':'es-CO',{dateStyle:'medium',timeStyle:'short'}).format(parsed);};
+ const date=(value:string)=>formatDateValue(value,language,{market,dateStyle:'medium',timeStyle:'short'});
  const text=(value:unknown)=>value===null||value===undefined?'—':typeof value==='object'?String((value as {name?:string}).name||'—'):String(value);
  const labels:Record<string,string>={status:en?'Status':'Estado',phase:en?'Phase':'Fase',deadline:en?'Deadline':'Cierre',value:en?'Value':'Valor',document:en?'New document':'Documento nuevo'};
  if(!projectId && !showEmpty && !loading && !error && !state?.alerts.length)return null;
