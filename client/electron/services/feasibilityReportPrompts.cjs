@@ -191,6 +191,22 @@ const ANALYSIS_FIELDS = [
 ];
 
 function formatProjectInfo(info = {}) {
+  const spanish = info.jurisdiction === 'ES' || info.market === 'ES' || info.language === 'es';
+  if (spanish) {
+    const typeLabel = info.projectType === 'enterprise' ? 'Inversión privada / empresarial' : 'Inversión / contratación pública (LCSP)';
+    return [
+      `Nombre del proyecto: ${info.projectName || '[Pendiente por completar]'}`,
+      `Tipo de proyecto: ${typeLabel}`,
+      `Sector / CPV: ${info.industry || '[Pendiente por completar]'}`,
+      `Órgano / entidad promotora: ${info.constructionUnit || '[Pendiente por completar]'}`,
+      `Ubicación / ámbito territorial: ${info.location || '[Pendiente por completar]'}`,
+      `Objeto, alcance y escala: ${info.constructionContent || '[Pendiente por completar]'}`,
+      `Plazo de ejecución / obra: ${info.constructionPeriodYears || '[Pendiente por completar]'} años`,
+      `Periodo de operación / servicio: ${info.operationPeriodYears || '[Pendiente por completar]'} años`,
+      `Presupuesto / inversión total (EUR): ${info.totalInvestment || '[Pendiente por completar]'}`,
+      `Fuente de financiación: ${info.fundingSource || '[Pendiente por completar]'}`,
+    ].join('\n');
+  }
   const typeLabel = info.projectType === 'enterprise' ? '企业投资项目' : '政府投资项目';
   return [
     `项目名称：${info.projectName || '【待补充】'}`,
@@ -233,9 +249,12 @@ function buildOutlineTemplateMarkdown(templateId, targetWords) {
   ].join('\n');
 }
 
-function buildAnalysisSystemPrompt() {
+function buildAnalysisSystemPrompt(options = {}) {
+  const spanish = options?.jurisdiction === 'ES' || options?.market === 'ES' || options?.language === 'es';
   return [
-    'You are a rigorous analyst of feasibility-study materials for Chinese construction projects. Extract facts only from the project parameters and user-provided materials; never invent amounts, scale, locations, durations, policy names or technical parameters.',
+    spanish
+      ? 'You are a rigorous analyst of feasibility-study and public-procurement materials (including Spanish LCSP Ley 9/2017, PCAP/PPT, EUR budgets, and CPV scope). Extract facts only from the project parameters and user-provided materials; never invent amounts, scale, locations, durations, policy names or technical parameters.'
+      : 'You are a rigorous analyst of feasibility-study materials for construction and public-procurement projects. Extract facts only from the project parameters and user-provided materials; never invent amounts, scale, locations, durations, policy names or technical parameters.',
     'When no supporting documents are available, use only the project parameters, including construction scope and scale; the materials block may say that no documents were imported.',
   ].join(' ');
 }
@@ -304,9 +323,9 @@ function buildContentWritingRules() {
   return `Writing rules:
 1. Generate only the body of the current leaf section, without repeating its title.
 2. Analyze and structure the available material; Markdown subheadings, lists and necessary tables are allowed.
-3. Mark unsupported key data as “【待补充】” or use qualitative language without invented numbers.
+3. Mark unsupported key data as “[Pendiente por completar]” (when writing in Spanish) or “【待补充】”, or use qualitative language without invented numbers.
 4. Do not present requirements, recommendations or general standards as completed facts.
-5. Remain consistent with the report's key parameters.
+5. Remain consistent with the report's key parameters (including EUR/COP amounts, LCSP/PCAP/PPT clauses when applicable).
 6. For engineering or site-selection sections covering site and construction conditions, general layout, process flow, environmental facilities or implementation schedule, insert exactly one illustration guide at the best location in this fixed format:
 > 📸 **【插图指引】：图片名称**
 > *说明：此处请插入...*

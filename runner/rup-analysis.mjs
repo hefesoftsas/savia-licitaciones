@@ -43,7 +43,7 @@ export function createRupAnalysisHandler({ tempRoot = tmpdir(), createAiService 
       runtime = createRuntime({ app, configStore, aiService, isMonitorActive: () => false, requestUserQuestion: async () => { throw new Error('La interacción con el agente aún no está disponible en web.'); } }); trackPiProgress(runtime, context);
       const service = rupModule.createRupAgentService({ certificate: { readPdf: () => pdf, extractPages: () => extractPages(pdf, context.signal) }, getConfig: () => config, agentService: { runTask: task => runtime.runTask({ ...task, signal: context.signal }) } });
       let result;
-      try { result = await service.analyze(payload.language); }
+      try { result = await service.analyze(payload.language, { jurisdiction: payload?.jurisdiction || payload?.market }); }
       catch (error) {
         if (/No selectable text was found in the certificate|No se encontró texto seleccionable en el certificado/.test(String(error?.message || ''))) throw new TaskInputError(error.message);
         throw error;

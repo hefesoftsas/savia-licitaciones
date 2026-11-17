@@ -3,8 +3,8 @@
 // Verify every evidence quote against the tender source; leave unstated formatting options unchecked and rely on consistency rules.
 const { normalizeProfile } = require('./blindCheckPresets.cjs');
 
-const FORMAT_KEYWORDS = /(宋体|仿宋|黑体|楷体|字体|字号|号字|[初小一二三四五六七八]号|行距|行间距|磅|页边距|边距|A4|纸张|首行缩进|缩进|段前|段后|页眉|页脚|页码|加粗|倾斜|斜体|下划线|排版|装订|黑白|彩色|空行)/g;
-const CONTEXT_KEYWORDS = /(暗标|技术标|施工组织设计|投标文件)/;
+const FORMAT_KEYWORDS = /(宋体|仿宋|黑体|楷体|字体|字号|号字|[初小一二三四五六七八]号|行距|行间距|磅|页边距|边距|A4|纸张|首行缩进|缩进|段前|段后|页眉|页脚|页码|加粗|倾斜|斜体|下划线|排版|装订|黑白|彩色|空行|Arial|Calibri|Times New Roman|Verdana|fuente|tipograf[ií]a|tama[ñn]o|puntos|\bpt\b|interlineado|m[aá]rgenes?|margen|sangr[ií]a|espaciado|encabezado|pie de p[aá]gina|numeraci[oó]n|negrita|cursiva|subrayado|extensi[oó]n m[aá]xima|p[aá]ginas|caras)/gi;
+const CONTEXT_KEYWORDS = /(暗标|技术标|施工组织设计|投标文件|Sobre\s*[B2]|juicio de valor|memoria t[eé]cnica|propuesta t[eé]cnica|oferta t[eé]cnica|PCAP|PPT|anonimato|an[oó]nimo)/i;
 const WINDOW_BEFORE = 12;
 const WINDOW_AFTER = 28;
 const MAX_WINDOWS = 6;
@@ -20,8 +20,8 @@ const CHINESE_SIZES = {
 const HEADING_LEVELS = ['1', '2', '3', '4'];
 
 // Prohibitive and permissive wording determines boolean direction; remove negated permission phrases before testing for permission.
-const NEGATION = /不得|不允许|不准|不应|不能|不可|禁止|严禁|不要|不宜|勿|不使用|不采用|不出现|不设|不编/;
-const PERMISSION = /允许|可以|可|宜/;
+const NEGATION = /不得|不允许|不准|不应|不能|不可|禁止|严禁|不要|不宜|勿|不使用|不采用|不出现|不设|不编|prohibid[oa]|no se permite|no podr[aá]|sin incluir|en ning[uú]n caso/i;
+const PERMISSION = /允许|可以|可|宜|se permite|podr[aá]|admitid[oa]|autorizad[oa]/i;
 
 /** Extractable fields: path, type, and description. Paths match the preset profile; types determine validation. */
 const EXTRACTABLE_FIELDS = [
@@ -131,11 +131,11 @@ function locateFormatExcerpts(markdown) {
   };
 }
 
-const SYSTEM_PROMPT = `你是招标文件格式条款的解析助手。用户会给你招标文件中与排版格式有关的若干片段，你要找出对【投标文件技术标（暗标、施工组织设计）】的排版格式要求，按指定字段整理成 JSON。
+const SYSTEM_PROMPT = `你是招标文件格式条款的解析助手（同时支持中国暗标/技术标与西班牙 LCSP Sobre B / Memoria Técnica 排版要求）。用户会给你招标文件中与排版格式有关的若干片段，你要找出对【投标文件技术标（暗标、施工组织设计、Sobre B / Memoria Técnica）】的排版格式要求，按指定字段整理成 JSON。
 
 要求：
-1. 只提取原文明确写出的要求。原文没写的字段不要出现，不要按惯例补默认值；原文写"不作要求""由投标人自定"的也不要出现。
-2. 只提取对技术标/暗标/施工组织设计/投标文件正文的要求。招标文件自身的格式、商务标、资格审查文件的要求不要提取。
+1. 只提取原文明确写出的要求。原文没写的字段不要出现，不要按惯例补默认值；原文写"不作要求""由投标人自定"或西语类似表述（"sin formato específico", "a criterio del licitador"）的也不要出现。
+2. 只提取对技术标/暗标/施工组织设计/投标文件正文（或西语 Sobre B / memoria técnica / criterios sujetos a juicio de valor）的要求。招标文件自身的格式、商务标、资格审查文件（Sobre A）、经济报价（Sobre C）的要求不要提取。
 3. 字号照抄原文写法（如"四号""小四""10.5磅"），不要自己换算；页边距用厘米；段前段后"0 行"填 0。
 4. 原文规定"二级及以下标题与正文相同"时，在 headings.2 至 headings.4 填写与正文相同的字号和加粗要求；原文规定表格字体"同正文"时，表格字段填写正文的字体字号；原文全文禁止加粗时，各级标题的 bold 也填 false；原文写"不允许字符间距缩放"一类表述时，body.allow_char_spacing 和 body.allow_font_scaling 都填 false；原文写"页脚只准出现页码"时 structure.page_number 填 footer_only；原文写"数字、英文字符不做要求"时 body.check_latin_size 填 false。
 5. 允许类字段（allow_*）原文禁止填 false、原文明确允许也要填 true；页眉、页脚、空行字段原文禁止填 true、原文明确允许填 false。

@@ -5,6 +5,17 @@ const { warmPromptPrefix } = require('../utils/promptPrefixCache.cjs');
 
 const MARKDOWN_MISSING_RESULT = '未提取到';
 
+const SPANISH_LCSP_PATTERN = /\b(LCSP|Ley\s+9\/2017|PCAP|PPT|PLACSP|DEUC|ROLECE|RELI|Presupuesto\s+Base\s+de\s+Licitaci[oó]n|Valor\s+Estimado\s+del\s+Contrato|Mesa\s+de\s+Contrataci[oó]n|Cuadro\s+de\s+Caracter[ií]sticas)\b/i;
+
+function isSpanishLcspTender(fileContent = '', config = {}) {
+  if (config?.market === 'ES' || config?.jurisdiction === 'ES') return true;
+  return SPANISH_LCSP_PATTERN.test(String(fileContent || '').slice(0, 60000));
+}
+
+const SPANISH_LCSP_SYSTEM_ADDENDUM = `Contexto normativo España (LCSP, Ley 9/2017):
+- Si el pliego corresponde a contratación pública en España, interpreta y extrae con precisión la terminología LCSP: PCAP (Pliego de Cláusulas Administrativas Particulares), Cuadro de Características, PPT (Pliego de Prescripciones Técnicas), Presupuesto Base de Licitación (PBL, con y sin IVA), Valor Estimado del Contrato (VEC), lotes, códigos CPV, Sobres/Archivos electrónicos A (documentación administrativa / DEUC / ROLECE / solvencia / clasificación empresarial), B (criterios sujetos a juicio de valor / memoria técnica) y C (oferta económica y criterios evaluables mediante fórmulas), Mesa de Contratación, garantía provisional/definitiva, y causas de exclusión o subsanación.
+- Conserva exactamente las claves JSON y la estructura Markdown solicitadas, pero redacta todos los valores y textos extraídos en español (o en el idioma del pliego) con importes en EUR cuando proceda.`;
+
 const stableSystemPrompt = `你是专业的投标资料分析助手。请严格基于用户提供的上下文完成提取和总结。
 
 通用要求：
@@ -195,10 +206,13 @@ function isMissingMarkdownResult(task, content) {
   return task.output === 'markdown' && String(content || '').trim() === MARKDOWN_MISSING_RESULT;
 }
 
-function buildTenderContextMessages(fileContent, sectionHint) {
+function buildTenderContextMessages(fileContent, sectionHint, config = {}) {
   const messages = [
     { role: 'system', content: stableSystemPrompt },
   ];
+  if (isSpanishLcspTender(fileContent, config)) {
+    messages.push({ role: 'system', content: SPANISH_LCSP_SYSTEM_ADDENDUM });
+  }
   if (sectionHint) {
     messages.push({ role: 'system', content: sectionHint });
   }
@@ -206,8 +220,8 @@ function buildTenderContextMessages(fileContent, sectionHint) {
   return messages;
 }
 
-function buildMessages(fileContent, task, sectionHint) {
-  const messages = buildTenderContextMessages(fileContent, sectionHint);
+function buildMessages(fileContent, task, sectionHint, config = {}) {
+  const messages = buildTenderContextMessages(fileContent, sectionHint, config);
   messages.push(
     { role: 'user', content: buildTaskPrompt(task) },
   );
@@ -215,8 +229,9 @@ function buildMessages(fileContent, task, sectionHint) {
 }
 
 async function runSingleBidAnalysisPromptTask({ aiService, fileContent, task, sectionHint, logTitle }) {
+  const config = typeof aiService?.getConfig === 'function' ? aiService.getConfig() : {};
   return aiService.chat({
-    messages: buildMessages(fileContent, task, sectionHint),
+    messages: buildMessages(fileContent, task, sectionHint, config),
     response_format: task.output === 'json' ? { type: 'json_object' } : undefined,
     logTitle: logTitle || `招标解析-${task.label}`,
   });
@@ -458,6 +473,7 @@ module.exports = {
   buildTenderContextMessages,
   getBidAnalysisTaskById,
   getBidAnalysisTasks,
+  isSpanishLcspTender,
   runInvalidBidAndRejectionItemsExtraction,
   runBidAnalysisTask,
   runBidAnalysisPromptTask,

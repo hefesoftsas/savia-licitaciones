@@ -10,9 +10,23 @@ function quoteContainsValue(quote, value) {
   return new RegExp(`(?:^|[^\\d.,])${escaped}(?![\\d.,])`).test(text);
 }
 
+function isSpanishAccreditation(pages, jurisdiction) {
+  if (jurisdiction === 'ES') return true;
+  if (jurisdiction === 'CO') return false;
+  const sample = pages.slice(0, 5).map(p => p.layoutText || p.text || '').join('\n');
+  return /\b(ROLECE|DEUC|RELI|LCSP|Clasificaci[oó]n\s+empresarial|Registro\s+Oficial\s+de\s+Licitadores)\b/i.test(sample);
+}
+
+function buildAccreditationPrompt(en, spanish) {
+  if (spanish) {
+    return `Analyze this Spanish public procurement accreditation document (ROLECE, RELI, DEUC, or classification/solvency certificate) using only the text files in pages/. Each file name is its PDF page number. Search all available pages for company identification (NIF/CIF, corporate name), ROLECE/RELI registration number and validity/issue dates, business classification (clasificación empresarial: grupo, subgrupo, categoría), economic and financial solvency indicators (annual turnover, net equity, solvency ratios with fiscal years), technical/professional solvency (executed contracts, amounts in EUR, dates, contracting entities), and 8-digit CPV codes. Report only values explicitly supported by the same page. Never invent or calculate values or page numbers. Return only a JSON array, without Markdown, of objects {"label":"description including fiscal year, contract reference or classification group when available","value":"exact value as in the source","page":1,"quote":"short exact contiguous excerpt containing the value"}. Write labels in ${en ? 'English' : 'Spanish'}; preserve the original text and punctuation in values and quotes. Do not save or change files. Missing, ambiguous or unreadable data must be omitted. The answer is a set of suggestions for human review, not an eligibility decision.`;
+  }
+  return `Analyze this Colombian RUP certificate using only the text files in pages/. Each file name is its PDF page number. Search all available pages for financial indicators with cutoff dates, validity and firmness, contract experience, contractor role, amounts and UNSPSC codes. Report only values explicitly supported by the same page. Never invent or calculate values or page numbers. Return only a JSON array, without Markdown, of objects {"label":"description including cutoff date or contract number when available","value":"exact value as in the source","page":1,"quote":"short exact contiguous excerpt containing the value"}. Write labels in ${en ? 'English' : 'Spanish'}; preserve the original text and punctuation in values and quotes. Do not save or change files. Missing, ambiguous or unreadable data must be omitted. The answer is a set of suggestions for human review, not an eligibility decision.`;
+}
+
 function createRupAgentService({ certificate, agentService, getConfig }) {
   let running = false;
-  async function analyze(language) {
+  async function analyze(language, options = {}) {
     const en = language === 'en';
     if (running) throw Error(en ? 'RUP analysis is already running.' : 'El análisis del RUP ya está en curso.');
     const config = getConfig();
@@ -25,8 +39,12 @@ function createRupAgentService({ certificate, agentService, getConfig }) {
       if (!readable.length) throw Error(en ? 'No selectable text was found in the certificate. Review the scanned PDF manually.' : 'No se encontró texto seleccionable en el certificado. Revisa el PDF escaneado manualmente.');
       const files = readable.map(page => ({path:`pages/${page.page}.txt`,content:page.layoutText || page.text}));
       const taskId = crypto.randomUUID();
-      const prompt = `Analyze this Colombian RUP certificate using only the text files in pages/. Each file name is its PDF page number. Search all available pages for financial indicators with cutoff dates, validity and firmness, contract experience, contractor role, amounts and UNSPSC codes. Report only values explicitly supported by the same page. Never invent or calculate values or page numbers. Return only a JSON array, without Markdown, of objects {"label":"description including cutoff date or contract number when available","value":"exact value as in the source","page":1,"quote":"short exact contiguous excerpt containing the value"}. Write labels in ${en ? 'English' : 'Spanish'}; preserve the original text and punctuation in values and quotes. Do not save or change files. Missing, ambiguous or unreadable data must be omitted. The answer is a set of suggestions for human review, not an eligibility decision.`;
-      const result = await agentService.runTask({task_id:taskId,queue_scope_id:`rup-analysis-${taskId}`,title:en?'RUP certificate analysis':'Análisis del certificado RUP',prompt,files,max_retries:0,initial_stage:'rup-analysis',secop_safe_tools:true,active_tools:['read','grep','find','ls'],before_tool_call:async ({toolCall})=>{if(toolCall?.name==='write'||toolCall?.name==='edit')throw Error('El análisis del RUP es de solo lectura.');}});
+      const spanish = isSpanishAccreditation(readable, options?.jurisdiction);
+      const prompt = buildAccreditationPrompt(en, spanish);
+      const title = spanish
+        ? (en ? 'ROLECE / DEUC analysis' : 'Análisis ROLECE / DEUC')
+        : (en ? 'RUP certificate analysis' : 'Análisis del certificado RUP');
+      const result = await agentService.runTask({task_id:taskId,queue_scope_id:`rup-analysis-${taskId}`,title,prompt,files,max_retries:0,initial_stage:'rup-analysis',secop_safe_tools:true,active_tools:['read','grep','find','ls'],before_tool_call:async ({toolCall})=>{if(toolCall?.name==='write'||toolCall?.name==='edit')throw Error('El análisis del RUP es de solo lectura.');}});
       if (hash(certificate.readPdf()) !== digest) throw Error(en ? 'The certificate changed during analysis. Analyze the current certificate again.' : 'El certificado cambió durante el análisis. Analiza de nuevo el certificado actual.');
       const raw = String(result.assistant_text || '').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');
       let entries; try { entries = JSON.parse(raw); } catch { throw Error(en ? 'The agent did not return a readable result. Try again.' : 'El agente no devolvió un resultado legible. Inténtalo de nuevo.'); }
@@ -46,4 +64,4 @@ function createRupAgentService({ certificate, agentService, getConfig }) {
   }
   return { analyze };
 }
-module.exports = { createRupAgentService };
+module.exports = { createRupAgentService, isSpanishAccreditation, buildAccreditationPrompt };

@@ -180,6 +180,32 @@ const BUILTIN_PRESETS = [
       table: { size_pt: 14 },
     },
   },
+  {
+    id: 'builtin-es-sobre-b',
+    name: 'España · Sobre B (LCSP)',
+    description: 'A4, Arial 11 pt, interlineado múltiple 1,15, márgenes 2,5 cm, revisión de anonimato y separación Sobre B / Sobre C (art. 146.2 LCSP).',
+    profile: {
+      page: { paper: 'A4', margin_top_cm: 2.5, margin_bottom_cm: 2.5, margin_left_cm: 2.5, margin_right_cm: 2.5 },
+      body: {
+        font_cn: 'Arial',
+        font_en: 'Arial',
+        size_pt: 11,
+        line_rule: 'multiple',
+        line_multiple: 1.15,
+        first_line_indent_chars: 0,
+        allow_bold: true,
+        allow_italic: true,
+      },
+      headings: {
+        1: { font_cn: 'Arial', size_pt: 14, bold: true },
+        2: { font_cn: 'Arial', size_pt: 12, bold: true },
+        3: { font_cn: 'Arial', size_pt: 11, bold: true },
+        4: { font_cn: 'Arial', size_pt: 11, bold: false },
+      },
+      table: { font_cn: 'Arial', size_pt: 10 },
+      text: { check_english_punct: false, check_spaces: false },
+    },
+  },
 ];
 
 const RULE_IDS = new Set([

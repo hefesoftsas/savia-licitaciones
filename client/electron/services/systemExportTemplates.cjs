@@ -1,4 +1,5 @@
 const { COLOMBIA_EXPORT_TEMPLATES } = require('./colombiaTemplates.cjs');
+const { SPAIN_EXPORT_TEMPLATES } = require('./spainTemplates.cjs');
 const { cloneDefaultExportFormat } = require('./exportFormatDefaults.cjs');
 
 /**
@@ -60,6 +61,7 @@ function buildConfig(overrides) {
 
 const SYSTEM_EXPORT_TEMPLATES = [
   ...COLOMBIA_EXPORT_TEMPLATES,
+  ...SPAIN_EXPORT_TEMPLATES,
   {
     // Conventional undecorated black-and-white bid layout, minimizing review objections.
     template_id: 'tpl-system-standard-bid',
