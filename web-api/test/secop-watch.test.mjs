@@ -30,3 +30,79 @@ test('seguimiento SECOP detecta cambios y conserva fuentes incompletas',async()=
 
  }finally{await worker?.dispose();await rm(dir,{recursive:true,force:true});}
 });
+
+test('seguimiento PLACSP detecta cambios de estado, plazo y documentos',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'savia-placsp-watch-'));let worker,statusCode='PUB',deadline='2026-12-20',extraDoc=false,unavailable=false;
+ const atom=()=>{
+  const docExtra=extraDoc?`\n      <cac:TechnicalDocumentReference>\n        <cbc:ID>ADENDA-1.pdf</cbc:ID>\n        <cac:Attachment><cac:ExternalReference><cbc:URI>https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=ADENDA1</cbc:URI></cac:ExternalReference></cac:Attachment>\n      </cac:TechnicalDocumentReference>`:'';
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:cbc="urn:dgpe:names:draft:codice:schema:xsd:CommonBasicComponents-2"
+      xmlns:cac="urn:dgpe:names:draft:codice:schema:xsd:CommonAggregateComponents-2"
+      xmlns:cbc-place-ext="urn:dgpe:names:draft:codice-place-ext:schema:xsd:CommonBasicComponents-2"
+      xmlns:cac-place-ext="urn:dgpe:names:draft:codice-place-ext:schema:xsd:CommonAggregateComponents-2">
+  <updated>2026-11-15T10:00:00.000+01:00</updated>
+  <entry>
+    <id>https://contrataciondelsectorpublico.gob.es/sindicacion/licitacionesPerfilContratante/999001</id>
+    <title>Servicios TI España</title>
+    <updated>2026-11-15T09:30:00+01:00</updated>
+    <link rel="alternate" href="https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&amp;idEvl=XYZ999"/>
+    <cac-place-ext:ContractFolderStatus>
+      <cbc:ContractFolderID>EXP-2026-999</cbc:ContractFolderID>
+      <cbc-place-ext:ContractFolderStatusCode>${statusCode}</cbc-place-ext:ContractFolderStatusCode>
+      <cac-place-ext:LocatedContractingParty>
+        <cac:Party><cac:PartyName><cbc:Name>Ministerio TI</cbc:Name></cac:PartyName></cac:Party>
+      </cac-place-ext:LocatedContractingParty>
+      <cac:ProcurementProject>
+        <cbc:Name>Servicios TI España</cbc:Name>
+        <cac:BudgetAmount><cbc:TaxExclusiveAmount currencyID="EUR">150000</cbc:TaxExclusiveAmount></cac:BudgetAmount>
+      </cac:ProcurementProject>
+      <cac:TenderingProcess>
+        <cac:TenderSubmissionDeadlinePeriod><cbc:EndDate>${deadline}</cbc:EndDate><cbc:EndTime>14:00:00</cbc:EndTime></cac:TenderSubmissionDeadlinePeriod>
+      </cac:TenderingProcess>
+      <cac:LegalDocumentReference>
+        <cbc:ID>PCAP-1.pdf</cbc:ID>
+        <cac:Attachment><cac:ExternalReference><cbc:URI>https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=PCAP1</cbc:URI></cac:ExternalReference></cac:Attachment>
+      </cac:LegalDocumentReference>${docExtra}
+    </cac-place-ext:ContractFolderStatus>
+  </entry>
+</feed>`;
+ };
+ try{
+  execFileSync('pnpm',['exec','wrangler','deploy','--dry-run','--outdir',dir],{cwd:root,stdio:'pipe',env:{...process.env,CLOUDFLARE_SEND_METRICS:'false'}});
+  const outboundService=async request=>{
+   const url=new URL(request.url);
+   assert.equal(url.hostname,'contrataciondelsectorpublico.gob.es');
+   if(unavailable)return new Response('unavailable',{status:503});
+   return new Response(atom(),{headers:{'content-type':'application/atom+xml'}});
+  };
+  worker=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile(join(dir,'index.js'),'utf8'),compatibilityDate:'2026-10-30',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'placsp-watch'},r2Buckets:['FILES'],bindings:{AUTH_ALLOW_REGISTRATION:'true',BETTER_AUTH_SECRET:'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz',BETTER_AUTH_URL:'http://localhost'},outboundService}));
+  const db=await worker.getD1Database('DB');for(const file of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(join(root,'migrations',file),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await db.prepare(sql).run();
+  const req=(path,options={})=>worker.dispatchFetch(`http://localhost${path}`,options),send=(path,method,body,cookie)=>req(path,{method,headers:{origin:'http://localhost','content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(body)});
+  const signup=await send('/api/auth/sign-up/email','POST',{name:'ana',email:'ana@example.es',password:'password-123456'});assert.equal(signup.status,200);
+  const cookie=signup.headers.get('set-cookie').split(';')[0];
+  assert.equal((await send('/api/secop/placsp/sync','POST',{},cookie)).status,200);
+  const search=await (await send('/api/secop/search','POST',{dataset:'placsp'},cookie)).json();
+  const tender=search.data.items[0];assert.equal(tender.source,'placsp');
+  const project=(await (await send('/api/projects/from-secop','POST',{process:tender},cookie)).json()).project;
+  const path=`/api/projects/${project.id}/secop-watch`;
+  assert.equal((await send(path,'POST',{},cookie)).status,200);
+  let state=await (await req(path,{headers:{cookie}})).json();
+  assert.equal(state.alerts.length,0);
+  assert.equal(state.baseline.deadline,'2026-12-20T14:00:00');
+  assert.equal(state.baseline.deadlineVerified,true);
+
+  statusCode='ADJ';deadline='2026-12-28';extraDoc=true;
+  assert.equal((await send(path,'POST',{},cookie)).status,200);
+  state=await (await req(path,{headers:{cookie}})).json();
+  assert.deepEqual(state.alerts.map(x=>x.kind).sort(),['deadline','document','status']);
+  assert.equal(state.unreadCount,3);
+  assert.equal(state.alerts.find(x=>x.kind==='document').current.name,'ADENDA-1.pdf');
+
+  unavailable=true;
+  assert.equal((await send(path,'POST',{},cookie)).status,200);
+  state=await (await req(path,{headers:{cookie}})).json();
+  assert.ok(state.error);
+  assert.equal(state.baseline.deadline,'2026-12-28T14:00:00');
+ }finally{await worker?.dispose();await rm(dir,{recursive:true,force:true});}
+});

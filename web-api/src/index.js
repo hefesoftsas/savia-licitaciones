@@ -666,7 +666,7 @@ const apiWorker = {
     if (/^\/api\/rup\/analyses(?:\/[^/]+\/cancel)?$/.test(url.pathname)) {
       const session = await getScopedSession();
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
-      return privateResponse(await userAccountJobs(request, env, session.workspaceId));
+      return privateResponse(await userAccountJobs(request, env, session.workspaceId, session));
     }
     const runnerRup = /^\/api\/runner\/jobs\/([^/]+)\/rup$/.exec(url.pathname);
     if (runnerRup) {

@@ -6,7 +6,7 @@ export function accountView(row) { return { id: row.id, projectId: null, ...(row
 export async function expireAccountJobs(env, ownerId) {
   await env.DB.prepare("UPDATE account_jobs SET state = 'interrupted', updated_at = ? WHERE owner_id = ? AND state = 'running' AND lease_expires_at <= ?").bind(new Date().toISOString(), ownerId, Date.now()).run();
 }
-export async function userAccountJobs(request, env, ownerId) {
+export async function userAccountJobs(request, env, ownerId, session = null) {
   const match = /^\/api\/rup\/analyses(?:\/([^/]+)\/cancel)?$/.exec(new URL(request.url).pathname);
   if (!match) return missing();
   if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ error: 'invalid_origin' }, { status: 403 });
@@ -32,7 +32,14 @@ export async function userAccountJobs(request, env, ownerId) {
   if (!credential && input.credentialId !== 'local-runner') return missing();
   const requestId = request.headers.get('idempotency-key') || '';
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(requestId)) return Response.json({ error: 'invalid_idempotency_key' }, { status: 400 });
-  const payload = JSON.stringify({ localRunner:input.credentialId==='local-runner', certificateId: input.certificateId, certificateVersion: input.certificateVersion, language: input.language, dataProcessingConsent: true });
+  const tenantCountry = ['CO', 'ES', 'ALL'].includes(session?.tenant?.country) ? session.tenant.country : 'ALL';
+  let market = tenantCountry;
+  if (market === 'ALL') {
+    const userRow = await env.DB.prepare('SELECT savia_market AS market FROM "user" WHERE id = ?').bind(session?.user?.id || ownerId).first();
+    if (['CO', 'ES', 'ALL'].includes(userRow?.market)) market = userRow.market;
+  }
+  const jurisdiction = market === 'ES' || market === 'CO' ? market : undefined;
+  const payload = JSON.stringify({ localRunner:input.credentialId==='local-runner', certificateId: input.certificateId, certificateVersion: input.certificateVersion, language: input.language, dataProcessingConsent: true, ...(jurisdiction ? { jurisdiction } : {}) });
   const now = new Date().toISOString();
   const inserted = await env.DB.prepare("INSERT INTO account_jobs (id, owner_id, kind, client_request_id, payload_json, state, created_at, updated_at, credential_id) SELECT ?, ?, 'rup.analyze', ?, ?, 'queued', ?, ?, ? WHERE EXISTS (SELECT 1 FROM rup_current WHERE owner_id = ? AND certificate_id = ? AND version = ?) AND (?='local-runner' OR EXISTS (SELECT 1 FROM provider_credentials WHERE id = ? AND owner_id = ? AND provider IN ('opencode-go', 'openai-api', 'anthropic-api', 'google-api','google-vertex-api', 'groq-api', 'xai-api', 'deepseek-api', 'mistral-api', 'cerebras-api', 'together-api', 'nvidia-api', 'fireworks-api','huggingface-api','minimax-api','minimax-cn-api','moonshot-api','moonshot-cn-api','xiaomi-api','azure-openai-api','zai-api','ant-ling-api','opencode-zen') AND revoked_at IS NULL)) ON CONFLICT(owner_id, client_request_id) DO NOTHING RETURNING *")
     .bind(crypto.randomUUID(), ownerId, requestId, payload, now, now, input.credentialId==='local-runner'?null:input.credentialId, ownerId, input.certificateId, input.certificateVersion, input.credentialId, input.credentialId, ownerId).first();

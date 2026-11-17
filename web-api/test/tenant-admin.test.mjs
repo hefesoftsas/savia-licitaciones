@@ -120,3 +120,58 @@ test('la administración exige correo verificado cuando está configurado',async
  assert.equal(response.status,403);
  assert.equal((await response.json()).error,'email_not_verified');
 });
+
+test('POST y PATCH /api/admin/tenants soportan country y /api/preferences refleja tenant.country', {timeout:120000}, async () => {
+ const dir=await mkdtemp(join(tmpdir(),'savia-tenants-country-')); let worker;
+ try {
+  execFileSync('pnpm',['exec','wrangler','deploy','--dry-run','--outdir',dir],{cwd:root,stdio:'pipe',env:{...process.env,CLOUDFLARE_SEND_METRICS:'false'}});
+  worker=new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile(join(dir,'index.js'),'utf8'),compatibilityDate:'2026-10-30',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'tenants-country'},r2Buckets:['FILES'],bindings:{BETTER_AUTH_SECRET:'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz',BETTER_AUTH_URL:'http://localhost',SAVIA_SUPERADMIN_EMAIL:'admin@example.test',SAVIA_SUPERADMIN_PASSWORD:'local-only-password-12345',AUTH_ALLOW_REGISTRATION:'true'}}));
+  const db=await worker.getD1Database('DB');
+  for(const file of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(join(root,'migrations',file),'utf8')).split(';').map(x=>x.trim()).filter(Boolean))await db.prepare(sql).run();
+  const req=(path,options={})=>worker.dispatchFetch(`http://localhost${path}`,options);
+  const send=(path,method,body,cookie)=>req(path,{method,headers:{origin:'http://localhost','content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(body)});
+  const login=await send('/api/auth/sign-in/email','POST',{email:'admin@example.test',password:'local-only-password-12345'});
+  assert.equal(login.status,200);
+  const adminCookie=login.headers.get('set-cookie').split(';')[0];
+
+  assert.equal((await send('/api/admin/tenants','POST',{name:'Inválido',country:'FR'},adminCookie)).status,400);
+
+  const esRes=await send('/api/admin/tenants','POST',{name:'Empresa ES',country:'ES'},adminCookie);
+  assert.equal(esRes.status,201);
+  const esTenant=(await esRes.json()).tenant;
+  assert.equal(esTenant.country,'ES');
+
+  const coRes=await send('/api/admin/tenants','POST',{name:'Empresa CO',country:'CO'},adminCookie);
+  assert.equal(coRes.status,201);
+  assert.equal((await coRes.json()).tenant.country,'CO');
+
+  const allRes=await send('/api/admin/tenants','POST',{name:'Empresa ALL',country:'ALL'},adminCookie);
+  assert.equal(allRes.status,201);
+  assert.equal((await allRes.json()).tenant.country,'ALL');
+
+  const memberRes=await send(`/api/admin/tenants/${esTenant.id}/users`,'POST',{name:'Carlos',email:'carlos@example.es',password:'password-for-testing-123'},adminCookie);
+  assert.equal(memberRes.status,201);
+  const carlosLogin=await send('/api/auth/sign-in/email','POST',{email:'carlos@example.es',password:'password-for-testing-123'});
+  const carlosCookie=carlosLogin.headers.get('set-cookie').split(';')[0];
+
+  assert.equal((await (await req('/api/preferences',{headers:{cookie:carlosCookie}})).json()).market,'ES');
+  const putWhileEs=await send('/api/preferences','PUT',{market:'CO'},carlosCookie);
+  assert.equal(putWhileEs.status,200);
+  assert.equal((await putWhileEs.json()).market,'ES');
+
+  assert.equal((await send(`/api/admin/tenants/${esTenant.id}`,'PATCH',{country:'XX'},adminCookie)).status,400);
+
+  const patchCo=await send(`/api/admin/tenants/${esTenant.id}`,'PATCH',{country:'CO'},adminCookie);
+  assert.equal(patchCo.status,200);
+  assert.equal((await patchCo.json()).tenant.country,'CO');
+  assert.equal((await (await req('/api/preferences',{headers:{cookie:carlosCookie}})).json()).market,'CO');
+
+  const patchAll=await send(`/api/admin/tenants/${esTenant.id}`,'PATCH',{country:'ALL'},adminCookie);
+  assert.equal(patchAll.status,200);
+  assert.equal((await patchAll.json()).tenant.country,'ALL');
+  assert.equal((await (await req('/api/preferences',{headers:{cookie:carlosCookie}})).json()).market,'CO');
+  const putEs=await send('/api/preferences','PUT',{market:'ES'},carlosCookie);
+  assert.equal(putEs.status,200);
+  assert.equal((await putEs.json()).market,'ES');
+ } finally {await worker?.dispose();await rm(dir,{recursive:true,force:true});}
+});

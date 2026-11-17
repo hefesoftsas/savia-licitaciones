@@ -129,10 +129,20 @@ test('análisis RUP por cuenta usa concesiones, aislamiento y recuperación idem
     assert.equal((await post(`/api/runner/jobs/${older.id}/renew`, { lease: fairClaim.lease }, agent(runner))).status, 409);
     const projectClaim = await (await post('/api/runner/jobs/claim', { kinds: ['rup.analyze', 'economic-offer.calculate'] }, agent(runner))).json(); assert.equal(projectClaim.job.id, projectJob.id);
     const replaced = await req('/api/rup/certificate', { method: 'PUT', headers: { cookie: alice, origin: 'http://localhost', 'x-rup-version': '2', 'x-file-name': 'Nuevo.pdf' }, body: bytes }); assert.equal(replaced.status, 200);
+    const replacedData = await replaced.json();
     assert.equal((await create({ ...body, certificateVersion: 2 }, 'old-certificate')).status, 409);
 
+    assert.equal((await req('/api/preferences', { method: 'PUT', headers: { origin: 'http://localhost', 'content-type': 'application/json', cookie: alice }, body: JSON.stringify({ market: 'ES' }) })).status, 200);
+    const esBody = { ...body, certificateId: replacedData.certificate.id, certificateVersion: replacedData.version };
+    const esRes = await create(esBody, 'analysis-es');
+    assert.equal(esRes.status, 201);
+    const esJob = (await esRes.json()).job;
+    assert.equal(esJob.payload.jurisdiction, 'ES');
 
-
+    await db.prepare('UPDATE tenants SET country = ? WHERE owner_user_id = (SELECT id FROM "user" WHERE email = ?)').bind('CO', 'alice@example.com').run();
+    const coRes = await create(esBody, 'analysis-co');
+    assert.equal(coRes.status, 201);
+    assert.equal((await coRes.json()).job.payload.jurisdiction, 'CO');
 
   } finally { await worker?.dispose(); await rm(build, { recursive: true, force: true }); }
 });

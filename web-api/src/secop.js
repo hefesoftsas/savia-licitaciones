@@ -317,7 +317,7 @@ async function getPlacspCategories(env, category) {
   return { success: true, data: (rows.results || []).map(r => r.val), message: 'ok' };
 }
 
-async function getPlacspDetail(env, id) {
+export async function getPlacspDetail(env, id) {
   const row = await env.DB.prepare('SELECT * FROM placsp_tenders WHERE id = ?').bind(id).first();
   if (!row) return { success: false, data: null, message: 'No se encontró el proceso en PLACSP.' };
   return { success: true, data: placspRowToProcess(row), message: 'ok' };
