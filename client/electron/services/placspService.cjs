@@ -15,6 +15,7 @@ const MAX_FEED_BYTES = 2_000_000;
 const USER_AGENT = 'savia-licitaciones';
 const DEFAULT_FEED_URL = 'https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom';
 const AGGREGATED_FEED_URL = 'https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_1044/PlataformasAgregadasSinMenores.atom';
+const PSCP_SOCRATA_URL = 'https://analisi.transparenciacatalunya.cat/resource/ybgg-dgi6.json';
 
 const STATUS_LABELS = {
   PRE: 'Anuncio previo',
@@ -359,23 +360,88 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
     }
   }
 
+  async function fetchPscpSocrataEntries({ limit = 100, timeoutMs = 15_000 } = {}) {
+    const query = `${PSCP_SOCRATA_URL}?${new URLSearchParams({
+      $where: "fase_publicacio like '%licitaci%'",
+      $order: 'data_publicacio_anunci DESC',
+      $limit: String(limit),
+    }).toString()}`;
+    const response = await fetchImpl(query, {
+      method: 'GET',
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) {
+      throw new Error(`PSCP Socrata request failed: HTTP ${response.status}`);
+    }
+    const rows = await response.json();
+    if (!Array.isArray(rows)) return { updated: '', entries: [] };
+    const byId = new Map();
+    for (const row of rows) {
+      const id = String(row.id_intern || row.codi_expedient || '').trim();
+      const title = String(row.denominacio || row.objecte_contracte || '').trim();
+      if (!id || !title || byId.has(id)) continue;
+      const cpvRaw = String(row.codi_cpv || '').trim();
+      const cpvClean = cpvRaw.replace(/[^0-9]/g, '').slice(0, 8);
+      const cpvCodes = cpvClean.length >= 4 ? [cpvClean] : [];
+      const rawValue = Number(row.valor_estimat_contracte ?? row.pressupost_licitacio_amb ?? row.pressupost_licitacio_sense);
+      const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : null;
+      const url = typeof row.enllac_publicacio === 'string'
+        ? row.enllac_publicacio
+        : (row.enllac_publicacio?.url || '');
+      const statusText = String(row.fase_publicacio || 'Anunci de licitació');
+      byId.set(id, {
+        id: `pscp:${id}`,
+        reference: String(row.codi_expedient || id),
+        title,
+        entity: String(row.nom_organ || ''),
+        entityId: String(row.codi_dir3 || row.codi_organ || ''),
+        modality: String(row.procediment || row.tipus_contracte || ''),
+        status: statusText,
+        statusCode: 'PUB',
+        value,
+        currency: 'EUR',
+        publicationDate: String(row.data_publicacio_anunci || row.data_publicacio_contracte || '').slice(0, 10),
+        deadline: String(row.termini_presentacio_ofertes || '').slice(0, 19),
+        territory: String(row.lloc_execucio || 'Cataluña'),
+        city: String(row.lloc_execucio || ''),
+        classificationCode: cpvClean,
+        cpvCodes,
+        url,
+        documents: [],
+        updatedAt: String(row.data_publicacio_anunci || row.data_publicacio_contracte || ''),
+        source: 'placsp',
+        country: 'ES',
+      });
+    }
+    return { updated: new Date().toISOString(), entries: [...byId.values()] };
+  }
+
   async function fetchLatestEntries({
     feedUrl = DEFAULT_FEED_URL,
     maxPages = 2,
     timeoutMs = REQUEST_TIMEOUT_MS,
     softDeadlineMs,
     maxBytes,
+    fallbackToSocrata = true,
   } = {}) {
     const byId = new Map();
     let currentUrl = feedUrl;
     let feedUpdated = '';
     for (let page = 0; page < maxPages && currentUrl; page++) {
-      const parsed = await fetchFeedPage(currentUrl, { timeoutMs, softDeadlineMs, maxBytes });
-      if (page === 0) feedUpdated = parsed.updated;
-      for (const entry of parsed.entries) {
-        if (!byId.has(entry.id)) byId.set(entry.id, entry);
+      try {
+        const parsed = await fetchFeedPage(currentUrl, { timeoutMs: Math.min(timeoutMs, 10_000), softDeadlineMs, maxBytes });
+        if (page === 0) feedUpdated = parsed.updated;
+        for (const entry of parsed.entries) {
+          if (!byId.has(entry.id)) byId.set(entry.id, entry);
+        }
+        currentUrl = parsed.nextUrl && parsed.nextUrl !== currentUrl ? parsed.nextUrl : '';
+      } catch (error) {
+        if (page === 0 && fallbackToSocrata && feedUrl === DEFAULT_FEED_URL) {
+          return fetchPscpSocrataEntries({ timeoutMs: Math.min(timeoutMs, 15_000) });
+        }
+        throw error;
       }
-      currentUrl = parsed.nextUrl && parsed.nextUrl !== currentUrl ? parsed.nextUrl : '';
     }
     return { updated: feedUpdated, entries: [...byId.values()] };
   }
@@ -383,8 +449,10 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
   return {
     DEFAULT_FEED_URL,
     AGGREGATED_FEED_URL,
+    PSCP_SOCRATA_URL,
     parseAtomFeed,
     fetchFeedPage,
+    fetchPscpSocrataEntries,
     fetchLatestEntries,
   };
 }
