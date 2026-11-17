@@ -364,6 +364,14 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
     assert.deepEqual((await overlap.json()).data.items.map(({id, deadline}) => ({id, deadline})), [
       {id:'pscp:qa-overlap_0', deadline:'2099-11-30T14:00:00'},
     ]);
+    useLicit = false;
+    const fallbackOverlap = await post('/api/secop/search', {dataset:'placsp',keyword:'saneamiento',openOnly:true}, cookie);
+    assert.equal(fallbackOverlap.status, 200);
+    const fallbackOverlapData = (await fallbackOverlap.json()).data;
+    assert.equal(fallbackOverlapData.partial, true);
+    assert.deepEqual(fallbackOverlapData.items.map(item=>item.id), ['pscp:qa-overlap_0']);
+    useLicit = true;
+
     await db.prepare('DELETE FROM placsp_tenders WHERE reference = ?').bind('QA-PSCP-OVERLAP').run();
     for (const [keyword, expected] of [
       ['inundaciones', ['22706.26.021', 'FP.499.079/0611', 'FP.499.079/2111']],

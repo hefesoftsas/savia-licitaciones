@@ -286,19 +286,6 @@ function pscpPublication(url) {
   return /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\//i.test(url || '') ? url : null;
 }
 
-function uniquePlacspSearchIds(entries) {
-  const preferred = new Map();
-  for (const item of entries) {
-    const key = pscpPublication(item.url) || item.id;
-    const existing = preferred.get(key);
-    // Keep the PSCP identity because it carries the official time and document catalog.
-    if (!existing || item.id.startsWith('pscp:') && (!existing.startsWith('pscp:') || item.id < existing)) {
-      preferred.set(key, item.id);
-    }
-  }
-  return [...preferred.values()];
-}
-
 export async function searchPlacspD1(env, params = {}, ownerId) {
   const deadlineCutoff = params.openOnly ? placsp.placspDeadlineCutoff() : null;
   const keywords = placsp.placspKeywordVariants(params.keyword);
@@ -335,10 +322,15 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
     const entries = [...primary.items, ...(pscp?.items || [])];
     await upsertPlacspEntries(env, entries);
     where.push('id IN (SELECT value FROM json_each(?))');
-    binds.push(JSON.stringify(uniquePlacspSearchIds(entries)));
+    binds.push(JSON.stringify(entries.map(item => item.id)));
   }
+  const isPscpPublication = alias => `substr(${alias}.url, 1, 32) = 'https://contractaciopublica.cat/' AND instr(${alias}.url, '/detall-publicacio/') > 0`;
   if (previousIds) {
-    where.push('id NOT IN (SELECT value FROM json_each(?))');
+    where.push(`NOT EXISTS (
+      SELECT 1 FROM placsp_tenders previous JOIN json_each(?) seen ON seen.value = previous.id
+      WHERE previous.id = placsp_tenders.id OR
+        (${isPscpPublication("placsp_tenders")} AND previous.url = placsp_tenders.url)
+    )`);
     binds.push(JSON.stringify(previousIds));
   }
   if (deadlineCutoff) {
@@ -391,7 +383,19 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
   }
   const orderCol = colMap[params.sortBy] || 'publication_date';
   const orderDir = params.sortDirection === 'asc' ? 'ASC' : 'DESC';
-  const sql = `SELECT * FROM placsp_tenders${where.length ? ` WHERE ${where.map(clause => `(${clause})`).join(' AND ')}` : ''} ORDER BY ${orderCol} ${orderDir}, id ASC LIMIT ? OFFSET ?`;
+  // Group official publications in both the live search and the cached fallback.
+  const filters = where.length ? `WHERE ${where.map(clause => `(${clause})`).join(' AND ')}` : '';
+  const sql = `
+    WITH matches AS (SELECT * FROM placsp_tenders ${filters})
+    SELECT * FROM matches AS current
+    WHERE NOT (${isPscpPublication("current")}) OR NOT EXISTS (
+      SELECT 1 FROM matches AS preferred WHERE preferred.url = current.url AND (
+        (preferred.id LIKE 'pscp:%') > (current.id LIKE 'pscp:%') OR
+        ((preferred.id LIKE 'pscp:%') = (current.id LIKE 'pscp:%') AND preferred.id < current.id)
+      )
+    )
+    ORDER BY ${orderCol} ${orderDir}, id ASC LIMIT ? OFFSET ?
+  `;
   const readPage = async () => (await env.DB.prepare(sql).bind(...binds, limit + 1, previousIds ? 0 : offset).all()).results || [];
   let rows = await readPage();
   let liveHasMore = Boolean(primary && (primary.truncated || pscp?.truncated));
