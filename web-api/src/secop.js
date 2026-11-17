@@ -213,10 +213,10 @@ async function upsertPlacspEntries(env, entries, now = Date.now()) {
   for (let i = 0; i < entries.length; i += 40) {
     const chunk = entries.slice(i, i + 40);
     await env.DB.batch(chunk.map(item =>
-      env.DB.prepare(`INSERT INTO placsp_tenders (id, reference, title, entity, entity_id, modality, status, status_code, value, currency, publication_date, deadline, territory, city, classification_code, cpv_codes_json, url, documents_json, updated_at, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET reference=excluded.reference, title=excluded.title, entity=excluded.entity, entity_id=excluded.entity_id, modality=excluded.modality, status=excluded.status, status_code=excluded.status_code, value=excluded.value, currency=excluded.currency, publication_date=excluded.publication_date, deadline=excluded.deadline, territory=excluded.territory, city=excluded.city, classification_code=excluded.classification_code, cpv_codes_json=excluded.cpv_codes_json, url=excluded.url, documents_json=excluded.documents_json, updated_at=excluded.updated_at, synced_at=excluded.synced_at`)
-        .bind(item.id, item.reference || '', item.title, item.entity || '', item.entityId || '', item.modality || '', item.status || '', item.statusCode || '', item.value ?? null, item.currency || 'EUR', item.publicationDate || '', item.deadline || '', item.territory || '', item.city || '', item.classificationCode || '', JSON.stringify(item.cpvCodes || []), item.url || '', JSON.stringify(item.documents || []), item.updatedAt || '', now)
+      env.DB.prepare(`INSERT INTO placsp_tenders (id, reference, title, entity, entity_id, modality, status, status_code, value, currency, publication_date, deadline, territory, city, classification_code, cpv_codes_json, url, documents_json, updated_at, synced_at, description)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET reference=excluded.reference, title=excluded.title, entity=excluded.entity, entity_id=excluded.entity_id, modality=excluded.modality, status=excluded.status, status_code=excluded.status_code, value=excluded.value, currency=excluded.currency, publication_date=excluded.publication_date, deadline=excluded.deadline, territory=excluded.territory, city=excluded.city, classification_code=excluded.classification_code, cpv_codes_json=excluded.cpv_codes_json, url=excluded.url, documents_json=CASE WHEN excluded.id LIKE 'pscp:%' AND excluded.documents_json = '[]' THEN placsp_tenders.documents_json ELSE excluded.documents_json END, updated_at=excluded.updated_at, synced_at=excluded.synced_at, description=excluded.description`)
+        .bind(item.id, item.reference || '', item.title, item.entity || '', item.entityId || '', item.modality || '', item.status || '', item.statusCode || '', item.value ?? null, item.currency || 'EUR', item.publicationDate || '', item.deadline || '', item.territory || '', item.city || '', item.classificationCode || '', JSON.stringify(item.cpvCodes || []), item.url || '', JSON.stringify(item.documents || []), item.updatedAt || '', now, item.description || '')
     ));
   }
 }
@@ -269,10 +269,15 @@ export async function searchPlacspD1(env, params = {}) {
   }
   const where = [];
   const binds = [];
+  const deadlineCutoff = params.openOnly ? placsp.placspDeadlineCutoff() : null;
+  if (deadlineCutoff) {
+    where.push("status_code = ? AND deadline > ? AND (id NOT LIKE 'pscp:%' OR status = ?)");
+    binds.push(placsp.PLACSP_OPEN_STATUS, deadlineCutoff, placsp.PSCP_OPEN_PHASE);
+  }
   if (params.keyword?.trim()) {
     const like = `%${params.keyword.trim()}%`;
-    where.push('(title LIKE ? OR entity LIKE ? OR reference LIKE ? OR cpv_codes_json LIKE ?)');
-    binds.push(like, like, like, like);
+    where.push('(title LIKE ? OR entity LIKE ? OR reference LIKE ? OR cpv_codes_json LIKE ? OR description LIKE ?)');
+    binds.push(like, like, like, like, like);
   }
   if (params.classificationClass && /^\d{4,8}$/.test(String(params.classificationClass))) {
     const prefix = `${String(params.classificationClass)}%`;
@@ -317,36 +322,25 @@ export async function searchPlacspD1(env, params = {}) {
   const orderCol = colMap[params.sortBy] || 'publication_date';
   const orderDir = params.sortDirection === 'asc' ? 'ASC' : 'DESC';
   const sql = `SELECT * FROM placsp_tenders${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY ${orderCol} ${orderDir}, id ASC LIMIT ? OFFSET ?`;
-  const result = await env.DB.prepare(sql).bind(...binds, limit + 1, offset).all();
-  const rows = result.results || [];
-  let truncated = rows.length > limit;
-  let items = rows.slice(0, limit).map(placspRowToProcess);
-
-  const shouldQueryLive =
-    items.length === 0 ||
-    (items.length < limit && offset === 0 && Boolean(params.keyword?.trim() || params.classificationClass));
-  if (shouldQueryLive) {
+  const readPage = async () => (await env.DB.prepare(sql).bind(...binds, limit + 1, offset).all()).results || [];
+  let rows = await readPage();
+  let liveHasMore = false;
+  const canExpand = Boolean(params.openOnly || params.keyword?.trim() || params.classificationClass);
+  if (!rows.length || (rows.length <= limit && canExpand)) {
     try {
-      const api = placsp.createPlacspService();
-      const live = await api.searchPscpSocrata({ ...params, limit, offset });
-      if (Array.isArray(live?.items) && live.items.length > 0) {
-        await upsertPlacspEntries(env, live.items, Date.now());
-        const seen = new Set(items.map(item => item.id));
-        const merged = [...items];
-        for (const item of live.items) {
-          if (!seen.has(item.id)) {
-            seen.add(item.id);
-            merged.push(item);
-          }
-        }
-        truncated = truncated || Boolean(live.truncated) || merged.length > limit;
-        items = merged.slice(0, limit);
+      const live = await placsp.createPlacspService().searchPscpSocrata({ ...params, deadlineCutoff, limit, offset });
+      if (live.items.length) {
+        await upsertPlacspEntries(env, live.items);
+        rows = await readPage();
+        liveHasMore = live.truncated;
       }
     } catch {
-      // Gracefully fall back to whatever D1 returned when live Socrata is unreachable
+      // Keep the cached page if the live source is unavailable.
     }
   }
 
+  const items = rows.slice(0, limit).map(placspRowToProcess);
+  const truncated = rows.length > limit || (items.length > 0 && liveHasMore);
   return { success: true, data: { items, truncated }, message: items.length ? 'ok' : 'No se encontraron procesos con esos criterios' };
 }
 
@@ -379,13 +373,13 @@ export async function searchSecop(request, env, ownerId) {
   if (!sameOrigin(request, env)) return Response.json({ error: 'invalid_origin' }, { status: 403 });
   const input = await body(request);
   const badCategory = key => input[key] !== undefined && !(typeof input[key] === 'string' && input[key].length <= 300) && !(Array.isArray(input[key]) && input[key].length <= 100 && input[key].every(x => typeof x === 'string' && x.length <= 300));
-  if (!input || !sources.includes(input.dataset) || categoryNames.some(badCategory) || badCategory('territory') || ['keyword','fromDate','classificationClass','cpvCode'].some(key => input[key] !== undefined && (typeof input[key] !== 'string' || input[key].length > 300)) || (input.fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.fromDate)) || ['minValue','maxValue'].some(key => input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0)) || !Number.isInteger(input.offset ?? 0) || (input.offset ?? 0) < 0 || (input.offset ?? 0) > 100000 || (input.sortBy && !columnNames.includes(input.sortBy)) || (input.sortDirection && !['asc','desc'].includes(input.sortDirection)) || (input.columnFilters && (typeof input.columnFilters !== 'object' || Array.isArray(input.columnFilters) || Object.entries(input.columnFilters).some(([k,v]) => !columnNames.includes(k) || typeof v !== 'string' || v.length > 300)))) return Response.json({ error: 'invalid_search' }, { status: 400 });
+  if (!input || (input.openOnly !== undefined && typeof input.openOnly !== 'boolean') || !sources.includes(input.dataset) || categoryNames.some(badCategory) || badCategory('territory') || ['keyword','fromDate','classificationClass','cpvCode'].some(key => input[key] !== undefined && (typeof input[key] !== 'string' || input[key].length > 300)) || (input.fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.fromDate)) || ['minValue','maxValue'].some(key => input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0)) || !Number.isInteger(input.offset ?? 0) || (input.offset ?? 0) < 0 || (input.offset ?? 0) > 100000 || (input.sortBy && !columnNames.includes(input.sortBy)) || (input.sortDirection && !['asc','desc'].includes(input.sortDirection)) || (input.columnFilters && (typeof input.columnFilters !== 'object' || Array.isArray(input.columnFilters) || Object.entries(input.columnFilters).some(([k,v]) => !columnNames.includes(k) || typeof v !== 'string' || v.length > 300)))) return Response.json({ error: 'invalid_search' }, { status: 400 });
   const params = { dataset: input.dataset, limit: 20, offset: input.offset ?? 0 };
   for (const key of ['keyword', ...categoryNames, 'fromDate', 'minValue', 'maxValue', 'sortBy', 'sortDirection', 'columnFilters', 'classificationClass']) if (input[key] !== undefined) params[key] = input[key];
   if (input.cpvCode !== undefined && params.classificationClass === undefined) params.classificationClass = input.cpvCode;
   if (input.territory !== undefined && params.department === undefined) params.department = input.territory;
   if (input.dataset === 'placsp') {
-    const result = await searchPlacspD1(env, { ...params, fresh: input.fresh === true });
+    const result = await searchPlacspD1(env, { ...params, openOnly: input.openOnly === true, fresh: input.fresh === true });
     return Response.json(result, { status: result.success ? 200 : 502 });
   }
   const hash = await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([ownerId,params])));

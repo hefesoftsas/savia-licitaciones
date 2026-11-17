@@ -116,6 +116,19 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
         }
         return new Response(SAMPLE_ATOM, { headers: { 'content-type': 'application/atom+xml' } });
       }
+      if (url.hostname === 'analisi.transparenciacatalunya.cat') {
+        const where = url.searchParams.get('$where') || '';
+        if (where.includes('QA PAGINATION')) {
+          const offset = Number(url.searchParams.get('$offset') || 0);
+          return Response.json(Array.from({length:22}, (_, i) => ({
+            id_intern: `qa-page-${String(i+1).padStart(2,'0')}`,
+            denominacio: `Anuncio de prueba ${i+1}`,
+            objecte_contracte: 'QA pagination',
+            data_publicacio_anunci: `2099-01-${String(28-i).padStart(2,'0')}T12:00:00`,
+          })).slice(offset, offset + Number(url.searchParams.get('$limit'))));
+        }
+        return Response.json(where.includes('QA PSCP CATALOG') ? [{id_intern:'qa-catalog', denominacio:'QA PSCP catalog'}] : []);
+      }
       if (url.hostname === 'contrataciondelestado.es') {
         return new Response('%PDF-1.4 pliego', { headers: { 'content-type': 'application/pdf' } });
       }
@@ -155,6 +168,44 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
     const syncRes = await post('/api/secop/placsp/sync', {}, cookie);
     assert.equal(syncRes.status, 200, await syncRes.clone().text());
     assert.equal((await syncRes.json()).count, 1);
+
+    for (const [id, code, deadline, phase] of [
+      ['qa-open', 'PUB', '2099-01-01T09:00:00'],
+      ['qa-expired', 'PUB', '2000-01-01T09:00:00'],
+      ['qa-resolved', 'RES', '2099-01-01T09:00:00'],
+      ['qa-unverified', 'PUB', ''],
+      ['pscp:qa-resolved', 'PUB', '2099-01-01T09:00:00', 'Adjudicació'],
+    ]) {
+      await db.prepare('INSERT INTO placsp_tenders (id, title, status_code, deadline, status, synced_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(id, 'QA open bids', code, deadline, phase || '', Date.now()).run();
+    }
+    const openBids = await post('/api/secop/search', {dataset:'placsp', keyword:'QA open bids', openOnly:true}, cookie);
+    assert.equal(openBids.status, 200);
+    assert.deepEqual((await openBids.json()).data.items.map(item=>item.id), ['qa-open']);
+    const allBids = await post('/api/secop/search', {dataset:'placsp', keyword:'QA open bids', openOnly:false}, cookie);
+    assert.equal((await allBids.json()).data.items.length, 5);
+
+    const pscpDocs = [{id:'PCAP-99',name:'PCAP.pdf',extension:'pdf',url:'https://contrataciondelestado.es/pcap.pdf'}];
+    await db.prepare('INSERT INTO placsp_tenders (id, title, documents_json, synced_at) VALUES (?, ?, ?, ?)')
+      .bind('pscp:qa-catalog', 'QA PSCP catalog', JSON.stringify(pscpDocs), Date.now()).run();
+    const pscpRefresh = await post('/api/secop/search', {dataset:'placsp', keyword:'QA PSCP catalog'}, cookie);
+    assert.equal(pscpRefresh.status, 200);
+    const retained = await req('/api/secop/documents?source=placsp&id=pscp%3Aqa-catalog', {headers:{cookie}});
+    assert.deepEqual((await retained.json()).data.items.map(item=>item.id), ['PCAP-99']);
+    await db.prepare('DELETE FROM placsp_tenders WHERE id = ?').bind('pscp:qa-catalog').run();
+
+    await db.prepare('INSERT INTO placsp_tenders (id, title, publication_date, synced_at) VALUES (?, ?, ?, ?)')
+      .bind('qa-page-atom', 'QA pagination Atom', '2099-01-01', Date.now()).run();
+    const pagination = async offset => (await (await post('/api/secop/search', {
+      dataset:'placsp', keyword:'QA pagination', offset,
+    }, cookie)).json()).data;
+    const firstPage = await pagination(0);
+    assert.equal(firstPage.items[0].id, 'pscp:qa-page-01');
+    assert.equal(firstPage.truncated, true);
+    const secondPage = await pagination(20);
+    assert.deepEqual(secondPage.items.map(item=>item.id), ['pscp:qa-page-21','pscp:qa-page-22','qa-page-atom']);
+    assert.equal(secondPage.truncated, false);
+    await db.prepare("DELETE FROM placsp_tenders WHERE id LIKE 'qa-page-%' OR id LIKE 'pscp:qa-page-%'").run();
 
     const searchRes = await post('/api/secop/search', {
       dataset: 'placsp',
@@ -380,6 +431,10 @@ test('placspService.searchPscpSocrata construye consultas SoQL válidas y mapea 
   assert.equal(res.items[0].classificationCode, '72200000');
   assert.deepEqual(res.items[0].cpvCodes, ['72200000']);
   assert.equal(res.items[0].url, 'https://contractaciopublica.cat/ca/detall-publicacio/1001');
+
+  await service.searchPscpSocrata({openOnly:true, deadlineCutoff:placsp.placspDeadlineCutoff(new Date('2026-07-01T10:00:00Z'))});
+  assert.equal(new URL(capturedUrls[1]).searchParams.get('$where'),
+    "fase_publicacio = 'Anunci de licitació' AND termini_presentacio_ofertes > '2026-07-01T12:00:00'");
 });
 
 test('PLACSP carga las oportunidades de PSCP cuando Atom responde vacío', async () => {

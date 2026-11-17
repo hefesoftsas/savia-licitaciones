@@ -8,7 +8,14 @@ export function selectLoadedDocuments(documents) {
 }
 export async function prepareOpportunity(request,process,ids) {
   const documentIds=[...new Set(ids)];
-  const {project} = await request('/api/projects/from-secop',{method:'POST',json:{process,documentIds}});
+  let project;
+  try {
+    ({project} = await request('/api/projects/from-secop',{method:'POST',json:{process,documentIds}}));
+  } catch (error) {
+    const projectId = error?.details?.projectId;
+    if (error?.status !== 409 || error.details?.error !== 'already_saved' || typeof projectId !== 'string' || !projectId) throw error;
+    return {project:{id:projectId},existing:true,imported:[],queued:[],failed:[]};
+  }
   const imported=[],queued=[],failed=[];
   for (const id of documentIds) {
     try {

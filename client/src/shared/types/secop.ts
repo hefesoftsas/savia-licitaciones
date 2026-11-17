@@ -44,6 +44,7 @@ export interface OpportunitySuggestionsState {
 
 export type SecopColumn = 'title' | 'entity' | 'modality' | 'status' | 'value' | 'publicationDate' | 'deadline' | 'department';
 export interface SecopSearchParams {
+  openOnly?: boolean;
   classificationClass?: string;
   cpvCode?: string;
   sortBy?: SecopColumn;

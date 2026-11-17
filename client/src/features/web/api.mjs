@@ -4,9 +4,11 @@ export async function request(url, { json, headers: suppliedHeaders, ...options 
   const response = await fetcher(url, { ...options, headers, credentials: 'same-origin', ...(json === undefined ? {} : { body: JSON.stringify(json) }) });
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
-    try { const data = await response.json(); message = data.message || data.error || message; } catch { /* non-JSON error */ }
+    const details = await response.json().catch(() => null);
+    message = details?.message || details?.error || message;
     const error = new Error(message);
     error.status = response.status;
+    error.details = details;
     throw error;
   }
   return response.status === 204 ? null : response.json();

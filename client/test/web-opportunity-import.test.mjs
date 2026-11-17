@@ -15,3 +15,16 @@ test('selección masiva limita a 100 IDs únicos compatibles para que el servido
  const selected=selectLoadedDocuments([{id:'bad',extension:'pdf'},docs[0],...docs,{id:'200',extension:'exe'}]);
  assert.equal(selected.length,100);assert.equal(new Set(selected).size,100);assert.equal(selected[0],'1');assert.equal(selected[99],'100');
 });
+
+test('abre el proyecto existente al repetir el guardado de una oportunidad', async () => {
+  const calls = [];
+  const {request} = await import('../src/features/web/api.mjs');
+  const send = (path, options) => request(path, options, async url => {
+    calls.push(url);
+    return Response.json({error:'already_saved',projectId:'saved-project'},{status:409});
+  });
+  const result = await prepareOpportunity(send, {id:'already-saved'}, ['PCAP-1']);
+  assert.equal(result.project.id, 'saved-project');
+  assert.equal(result.existing, true);
+  assert.deepEqual(calls, ['/api/projects/from-secop']);
+});

@@ -15,6 +15,16 @@ const MAX_FEED_BYTES = 2_000_000;
 const USER_AGENT = 'savia-licitaciones';
 const DEFAULT_FEED_URL = 'https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom';
 const AGGREGATED_FEED_URL = 'https://contrataciondelsectorpublico.gob.es/sindicacion/sindicacion_1044/PlataformasAgregadasSinMenores.atom';
+const PSCP_OPEN_PHASE = 'Anunci de licitació';
+const PLACSP_OPEN_STATUS = 'PUB';
+const spanishDeadlineClock = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Europe/Madrid', dateStyle: 'short', timeStyle: 'medium', hourCycle: 'h23',
+});
+
+function placspDeadlineCutoff(now = new Date()) {
+  return spanishDeadlineClock.format(now).replace(' ', 'T');
+}
+
 const PSCP_SOCRATA_URL = 'https://analisi.transparenciacatalunya.cat/resource/ybgg-dgi6.json';
 
 const STATUS_LABELS = {
@@ -354,6 +364,7 @@ function mapPscpSocrataRows(rows) {
       id: `pscp:${id}`,
       reference: String(row.codi_expedient || id),
       title,
+      description: String(row.objecte_contracte || ''),
       entity: String(row.nom_organ || ''),
       entityId: String(row.codi_dir3 || row.codi_organ || ''),
       modality: String(row.procediment || row.tipus_contracte || ''),
@@ -500,7 +511,10 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
       return false;
     };
 
-    if (!addLikeFilter('fase_publicacio', params.status)) {
+    if (params.openOnly) {
+      where.push(`fase_publicacio = '${PSCP_OPEN_PHASE}'`, `termini_presentacio_ofertes > '${params.deadlineCutoff || placspDeadlineCutoff()}'`);
+    }
+    if (!addLikeFilter('fase_publicacio', params.status) && !params.openOnly) {
       where.push("fase_publicacio like '%licitaci%'");
     }
     if (typeof params.keyword === 'string' && params.keyword.trim()) {
@@ -662,6 +676,9 @@ module.exports = {
   DEFAULT_FEED_URL,
   AGGREGATED_FEED_URL,
   STATUS_LABELS,
+  PSCP_OPEN_PHASE,
+  PLACSP_OPEN_STATUS,
+  placspDeadlineCutoff,
   parseAtomFeed,
   validatePlacspUrl,
   extractPscpDocumentsFromPublicationJson,
