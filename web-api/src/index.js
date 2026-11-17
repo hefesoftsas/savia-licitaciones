@@ -902,7 +902,7 @@ const apiWorker = {
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
       return privateResponse(await companyProfile(request, env, session.workspaceId));
     }
-    const selectedSecopImports = /^\/api\/projects\/([^/]+)\/secop\/imports(?:\/(\d+))?$/.exec(url.pathname);
+    const selectedSecopImports = /^\/api\/projects\/([^/]+)\/secop\/imports(?:\/([A-Za-z0-9._-]+))?$/.exec(url.pathname);
     if (selectedSecopImports) {
       const session = await getScopedSession();
       if (!session) return privateResponse(Response.json({error:'unauthorized'},{status:401}));

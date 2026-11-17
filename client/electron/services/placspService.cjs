@@ -160,7 +160,9 @@ function validatePlacspUrl(rawUrl) {
       url.hostname === 'contrataciondelestado.es' ||
       url.hostname.endsWith('.contrataciondelestado.es') ||
       url.hostname === 'contrataciondelsectorpublico.gob.es' ||
-      url.hostname.endsWith('.contrataciondelsectorpublico.gob.es')
+      url.hostname.endsWith('.contrataciondelsectorpublico.gob.es') ||
+      url.hostname === 'contractaciopublica.cat' ||
+      url.hostname.endsWith('.contractaciopublica.cat')
     ) {
       return url.toString();
     }
@@ -378,6 +380,50 @@ function mapPscpSocrataRows(rows) {
   return [...byId.values()];
 }
 
+function extractPscpDocumentsFromPublicationJson(data) {
+  const pub = data?.publicacio?.dadesPublicacio;
+  if (!pub || typeof pub !== 'object') return [];
+  const groups = [
+    { key: 'plecsDeClausulesAdministratives', prefix: 'PCAP' },
+    { key: 'plecsDePrescripcionsTecniques', prefix: 'PPT' },
+    { key: 'memoriaJustificativaContracte', prefix: 'MEM' },
+    { key: 'documentsAprovacio', prefix: 'APR' },
+    { key: 'resolucioAprovacioExpedient', prefix: 'RES' },
+    { key: 'informeInsuficienciaMitjans', prefix: 'INF' },
+    { key: 'altresDocuments', prefix: 'DOC' },
+  ];
+  const docs = [];
+  const seenIds = new Set();
+  for (const { key, prefix } of groups) {
+    const section = pub[key];
+    if (!section || typeof section !== 'object') continue;
+    const lists = Array.isArray(section)
+      ? [section]
+      : ['ca', 'es', 'en', 'oc'].map(lang => section[lang]).filter(Array.isArray);
+    for (const list of lists) {
+      for (const item of list) {
+        const docId = item?.id;
+        const hash = typeof item?.hash === 'string' ? item.hash.trim() : '';
+        if (!docId || !hash || seenIds.has(String(docId))) continue;
+        seenIds.add(String(docId));
+        const name = String(item.titol || item.nomFitxer || `documento_${docId}.pdf`).trim();
+        const extMatch = /\.([a-z0-9]{2,5})$/i.exec(name);
+        const extension = (extMatch ? extMatch[1] : 'pdf').toLowerCase();
+        const size = Number.isFinite(Number(item.mida)) ? Number(item.mida) : null;
+        docs.push({
+          id: `${prefix}-${docId}`,
+          name,
+          extension,
+          docType: prefix,
+          size,
+          url: `https://contractaciopublica.cat/portal-api/descarrega-document/${encodeURIComponent(String(docId))}/${encodeURIComponent(hash)}`,
+        });
+      }
+    }
+  }
+  return docs;
+}
+
 function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
   async function fetchFeedPage(url = DEFAULT_FEED_URL, timeoutOrOptions = REQUEST_TIMEOUT_MS, extraOptions = {}) {
     const opts = typeof timeoutOrOptions === 'object' && timeoutOrOptions !== null
@@ -546,6 +592,37 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
     return { updated: feedUpdated, entries: [...byId.values()] };
   }
 
+  async function fetchPscpProcessDocuments(processId, { reference = '', timeoutMs = 15_000 } = {}) {
+    const rawId = String(processId || '').replace(/^pscp:/, '').trim();
+    if (!rawId && !reference) return [];
+    const whereClause = rawId
+      ? `id_intern='${escapeSoql(rawId)}'`
+      : `codi_expedient='${escapeSoql(String(reference || '').trim())}'`;
+    const query = `${PSCP_SOCRATA_URL}?${new URLSearchParams({
+      $where: whereClause,
+      $order: 'data_publicacio_anunci DESC',
+      $limit: '1',
+    }).toString()}`;
+    const res = await fetchImpl(query, {
+      method: 'GET',
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return [];
+    const rows = await res.json();
+    const row = Array.isArray(rows) ? rows[0] : null;
+    const jsonUrl = row?.url_json_licitacio?.url || row?.url_json_agregada?.url || '';
+    if (!jsonUrl || !validatePlacspUrl(jsonUrl)) return [];
+    const pubRes = await fetchImpl(jsonUrl, {
+      method: 'GET',
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!pubRes.ok) return [];
+    const pubData = await pubRes.json();
+    return extractPscpDocumentsFromPublicationJson(pubData);
+  }
+
   return {
     DEFAULT_FEED_URL,
     AGGREGATED_FEED_URL,
@@ -554,6 +631,7 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
     fetchFeedPage,
     fetchPscpSocrataEntries,
     searchPscpSocrata,
+    fetchPscpProcessDocuments,
     fetchLatestEntries,
   };
 }
@@ -564,5 +642,6 @@ module.exports = {
   STATUS_LABELS,
   parseAtomFeed,
   validatePlacspUrl,
+  extractPscpDocumentsFromPublicationJson,
   createPlacspService,
 };

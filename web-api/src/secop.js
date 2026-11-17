@@ -41,8 +41,16 @@ export async function secopDocuments(request, env, ownerId, projectId, documentI
   const process = await projectProcess(env, ownerId, projectId);
   if (!process) return Response.json({ error: 'not_found' }, { status: 404 });
   if (process.source === 'placsp') {
-    const row = await env.DB.prepare('SELECT documents_json FROM placsp_tenders WHERE id = ?').bind(process.id).first();
-    const docs = Array.isArray(process.documents) && process.documents.length ? process.documents : (row ? JSON.parse(row.documents_json || '[]') : []);
+    const row = await env.DB.prepare('SELECT documents_json, reference FROM placsp_tenders WHERE id = ?').bind(process.id).first();
+    let docs = Array.isArray(process.documents) && process.documents.length ? process.documents : (row ? JSON.parse(row.documents_json || '[]') : []);
+    if (!docs.length && String(process.id || '').startsWith('pscp:')) {
+      try {
+        docs = await placsp.createPlacspService().fetchPscpProcessDocuments(process.id, { reference: row?.reference || process.reference || '' });
+        if (docs.length && row) {
+          await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?').bind(JSON.stringify(docs), process.id).run();
+        }
+      } catch { /* leave empty if unreachable */ }
+    }
     if (!documentId && request.method === 'GET') {
       const saved = await env.DB.prepare('SELECT document_id AS id FROM project_secop_files WHERE project_id = ?').bind(projectId).all();
       const imported = new Set(saved.results.map(item => item.id));
@@ -401,8 +409,17 @@ export async function secopDocumentCatalog(request, env) {
   const url = new URL(request.url), source = url.searchParams.get('source'), id = url.searchParams.get('id') || '';
   if (source === 'placsp') {
     if (!id.trim() || id.length > 200) return Response.json({ error: 'invalid_process' }, { status: 400 });
-    const row = await env.DB.prepare('SELECT documents_json FROM placsp_tenders WHERE id = ?').bind(id).first();
-    const items = row ? JSON.parse(row.documents_json || '[]').map(({ url: _url, ...item }) => item) : [];
+    const row = await env.DB.prepare('SELECT documents_json, reference FROM placsp_tenders WHERE id = ?').bind(id).first();
+    let docs = row ? JSON.parse(row.documents_json || '[]') : [];
+    if (!docs.length && id.startsWith('pscp:')) {
+      try {
+        docs = await placsp.createPlacspService().fetchPscpProcessDocuments(id, { reference: row?.reference || '' });
+        if (docs.length && row) {
+          await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?').bind(JSON.stringify(docs), id).run();
+        }
+      } catch { /* leave empty if unreachable */ }
+    }
+    const items = docs.map(({ url: _url, ...item }) => item);
     return Response.json({ success: true, data: { items, truncated: false, partial: false }, message: 'ok' });
   }
   const portfolioId = url.searchParams.get('portfolioId') || '', rawOffset = url.searchParams.get('offset') || '0';
