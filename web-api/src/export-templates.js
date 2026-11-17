@@ -1,10 +1,12 @@
 import defaults from '../../client/electron/services/exportFormatDefaults.cjs';
 import systemPresets from '../../client/electron/services/systemExportTemplates.cjs';
+import spainTemplates from '../../client/electron/services/spainTemplates.cjs';
+import colombiaTemplates from '../../client/electron/services/colombiaTemplates.cjs';
 const bad=()=>Response.json({error:'invalid_template'},{status:400}),missing=()=>Response.json({error:'not_found'},{status:404}),conflict=()=>Response.json({error:'template_conflict'},{status:409});
 const hash=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
 export async function userExportTemplates(request,env,owner,id){
  if(request.method!=='GET'&&request.headers.get('origin')!==new URL(env.BETTER_AUTH_URL).origin)return Response.json({error:'invalid_origin'},{status:403});
- if(request.method==='GET'&&!id){const rows=await env.DB.prepare('SELECT * FROM export_format_templates WHERE owner_id=? ORDER BY updated_at DESC,id').bind(owner).all();return Response.json({templates:rows.results.map(row=>({id:row.id,name:row.name,format:JSON.parse(row.format_json),version:row.version,createdAt:row.created_at,updatedAt:row.updated_at})),systemTemplates:systemPresets.SYSTEM_EXPORT_TEMPLATES.map(item=>({id:item.template_id,format:item.config}))});}
+ if(request.method==='GET'&&!id){const rows=await env.DB.prepare('SELECT * FROM export_format_templates WHERE owner_id=? ORDER BY updated_at DESC,id').bind(owner).all();return Response.json({templates:rows.results.map(row=>({id:row.id,name:row.name,format:JSON.parse(row.format_json),version:row.version,createdAt:row.created_at,updatedAt:row.updated_at})),systemTemplates:systemPresets.SYSTEM_EXPORT_TEMPLATES.map(item=>({id:item.template_id,format:item.config})),documentTemplates:[...spainTemplates.SPAIN_DOCUMENT_TEMPLATES.map(item=>({...item,market:'ES'})),...colombiaTemplates.COLOMBIA_DOCUMENT_TEMPLATES.map(item=>({...item,market:'CO'}))]});}
  if((request.method==='POST'&&!id)||(request.method==='PUT'&&id)){
   let input;try{input=await request.json();}catch{return bad();}
   if(typeof input?.name!=='string'||!input.name.trim()||input.name.length>300||!input.format||typeof input.format!=='object'||Array.isArray(input.format)||JSON.stringify(input.format).length>100000||(id&&(!Number.isSafeInteger(input.version)||input.version<1)))return bad();

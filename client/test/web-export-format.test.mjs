@@ -29,3 +29,36 @@ test('selector de exportación ofrece formato de cuenta y plantillas por separad
  const server=await createServer({configFile:resolve(root,'vite.web.config.ts'),root,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},appType:'custom'});
  try{const {ExportFormatPickerView}=await server.ssrLoadModule('/src/features/web/WebExportFormatPicker.tsx');const props={language:'es',value:'',disabled:false,templates:[{id:'own',name:'Mi formato',format:{}}],systemTemplates:[{id:'tpl-co-matrices',format:{template_name:'Colombia'}}],onChange:()=>{}};const html=renderToStaticMarkup(React.createElement(ExportFormatPickerView,props));assert.match(html,/Formato de la cuenta/);assert.match(html,/Mi formato/);assert.match(html,/Matrices horizontales/);assert.match(html,/Plantillas del sistema/);}finally{await server.close();}
 });
+
+test('filtra y etiqueta plantillas de España LCSP A4 y Colombia según el mercado activo',async()=>{
+ const server=await createServer({configFile:resolve(root,'vite.web.config.ts'),root,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},appType:'custom'});
+ try{
+  const {ExportFormatPickerView}=await server.ssrLoadModule('/src/features/web/WebExportFormatPicker.tsx');
+  const {SystemTemplateList,DocumentTemplateList}=await server.ssrLoadModule('/src/features/web/WebExportTemplates.tsx');
+  const systemTemplates=[
+   {id:'tpl-co-matrices',format:{template_name:'Colombia'}},
+   {id:'tpl-es-memoria-tecnica',format:{template_name:'España'}},
+   {id:'tpl-system-a4-visual',format:{template_name:'A4 图文版'}},
+  ];
+  const docTemplates=[
+   {id:'es-sobre-a-deuc',name:'Sobre A · DEUC',nameEn:'Envelope A · ESPD',summary:'Checklist LCSP',summaryEn:'LCSP checklist',source:'https://boe.es',reviewedAt:'2026-11-17',html:'<h1>Sobre A</h1>',config:{},market:'ES'},
+   {id:'co-presentacion',name:'Carta de presentación',nameEn:'Cover letter',summary:'SECOP',summaryEn:'SECOP',source:'https://colombiacompra.gov.co',reviewedAt:'2026-10-29',html:'<h1>Carta</h1>',config:{},market:'CO'},
+  ];
+  const esPicker=renderToStaticMarkup(React.createElement(ExportFormatPickerView,{language:'es',market:'ES',value:'',disabled:false,templates:[],systemTemplates,onChange:()=>{}}));
+  assert.match(esPicker,/España · Memoria técnica LCSP \(A4\)/);
+  assert.doesNotMatch(esPicker,/Colombia · Matrices horizontales/);
+  const coPicker=renderToStaticMarkup(React.createElement(ExportFormatPickerView,{language:'es',market:'CO',value:'',disabled:false,templates:[],systemTemplates,onChange:()=>{}}));
+  assert.match(coPicker,/Colombia · Matrices horizontales/);
+  assert.doesNotMatch(coPicker,/España · Memoria técnica LCSP/);
+  const allList=renderToStaticMarkup(React.createElement(SystemTemplateList,{language:'en',market:'ALL',templates:systemTemplates,disabled:false,onSelect:()=>{},onCopy:()=>{}}));
+  assert.match(allList,/Spain · Technical proposal LCSP \(A4\)/);
+  assert.match(allList,/Colombia · Landscape schedules/);
+  const esDocs=renderToStaticMarkup(React.createElement(DocumentTemplateList,{language:'es',market:'ES',templates:docTemplates,disabled:false,onUseFormat:()=>{},onCopyFormat:()=>{},onPreview:()=>{}}));
+  assert.match(esDocs,/Sobre A · DEUC/);
+  assert.match(esDocs,/España · LCSP · A4/);
+  assert.doesNotMatch(esDocs,/Carta de presentación/);
+  const coDocs=renderToStaticMarkup(React.createElement(DocumentTemplateList,{language:'es',market:'CO',templates:docTemplates,disabled:false,onUseFormat:()=>{},onCopyFormat:()=>{},onPreview:()=>{}}));
+  assert.match(coDocs,/Carta de presentación/);
+  assert.doesNotMatch(coDocs,/Sobre A · DEUC/);
+ }finally{await server.close();}
+});

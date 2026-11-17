@@ -22,6 +22,7 @@ import AppDialog from '@/shared/ui/AppDialog';
 import {useToast} from '@/shared/ui/ToastProvider';
 import {useFeasibilityRequest,useFeasibilityPath,FeasibilityScope} from './FeasibilityScope';
 import {editOutline,prepareOutlineSave} from './feasibility-outline.mjs';
+import type {ProcurementMarket} from '@/shared/types/secop';
 
 const WordCanvas=lazy(()=>import('./WebWordCanvas'));
 
@@ -132,7 +133,7 @@ export function FeasibilityEditor({state,language,sources,onChange,defaults,step
  {state.step==='content'&&<><h2>{labels[language][5]}</h2><WebLibraryImageReferences language={language}/>{state.outlineData?.outline.length?chapters(state.outlineData.outline):<p>{en?'Add an outline to edit chapters.':'Agrega un índice para editar capítulos.'}</p>}</>}
  </div></div>;
 }
-function WebFeasibilityInner({language,onDirtyChange,credentials,projectId,projectFiles=[],projectDefaults,onOpenProjectFiles}:{language:'es'|'en';onDirtyChange:(dirty:boolean)=>void;credentials:{id:string;provider:string;model:string}[];projectId?:string;projectFiles?:{id:string;name:string}[];projectDefaults?:ProjectDefaults|null;onOpenProjectFiles?:()=>void}){
+function WebFeasibilityInner({language,market='ALL',onDirtyChange,credentials,projectId,projectFiles=[],projectDefaults,onOpenProjectFiles}:{language:'es'|'en';market?:ProcurementMarket;onDirtyChange:(dirty:boolean)=>void;credentials:{id:string;provider:string;model:string}[];projectId?:string;projectFiles?:{id:string;name:string}[];projectDefaults?:ProjectDefaults|null;onOpenProjectFiles?:()=>void}){
  const request=useFeasibilityRequest();
  const feasibilityPath=useFeasibilityPath();
  const en=language==='en',{showToast}=useToast(),[state,setState]=useState<State|null>(null),[saved,setSaved]=useState<State|null>(null),[version,setVersion]=useState(0),[sources,setSources]=useState<Availability[]>([]),[loading,setLoading]=useState(true),[failed,setFailed]=useState(false),[busy,setBusy]=useState(false),[sourceBusy,setSourceBusy]=useState(false),[analysisBusy,setAnalysisBusy]=useState(false),[confirm,setConfirm]=useState(false),[prefilled,setPrefilled]=useState(false),[defaults,setDefaults]=useState<ProjectDefaults|undefined>(projectDefaults||undefined),[readerOpen,setReaderOpen]=useState(false),[readerFileId,setReaderFileId]=useState(''),[fullscreen,setFullscreen]=useState(false);
@@ -189,7 +190,7 @@ function WebFeasibilityInner({language,onDirtyChange,credentials,projectId,proje
      {state.step==='parameters'&&<WebFeasibilityParameters language={language} version={version} dirty={dirty||sourceBusy||analysisBusy} hasOutline={!!saved?.outlineData?.outline.length&&!!saved?.projectInfo.projectName.trim()} hasReferences={!!saved?.referenceDocumentIds.length} credentials={credentials} onBusyChange={setAnalysisBusy} onApplied={reloadReport} />}
      {state.step==='content'&&<WebFeasibilityContent language={language} version={version} dirty={dirty||sourceBusy||analysisBusy} ready={!!saved?.outlineData?.outline.length&&!!saved?.keyParametersMarkdown.trim()} reviewReady={hasLeafContent(saved?.outlineData?.outline||[])} chapterTitles={Object.fromEntries((function flat(nodes:Node[]):[string,string][]{return nodes.flatMap(node=>[[node.id,node.title] as [string,string],...flat(node.children||[])]);})(saved?.outlineData?.outline||[]))} hasReferences={!!saved?.referenceDocumentIds.length} credentials={credentials} onBusyChange={setAnalysisBusy} onApplied={reloadReport} />}
      <fieldset className="web-feasibility-fieldset" disabled={busy||sourceBusy||analysisBusy}><FeasibilityEditor hideNavigation state={state} language={language} sources={sources} defaults={defaults} stepStatuses={stepStatuses} onChange={setState} /></fieldset>
-     {state.step==='content'&&<WebFeasibilityExports language={language} version={version} dirty={dirty||sourceBusy||analysisBusy} hasOutline={!!saved?.outlineData?.outline.length} />}
+     {state.step==='content'&&<WebFeasibilityExports language={language} market={market} version={version} dirty={dirty||sourceBusy||analysisBusy} hasOutline={!!saved?.outlineData?.outline.length} />}
     </section>
    </div>
   </div>
@@ -206,4 +207,4 @@ function WebFeasibilityInner({language,onDirtyChange,credentials,projectId,proje
  </div>;
 }
 
-export default function WebFeasibility(props:{language:'es'|'en';onDirtyChange:(dirty:boolean)=>void;credentials:{id:string;provider:string;model:string}[];projectId?:string;projectFiles?:{id:string;name:string}[];projectDefaults?:ProjectDefaults|null;onOpenProjectFiles?:()=>void}){return <FeasibilityScope projectId={props.projectId}><WebFeasibilityInner key={props.projectId||'account'} {...props}/></FeasibilityScope>;}
+export default function WebFeasibility(props:{language:'es'|'en';market?:ProcurementMarket;onDirtyChange:(dirty:boolean)=>void;credentials:{id:string;provider:string;model:string}[];projectId?:string;projectFiles?:{id:string;name:string}[];projectDefaults?:ProjectDefaults|null;onOpenProjectFiles?:()=>void}){return <FeasibilityScope projectId={props.projectId}><WebFeasibilityInner key={props.projectId||'account'} {...props}/></FeasibilityScope>;}
