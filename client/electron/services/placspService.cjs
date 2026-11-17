@@ -327,6 +327,57 @@ async function readStreamWithLimits(response, { softDeadlineMs = SOFT_DEADLINE_M
   }
 }
 
+function escapeSoql(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function mapPscpSocrataRows(rows) {
+  const byId = new Map();
+  for (const row of rows) {
+    const id = String(row.id_intern || row.codi_expedient || '').trim();
+    const title = String(row.denominacio || row.objecte_contracte || '').trim();
+    if (!id || !title || byId.has(id)) continue;
+    const cpvRaw = String(row.codi_cpv || '').trim();
+    const cpvClean = cpvRaw.replace(/[^0-9]/g, '').slice(0, 8);
+    const cpvCodes = cpvClean.length >= 4 ? [cpvClean] : [];
+    const rawValue = Number(row.valor_estimat_contracte ?? row.pressupost_licitacio_amb ?? row.pressupost_licitacio_sense);
+    const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : null;
+    const url = typeof row.enllac_publicacio === 'string'
+      ? row.enllac_publicacio
+      : (row.enllac_publicacio?.url || '');
+    const statusText = String(row.fase_publicacio || 'Anunci de licitació');
+    const territory = String(row.lloc_execucio || 'Cataluña');
+    const deadline = String(row.termini_presentacio_ofertes || '').slice(0, 19);
+    byId.set(id, {
+      id: `pscp:${id}`,
+      reference: String(row.codi_expedient || id),
+      title,
+      entity: String(row.nom_organ || ''),
+      entityId: String(row.codi_dir3 || row.codi_organ || ''),
+      modality: String(row.procediment || row.tipus_contracte || ''),
+      status: statusText,
+      statusCode: 'PUB',
+      value,
+      currency: 'EUR',
+      currencyVerified: value != null,
+      publicationDate: String(row.data_publicacio_anunci || row.data_publicacio_contracte || '').slice(0, 10),
+      deadline,
+      deadlineVerified: Boolean(deadline),
+      department: territory,
+      territory,
+      city: String(row.lloc_execucio || ''),
+      classificationCode: cpvClean,
+      cpvCodes,
+      url,
+      documents: [],
+      updatedAt: String(row.data_publicacio_anunci || row.data_publicacio_contracte || ''),
+      source: 'placsp',
+      country: 'ES',
+    });
+  }
+  return [...byId.values()];
+}
+
 function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
   async function fetchFeedPage(url = DEFAULT_FEED_URL, timeoutOrOptions = REQUEST_TIMEOUT_MS, extraOptions = {}) {
     const opts = typeof timeoutOrOptions === 'object' && timeoutOrOptions !== null
@@ -376,45 +427,94 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
     }
     const rows = await response.json();
     if (!Array.isArray(rows)) return { updated: '', entries: [] };
-    const byId = new Map();
-    for (const row of rows) {
-      const id = String(row.id_intern || row.codi_expedient || '').trim();
-      const title = String(row.denominacio || row.objecte_contracte || '').trim();
-      if (!id || !title || byId.has(id)) continue;
-      const cpvRaw = String(row.codi_cpv || '').trim();
-      const cpvClean = cpvRaw.replace(/[^0-9]/g, '').slice(0, 8);
-      const cpvCodes = cpvClean.length >= 4 ? [cpvClean] : [];
-      const rawValue = Number(row.valor_estimat_contracte ?? row.pressupost_licitacio_amb ?? row.pressupost_licitacio_sense);
-      const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : null;
-      const url = typeof row.enllac_publicacio === 'string'
-        ? row.enllac_publicacio
-        : (row.enllac_publicacio?.url || '');
-      const statusText = String(row.fase_publicacio || 'Anunci de licitació');
-      byId.set(id, {
-        id: `pscp:${id}`,
-        reference: String(row.codi_expedient || id),
-        title,
-        entity: String(row.nom_organ || ''),
-        entityId: String(row.codi_dir3 || row.codi_organ || ''),
-        modality: String(row.procediment || row.tipus_contracte || ''),
-        status: statusText,
-        statusCode: 'PUB',
-        value,
-        currency: 'EUR',
-        publicationDate: String(row.data_publicacio_anunci || row.data_publicacio_contracte || '').slice(0, 10),
-        deadline: String(row.termini_presentacio_ofertes || '').slice(0, 19),
-        territory: String(row.lloc_execucio || 'Cataluña'),
-        city: String(row.lloc_execucio || ''),
-        classificationCode: cpvClean,
-        cpvCodes,
-        url,
-        documents: [],
-        updatedAt: String(row.data_publicacio_anunci || row.data_publicacio_contracte || ''),
-        source: 'placsp',
-        country: 'ES',
-      });
+    return { updated: new Date().toISOString(), entries: mapPscpSocrataRows(rows) };
+  }
+
+  async function searchPscpSocrata(params = {}) {
+    const limit = Math.min(Math.max(Math.floor(Number(params.limit) || 20), 1), 100);
+    const offset = Math.max(Math.floor(Number(params.offset) || 0), 0);
+    const timeoutMs = params.timeoutMs ?? 15_000;
+    const where = [];
+
+    const addLikeFilter = (col, val) => {
+      if (!val) return false;
+      if (Array.isArray(val) && val.length) {
+        const clauses = val
+          .map(v => String(v || '').trim())
+          .filter(Boolean)
+          .map(v => `upper(${col}) like '%${escapeSoql(v.toUpperCase())}%'`);
+        if (clauses.length) {
+          where.push(`(${clauses.join(' OR ')})`);
+          return true;
+        }
+      } else if (typeof val === 'string' && val.trim()) {
+        where.push(`upper(${col}) like '%${escapeSoql(val.trim().toUpperCase())}%'`);
+        return true;
+      }
+      return false;
+    };
+
+    if (!addLikeFilter('fase_publicacio', params.status)) {
+      where.push("fase_publicacio like '%licitaci%'");
     }
-    return { updated: new Date().toISOString(), entries: [...byId.values()] };
+    if (typeof params.keyword === 'string' && params.keyword.trim()) {
+      const kw = escapeSoql(params.keyword.trim().toUpperCase());
+      where.push(
+        `(upper(denominacio) like '%${kw}%' OR upper(objecte_contracte) like '%${kw}%' OR upper(nom_organ) like '%${kw}%' OR upper(codi_expedient) like '%${kw}%')`
+      );
+    }
+    if (params.classificationClass) {
+      const cpv = String(params.classificationClass).replace(/[^0-9]/g, '').slice(0, 8);
+      if (cpv) where.push(`codi_cpv like '${cpv}%'`);
+    }
+    addLikeFilter('lloc_execucio', params.department);
+    addLikeFilter('procediment', params.modality);
+    if (params.fromDate && /^\d{4}-\d{2}-\d{2}/.test(String(params.fromDate).trim())) {
+      where.push(`data_publicacio_anunci >= '${String(params.fromDate).trim().slice(0, 10)}T00:00:00'`);
+    }
+    if (params.minValue !== null && params.minValue !== undefined && params.minValue !== '' && Number.isFinite(Number(params.minValue))) {
+      where.push(`valor_estimat_contracte >= ${Number(params.minValue)}`);
+    }
+    if (params.maxValue !== null && params.maxValue !== undefined && params.maxValue !== '' && Number.isFinite(Number(params.maxValue))) {
+      where.push(`valor_estimat_contracte <= ${Number(params.maxValue)}`);
+    }
+
+    const socrataSortMap = {
+      title: 'denominacio',
+      entity: 'nom_organ',
+      modality: 'procediment',
+      status: 'fase_publicacio',
+      value: 'valor_estimat_contracte',
+      publicationDate: 'data_publicacio_anunci',
+      deadline: 'termini_presentacio_ofertes',
+      department: 'lloc_execucio',
+    };
+    const orderCol = socrataSortMap[params.sortBy] || 'data_publicacio_anunci';
+    const orderDir = params.sortDirection === 'asc' ? 'ASC' : 'DESC';
+
+    const searchParams = new URLSearchParams({
+      $where: where.join(' AND '),
+      $order: `${orderCol} ${orderDir}`,
+      $limit: String(limit + 1),
+    });
+    if (offset > 0) searchParams.set('$offset', String(offset));
+
+    const query = `${PSCP_SOCRATA_URL}?${searchParams.toString()}`;
+    const response = await fetchImpl(query, {
+      method: 'GET',
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) {
+      throw new Error(`PSCP Socrata search failed: HTTP ${response.status}`);
+    }
+    const rows = await response.json();
+    if (!Array.isArray(rows)) return { items: [], truncated: false };
+    const truncated = rows.length > limit;
+    return {
+      items: mapPscpSocrataRows(rows.slice(0, limit)),
+      truncated,
+    };
   }
 
   async function fetchLatestEntries({
@@ -453,6 +553,7 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
     parseAtomFeed,
     fetchFeedPage,
     fetchPscpSocrataEntries,
+    searchPscpSocrata,
     fetchLatestEntries,
   };
 }

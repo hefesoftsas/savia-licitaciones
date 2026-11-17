@@ -200,6 +200,19 @@ function placspRowToProcess(row) {
   };
 }
 
+async function upsertPlacspEntries(env, entries, now = Date.now()) {
+  if (!Array.isArray(entries) || entries.length === 0) return;
+  for (let i = 0; i < entries.length; i += 40) {
+    const chunk = entries.slice(i, i + 40);
+    await env.DB.batch(chunk.map(item =>
+      env.DB.prepare(`INSERT INTO placsp_tenders (id, reference, title, entity, entity_id, modality, status, status_code, value, currency, publication_date, deadline, territory, city, classification_code, cpv_codes_json, url, documents_json, updated_at, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET reference=excluded.reference, title=excluded.title, entity=excluded.entity, entity_id=excluded.entity_id, modality=excluded.modality, status=excluded.status, status_code=excluded.status_code, value=excluded.value, currency=excluded.currency, publication_date=excluded.publication_date, deadline=excluded.deadline, territory=excluded.territory, city=excluded.city, classification_code=excluded.classification_code, cpv_codes_json=excluded.cpv_codes_json, url=excluded.url, documents_json=excluded.documents_json, updated_at=excluded.updated_at, synced_at=excluded.synced_at`)
+        .bind(item.id, item.reference || '', item.title, item.entity || '', item.entityId || '', item.modality || '', item.status || '', item.statusCode || '', item.value ?? null, item.currency || 'EUR', item.publicationDate || '', item.deadline || '', item.territory || '', item.city || '', item.classificationCode || '', JSON.stringify(item.cpvCodes || []), item.url || '', JSON.stringify(item.documents || []), item.updatedAt || '', now)
+    ));
+  }
+}
+
 export async function syncPlacspFeed(env, { force = false, maxPages = 1 } = {}) {
   const now = Date.now();
   const state = await env.DB.prepare('SELECT last_synced_at, entry_count FROM placsp_sync_state WHERE id = 1').first();
@@ -209,15 +222,7 @@ export async function syncPlacspFeed(env, { force = false, maxPages = 1 } = {}) 
   try {
     const api = placsp.createPlacspService();
     const { updated, entries } = await api.fetchLatestEntries({ maxPages });
-    for (let i = 0; i < entries.length; i += 40) {
-      const chunk = entries.slice(i, i + 40);
-      await env.DB.batch(chunk.map(item =>
-        env.DB.prepare(`INSERT INTO placsp_tenders (id, reference, title, entity, entity_id, modality, status, status_code, value, currency, publication_date, deadline, territory, city, classification_code, cpv_codes_json, url, documents_json, updated_at, synced_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET reference=excluded.reference, title=excluded.title, entity=excluded.entity, entity_id=excluded.entity_id, modality=excluded.modality, status=excluded.status, status_code=excluded.status_code, value=excluded.value, currency=excluded.currency, publication_date=excluded.publication_date, deadline=excluded.deadline, territory=excluded.territory, city=excluded.city, classification_code=excluded.classification_code, cpv_codes_json=excluded.cpv_codes_json, url=excluded.url, documents_json=excluded.documents_json, updated_at=excluded.updated_at, synced_at=excluded.synced_at`)
-          .bind(item.id, item.reference || '', item.title, item.entity || '', item.entityId || '', item.modality || '', item.status || '', item.statusCode || '', item.value ?? null, item.currency || 'EUR', item.publicationDate || '', item.deadline || '', item.territory || '', item.city || '', item.classificationCode || '', JSON.stringify(item.cpvCodes || []), item.url || '', JSON.stringify(item.documents || []), item.updatedAt || '', now)
-      ));
-    }
+    await upsertPlacspEntries(env, entries, now);
     const totalRow = await env.DB.prepare('SELECT COUNT(*) AS cnt FROM placsp_tenders').first();
     const entryCount = totalRow?.cnt || 0;
     await env.DB.prepare('UPDATE placsp_sync_state SET last_synced_at = ?, last_feed_updated = ?, entry_count = ?, last_error = ? WHERE id = 1')
@@ -305,8 +310,34 @@ export async function searchPlacspD1(env, params = {}) {
   const sql = `SELECT * FROM placsp_tenders${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY ${orderCol} ${orderDir}, id ASC LIMIT ? OFFSET ?`;
   const result = await env.DB.prepare(sql).bind(...binds, limit + 1, offset).all();
   const rows = result.results || [];
-  const truncated = rows.length > limit;
-  const items = rows.slice(0, limit).map(placspRowToProcess);
+  let truncated = rows.length > limit;
+  let items = rows.slice(0, limit).map(placspRowToProcess);
+
+  const shouldQueryLive =
+    items.length === 0 ||
+    (items.length < limit && offset === 0 && Boolean(params.keyword?.trim() || params.classificationClass));
+  if (shouldQueryLive) {
+    try {
+      const api = placsp.createPlacspService();
+      const live = await api.searchPscpSocrata({ ...params, limit, offset });
+      if (Array.isArray(live?.items) && live.items.length > 0) {
+        await upsertPlacspEntries(env, live.items, Date.now());
+        const seen = new Set(items.map(item => item.id));
+        const merged = [...items];
+        for (const item of live.items) {
+          if (!seen.has(item.id)) {
+            seen.add(item.id);
+            merged.push(item);
+          }
+        }
+        truncated = truncated || Boolean(live.truncated) || merged.length > limit;
+        items = merged.slice(0, limit);
+      }
+    } catch {
+      // Gracefully fall back to whatever D1 returned when live Socrata is unreachable
+    }
+  }
+
   return { success: true, data: { items, truncated }, message: items.length ? 'ok' : 'No se encontraron procesos con esos criterios' };
 }
 

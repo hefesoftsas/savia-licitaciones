@@ -278,3 +278,101 @@ test('placspService recupera entradas completas cuando el stream Atom se corta p
   );
   assert.equal(emptyCancelled, true);
 });
+
+test('placspService.searchPscpSocrata construye consultas SoQL válidas y mapea filas', async () => {
+  const capturedUrls = [];
+  const sampleRows = [
+    {
+      id_intern: '1001',
+      codi_expedient: 'EXP-CAT-2026-01',
+      denominacio: "Serveis d'arquitectura de software",
+      objecte_contracte: 'Desenvolupament i manteniment',
+      nom_organ: 'Generalitat de Catalunya',
+      codi_organ: 'ORG-01',
+      procediment: 'Obert',
+      fase_publicacio: 'Anunci de licitació',
+      valor_estimat_contracte: '185000.50',
+      codi_cpv: '72200000-7',
+      lloc_execucio: 'Barcelona',
+      data_publicacio_anunci: '2026-11-10T09:00:00.000',
+      termini_presentacio_ofertes: '2026-12-01T14:00:00.000',
+      enllac_publicacio: { url: 'https://contractaciopublica.cat/ca/detall-publicacio/1001' },
+    },
+    {
+      id_intern: '1002',
+      codi_expedient: 'EXP-CAT-2026-02',
+      denominacio: 'Servicios de consultoría cloud',
+      nom_organ: 'Ajuntament de Girona',
+      procediment: 'Obert simplificat',
+      fase_publicacio: 'Anunci de licitació',
+      valor_estimat_contracte: '90000',
+      codi_cpv: '72220000',
+      lloc_execucio: 'Girona',
+      data_publicacio_anunci: '2026-11-09T10:00:00.000',
+    },
+    {
+      id_intern: '1003',
+      codi_expedient: 'EXP-CAT-2026-03',
+      denominacio: 'Servicios extra para comprobar truncado',
+      nom_organ: 'Diputació de Tarragona',
+      fase_publicacio: 'Anunci de licitació',
+      valor_estimat_contracte: '60000',
+      codi_cpv: '72000000',
+      data_publicacio_anunci: '2026-11-08T10:00:00.000',
+    },
+  ];
+
+  const service = placsp.createPlacspService({
+    fetchImpl: async url => {
+      capturedUrls.push(String(url));
+      return new Response(JSON.stringify(sampleRows), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  const res = await service.searchPscpSocrata({
+    keyword: "servicios d'software",
+    classificationClass: '722',
+    department: 'Barcelona',
+    modality: 'Obert',
+    fromDate: '2026-11-01',
+    minValue: 50000,
+    maxValue: 250000,
+    limit: 2,
+    offset: 4,
+    sortBy: 'value',
+    sortDirection: 'asc',
+  });
+
+  assert.equal(capturedUrls.length, 1);
+  const parsedUrl = new URL(capturedUrls[0]);
+  assert.equal(parsedUrl.origin + parsedUrl.pathname, 'https://analisi.transparenciacatalunya.cat/resource/ybgg-dgi6.json');
+  const where = parsedUrl.searchParams.get('$where');
+  assert.ok(where.includes("fase_publicacio like '%licitaci%'"), where);
+  assert.ok(where.includes("upper(denominacio) like '%SERVICIOS D''SOFTWARE%'"), where);
+  assert.ok(where.includes("upper(objecte_contracte) like '%SERVICIOS D''SOFTWARE%'"), where);
+  assert.ok(where.includes("upper(nom_organ) like '%SERVICIOS D''SOFTWARE%'"), where);
+  assert.ok(where.includes("upper(codi_expedient) like '%SERVICIOS D''SOFTWARE%'"), where);
+  assert.ok(where.includes("codi_cpv like '722%'"), where);
+  assert.ok(where.includes("upper(lloc_execucio) like '%BARCELONA%'"), where);
+  assert.ok(where.includes("upper(procediment) like '%OBERT%'"), where);
+  assert.ok(where.includes("data_publicacio_anunci >= '2026-11-01T00:00:00'"), where);
+  assert.ok(where.includes('valor_estimat_contracte >= 50000'), where);
+  assert.ok(where.includes('valor_estimat_contracte <= 250000'), where);
+  assert.equal(parsedUrl.searchParams.get('$limit'), '3');
+  assert.equal(parsedUrl.searchParams.get('$offset'), '4');
+  assert.equal(parsedUrl.searchParams.get('$order'), 'valor_estimat_contracte ASC');
+
+  assert.equal(res.truncated, true);
+  assert.equal(res.items.length, 2);
+  assert.equal(res.items[0].id, 'pscp:1001');
+  assert.equal(res.items[0].source, 'placsp');
+  assert.equal(res.items[0].country, 'ES');
+  assert.equal(res.items[0].currency, 'EUR');
+  assert.equal(res.items[0].value, 185000.5);
+  assert.equal(res.items[0].classificationCode, '72200000');
+  assert.deepEqual(res.items[0].cpvCodes, ['72200000']);
+  assert.equal(res.items[0].url, 'https://contractaciopublica.cat/ca/detall-publicacio/1001');
+});
