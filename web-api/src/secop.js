@@ -299,14 +299,23 @@ function uniquePlacspSearchIds(entries) {
   return [...preferred.values()];
 }
 
-export async function searchPlacspD1(env, params = {}) {
+export async function searchPlacspD1(env, params = {}, ownerId) {
   const deadlineCutoff = params.openOnly ? placsp.placspDeadlineCutoff() : null;
   const keywords = placsp.placspKeywordVariants(params.keyword);
   const offset = Math.max(Math.floor(Number(params.offset) || 0), 0);
   const limit = Math.min(Math.max(Math.floor(Number(params.limit) || 20), 1), 100);
+  const pageKey = ownerId && 'placsp-page:' + await searchCacheHash([ownerId,{...params, offset:undefined, fresh:undefined}]);
+  // Provider windows grow as the user pages. Exclude rows already shown even if a new row sorts ahead of them.
+  let previousIds = null;
+  if (pageKey && offset) {
+    const saved = await env.DB.prepare('SELECT response_json FROM secop_search_cache WHERE cache_key = ? AND expires_at > ?')
+      .bind(pageKey, Date.now()).first();
+    const ids = saved && JSON.parse(saved.response_json).data;
+    if (ids?.length >= offset) previousIds = ids.slice(0, offset);
+  }
   const market = await Promise.all([
     searchLicit(params, deadlineCutoff, offset + limit).catch(() => null),
-    searchCatalanTenders(params, deadlineCutoff, offset + limit).catch(() => ({items:[], truncated:false})),
+    searchCatalanTenders(params, deadlineCutoff, offset + limit).catch(() => null),
   ]);
   const [primary, pscp] = market;
   const boe = !primary && deadlineCutoff && !offset && keywords.length
@@ -318,19 +327,19 @@ export async function searchPlacspD1(env, params = {}) {
         }, fresh)).data,
       }).catch(() => [])
     : Promise.resolve([]);
-  let syncError;
-  try {
-    if (!primary) await syncPlacspFeed(env, { force: params.fresh === true });
-  } catch (error) {
-    syncError = error;
-  }
+  if (!primary) await syncPlacspFeed(env, {force:params.fresh === true}).catch(() => {});
+  const unavailableSource = !primary ? 'licit.es' : !pscp ? 'PSCP' : '';
   const where = [];
   const binds = [];
   if (primary) {
-    const entries = [...primary.items, ...pscp.items];
+    const entries = [...primary.items, ...(pscp?.items || [])];
     await upsertPlacspEntries(env, entries);
     where.push('id IN (SELECT value FROM json_each(?))');
     binds.push(JSON.stringify(uniquePlacspSearchIds(entries)));
+  }
+  if (previousIds) {
+    where.push('id NOT IN (SELECT value FROM json_each(?))');
+    binds.push(JSON.stringify(previousIds));
   }
   if (deadlineCutoff) {
     where.push("status_code = ? AND deadline > ? AND (id NOT LIKE 'pscp:%' OR status = ?)");
@@ -383,13 +392,16 @@ export async function searchPlacspD1(env, params = {}) {
   const orderCol = colMap[params.sortBy] || 'publication_date';
   const orderDir = params.sortDirection === 'asc' ? 'ASC' : 'DESC';
   const sql = `SELECT * FROM placsp_tenders${where.length ? ` WHERE ${where.map(clause => `(${clause})`).join(' AND ')}` : ''} ORDER BY ${orderCol} ${orderDir}, id ASC LIMIT ? OFFSET ?`;
-  const readPage = async () => (await env.DB.prepare(sql).bind(...binds, limit + 1, offset).all()).results || [];
+  const readPage = async () => (await env.DB.prepare(sql).bind(...binds, limit + 1, previousIds ? 0 : offset).all()).results || [];
   let rows = await readPage();
-  let liveHasMore = Boolean(primary && (primary.truncated || pscp.truncated));
+  let liveHasMore = Boolean(primary && (primary.truncated || pscp?.truncated));
   const canExpand = Boolean(params.openOnly || params.keyword?.trim() || params.classificationClass);
   if (!primary && (!rows.length || (rows.length <= limit && canExpand))) {
     try {
-      const live = await placsp.createPlacspService().searchPscpSocrata({ ...params, deadlineCutoff, limit, offset });
+      const live = await placsp.createPlacspService().searchPscpSocrata({
+        ...params, deadlineCutoff, limit:previousIds ? Math.min(100,offset+limit+1) : limit,
+        offset:previousIds ? 0 : offset,
+      });
       if (live.items.length) {
         await upsertPlacspEntries(env, live.items);
         rows = await readPage();
@@ -414,13 +426,21 @@ export async function searchPlacspD1(env, params = {}) {
     rows = await readPage();
   }
 
-  if (syncError && !notices.length && !rows.length) {
-    const count = await env.DB.prepare('SELECT COUNT(*) AS cnt FROM placsp_tenders').first();
-    if (!count?.cnt) return { success: false, message: syncError.message || 'No se pudo conectar con PLACSP.' };
+  if (unavailableSource && !rows.length) {
+    return {success:false, message:`No se pudo completar la búsqueda porque ${unavailableSource} no está disponible.`};
   }
   const items = rows.slice(0, limit).map(placspRowToProcess);
   const truncated = rows.length > limit || (items.length > 0 && liveHasMore);
-  return { success: true, data: { items, truncated }, message: items.length ? 'ok' : 'No se encontraron procesos con esos criterios' };
+  if (pageKey && (!offset || previousIds)) {
+    const ids = [...(previousIds || []), ...items.map(item => item.id)];
+    await cached(env, pageKey, 5 * 60 * 1000, () => ({success:true,data:ids}), true);
+  }
+  return {
+    success:true,
+    data:{items, truncated, ...(unavailableSource && {partial:true})},
+    message:unavailableSource ? `Resultados parciales: ${unavailableSource} no está disponible.`
+      : items.length ? 'ok' : 'No se encontraron procesos con esos criterios',
+  };
 }
 
 async function getPlacspCategories(env, category) {
@@ -456,6 +476,11 @@ export async function secopCategories(request, env) {
   const result = await cached(env, `category:${dataset}:${category}`, 7*24*60*60*1000, () => service('es').getFilterOptions(dataset,category));
   return Response.json(result,{status:result.success?200:502});
 }
+async function searchCacheHash(value) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)));
+  return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2,'0')).join('');
+}
+
 export async function searchSecop(request, env, ownerId) {
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
   if (!sameOrigin(request, env)) return Response.json({ error: 'invalid_origin' }, { status: 403 });
@@ -467,11 +492,10 @@ export async function searchSecop(request, env, ownerId) {
   if (input.cpvCode !== undefined && params.classificationClass === undefined) params.classificationClass = input.cpvCode;
   if (input.territory !== undefined && params.department === undefined) params.department = input.territory;
   if (input.dataset === 'placsp') {
-    const result = await searchPlacspD1(env, { ...params, openOnly: input.openOnly === true, fresh: input.fresh === true });
+    const result = await searchPlacspD1(env, { ...params, openOnly: input.openOnly === true, fresh: input.fresh === true }, ownerId);
     return Response.json(result, { status: result.success ? 200 : 502 });
   }
-  const hash = await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([ownerId,params])));
-  const key = 'search:' + Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2,'0')).join('');
+  const key = 'search:' + await searchCacheHash([ownerId,params]);
   const result = await cached(env,key,60*60*1000,() => service(input.language).searchProcesses(params),input.fresh === true);
   return Response.json(result, { status: result.success ? 200 : 502 });
 }

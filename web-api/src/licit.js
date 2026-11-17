@@ -18,7 +18,7 @@ async function json(path, signal, input) {
     signal,
     ...(input && {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(input)}),
   });
-  if (!response.ok) throw new Error('licit.es HTTP ' + response.status);
+  if (!response.ok) throw Object.assign(new Error('licit.es HTTP ' + response.status), {status:response.status});
   return response.json();
 }
 
@@ -50,10 +50,16 @@ export async function searchLicit(params, cutoff, target) {
   let cursor;
   let searched = 0;
   do {
-    const result = await json('/v1/buscar', signal, {
+    const request = {
       q: params.keyword?.trim() || undefined, filtros: filters,
       ordenar: params.sortBy === 'value' ? 'importe' : 'fecha',
       limit: Math.min(100, Math.max(40, target)), cursor,
+    };
+    const result = await json('/v1/buscar', signal, request).catch(error => {
+      // A cursor is tied to its filters. Retry only before starting pagination.
+      if (cursor || !filters.estado || !(error.status >= 500)) throw error;
+      delete filters.estado;
+      return json('/v1/buscar', signal, request);
     });
     if (!Array.isArray(result.resultados)) throw new Error('Respuesta inválida de licit.es');
     const candidates = result.resultados.filter(row => idPattern.test(row.id) && row.titulo);

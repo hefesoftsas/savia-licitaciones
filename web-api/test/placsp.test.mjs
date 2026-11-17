@@ -129,6 +129,7 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
       estado: 'EN PLAZO', fecha_publicacion: '2026-11-15', organo: 'Confederación',
       url_place: 'https://contrataciondelestado.es/wps/poc?idEvl=licit-cog',
     }));
+    let terrassaDownloadUnavailable = true;
     const outboundService = async request => {
       const url = new URL(request.url);
       if (url.hostname === 'api.licit.es') {
@@ -136,7 +137,23 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
         if (url.pathname.startsWith('/v1/licitacion/')) {
           return Response.json({...licitRows.at(-1), hora_limite:'00:00:00'});
         }
-        const {q, filtros} = await request.json();
+        const {q, filtros, cursor} = await request.json();
+        if (q === 'QA PAGINACION LICIT') {
+          const ids = cursor ? [1] : Array.from({length:40}, (_, index)=>index+10);
+          return Response.json({
+            resultados:ids.map(id=>({...licitRows[0], id:'10000000-0000-0000-0000-' + String(id).padStart(12,'0'),
+              expediente:'QA-PAGINA-' + id, titulo:'QA PAGINACION LICIT ' + id})),
+            cursor_siguiente:cursor ? null : 'page-two',
+          });
+        }
+        if (q === 'QA estado proveedor') {
+          if (filtros.estado) return Response.json({detail:'Error interno'}, {status:500});
+          return Response.json({resultados:[
+            licitRows[0],
+            licitRows.find(row => row.expediente === 'QA-VENCIDA'),
+            {...licitRows[1], estado:'Adjudicada'},
+          ]});
+        }
         assert.deepEqual(filtros.estado, ['EN PLAZO']);
         if (q === 'saneamiento') return Response.json({resultados:[{
           ...licitRows[0], id:'00000000-0000-0000-0000-000000000005',
@@ -190,6 +207,9 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
         ]}}}});
       }
       if (url.hostname === 'contractaciopublica.cat' && url.pathname === '/portal-api/descarrega-document/302782745/official-hash') {
+        if (terrassaDownloadUnavailable) return new Response('<html>Temporalmente no disponible</html>', {
+          headers:{'content-type':'text/html'},
+        });
         return new Response('%PDF-1.4 Terrassa', {headers:{'content-type':'application/pdf'}});
       }
       if (url.hostname === 'analisi.transparenciacatalunya.cat') {
@@ -295,9 +315,16 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
     assert.equal(secondPage.truncated, false);
     await db.prepare("DELETE FROM placsp_tenders WHERE id LIKE 'qa-page-%' OR id LIKE 'pscp:qa-page-%'").run();
 
+    const unavailable = await post('/api/secop/search', {
+      dataset:'placsp', keyword:'QA fuente no disponible', openOnly:true,
+    }, cookie);
+    assert.equal(unavailable.status, 502);
+    assert.match((await unavailable.json()).message, /licit\.es/);
     const floodSearch = await post('/api/secop/search', {dataset:'placsp',keyword:'inundaciones',openOnly:true}, cookie);
     assert.equal(floodSearch.status, 200);
-    const floodItems = (await floodSearch.json()).data.items;
+    const fallbackFlood = (await floodSearch.json()).data;
+    assert.equal(fallbackFlood.partial, true);
+    const floodItems = fallbackFlood.items;
     assert.ok(floodItems.some(item=>item.id==='pscp:qa-flood'));
     assert.ok(floodItems.some(item=>item.reference==='QA-BOE' && item.deadline==='2099-01-02T14:00:00'));
     for (const [keyword, expected] of [
@@ -310,6 +337,27 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
       assert.deepEqual((await targetedSearch.json()).data.items.map(item => item.reference).sort(), expected);
     }
     useLicit = true;
+    const genuineEmpty = await post('/api/secop/search', {
+      dataset:'placsp', keyword:'QA sin coincidencias', openOnly:true,
+    }, cookie);
+    assert.equal(genuineEmpty.status, 200);
+    assert.deepEqual((await genuineEmpty.json()).data.items, []);
+    const paged = offset => post('/api/secop/search', {
+      dataset:'placsp', keyword:'QA PAGINACION LICIT', openOnly:true, offset,
+    }, cookie).then(response=>response.json()).then(result=>result.data);
+    const firstLicitPage = await paged(0);
+    const secondLicitPage = await paged(20);
+    assert.equal(firstLicitPage.items.length, 20);
+    assert.equal(secondLicitPage.items.length, 20);
+    assert.equal(new Set([...firstLicitPage.items, ...secondLicitPage.items].map(item=>item.id)).size, 40);
+    const finalLicitPage = await paged(40);
+    assert.equal(finalLicitPage.items.length, 1);
+    assert.equal(finalLicitPage.truncated, false);
+    const stateFilterError = await post('/api/secop/search', {
+      dataset:'placsp', keyword:'QA estado proveedor', openOnly:true,
+    }, cookie);
+    assert.equal(stateFilterError.status, 200);
+    assert.deepEqual((await stateFilterError.json()).data.items.map(item => item.reference), ['22706.26.021']);
     const priorAtomRequests = atomRequests;
     const overlap = await post('/api/secop/search', {dataset:'placsp',keyword:'saneamiento',openOnly:true}, cookie);
     assert.equal(overlap.status, 200);
@@ -356,10 +404,21 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
     }, cookie);
     assert.equal(terrassaProject.status, 201);
     const {project:terrassa} = await terrassaProject.json();
-    const terrassaImport = await post('/api/projects/' + terrassa.id + '/secop/documents/' + terrassaPcap.id + '/import', {}, cookie);
+    const terrassaPath = '/api/projects/' + terrassa.id;
+    const importPath = terrassaPath + '/secop/imports/' + terrassaPcap.id;
+    const importState = async () => (await (await req(terrassaPath + '/secop/imports', {headers:{cookie}})).json()).items[0].state;
+    const terrassaFiles = async () => (await (await req(terrassaPath + '/files', {headers:{cookie}})).json()).files;
+    assert.equal((await post(importPath, {}, cookie)).status, 502);
+    assert.equal(await importState(), 'failed');
+    assert.deepEqual(await terrassaFiles(), []);
+    terrassaDownloadUnavailable = false;
+    const terrassaImport = await post(importPath, {}, cookie);
     assert.equal(terrassaImport.status, 201, await terrassaImport.clone().text());
-    const {file:terrassaFile} = await terrassaImport.json();
-    const terrassaDownload = await req('/api/projects/' + terrassa.id + '/files/' + terrassaFile.id, {headers:{cookie}});
+    assert.equal(await importState(), 'imported');
+    assert.equal((await post(importPath, {}, cookie)).status, 200);
+    const files = await terrassaFiles();
+    assert.equal(files.length, 1);
+    const terrassaDownload = await req(terrassaPath + '/files/' + files[0].id, {headers:{cookie}});
     assert.equal(await terrassaDownload.text(), '%PDF-1.4 Terrassa');
     await db.prepare('DELETE FROM placsp_tenders WHERE id = ?').bind(terrassaId).run();
     assert.equal(atomRequests, priorAtomRequests);
