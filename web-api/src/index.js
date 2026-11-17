@@ -118,7 +118,7 @@ import { importAccountCompanyProfileSnapshot } from './account-company-profile-r
 import { importDesktopCompanyProfileImage } from './desktop-company-profile-image.js';
 import { handleRunnerCredential, handleRunnerFile, handleUserCredentials } from './credentials.js';
 import { handleEconomicOffer } from './economic-offer.js';
-import { searchSecop, secopPreferences, secopCategories, secopDetail, secopDocumentCatalog, secopSelectedImports, createSecopProject, getProjectSecop, secopDocuments, marketSearch } from './secop.js';
+import { searchSecop, secopPreferences, secopCategories, secopDetail, secopDocumentCatalog, secopSelectedImports, createSecopProject, getProjectSecop, secopDocuments, marketSearch, syncPlacsp } from './secop.js';
 import { workflow } from './workflow.js';
 import { opportunityTracking } from './opportunity-tracking.js';
 import {submissionTracking} from './submission-tracking.js';
@@ -230,19 +230,20 @@ const apiWorker = {
       const session = await getScopedSession();
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
       if (request.method === 'GET') {
-        const row = await env.DB.prepare('SELECT savia_language AS language, savia_theme AS theme, savia_color_theme AS colorTheme, savia_visual_style AS visualStyle FROM "user" WHERE id = ?').bind(session.user.id).first();
-        return privateResponse(Response.json({ language: row?.language === 'en' ? 'en' : 'es', theme: ['light', 'dark', 'system'].includes(row?.theme) ? row.theme : 'system', colorTheme: ['neutral', 'blue', 'green', 'violet', 'rose'].includes(row?.colorTheme) ? row.colorTheme : 'neutral', visualStyle: ['vega', 'nova', 'maia', 'lyra', 'mira'].includes(row?.visualStyle) ? row.visualStyle : 'vega' }));
+        const row = await env.DB.prepare('SELECT savia_language AS language, savia_theme AS theme, savia_color_theme AS colorTheme, savia_visual_style AS visualStyle, savia_market AS market FROM "user" WHERE id = ?').bind(session.user.id).first();
+        return privateResponse(Response.json({ language: row?.language === 'en' ? 'en' : 'es', theme: ['light', 'dark', 'system'].includes(row?.theme) ? row.theme : 'system', colorTheme: ['neutral', 'blue', 'green', 'violet', 'rose'].includes(row?.colorTheme) ? row.colorTheme : 'neutral', visualStyle: ['vega', 'nova', 'maia', 'lyra', 'mira'].includes(row?.visualStyle) ? row.visualStyle : 'vega', market: ['CO', 'ES', 'ALL'].includes(row?.market) ? row.market : 'ALL' }));
       }
       if (request.method !== 'PUT') return privateResponse(new Response('Method not allowed', { status: 405 }));
       if (request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return privateResponse(Response.json({ error: 'invalid_origin' }, { status: 403 }));
       let input;
       try { input = await request.json(); } catch { return privateResponse(Response.json({ error: 'invalid_json' }, { status: 400 })); }
-      if (!input || typeof input !== 'object' || Array.isArray(input) || (input.language === undefined && input.theme === undefined && input.colorTheme === undefined && input.visualStyle === undefined)) return privateResponse(Response.json({ error: 'invalid_preferences' }, { status: 400 }));
+      if (!input || typeof input !== 'object' || Array.isArray(input) || (input.language === undefined && input.theme === undefined && input.colorTheme === undefined && input.visualStyle === undefined && input.market === undefined)) return privateResponse(Response.json({ error: 'invalid_preferences' }, { status: 400 }));
       if (input.language !== undefined && !['es', 'en'].includes(input.language)) return privateResponse(Response.json({ error: 'invalid_language' }, { status: 400 }));
       if (input.theme !== undefined && !['light', 'dark', 'system'].includes(input.theme)) return privateResponse(Response.json({ error: 'invalid_theme' }, { status: 400 }));
       if (input.colorTheme !== undefined && !['neutral', 'blue', 'green', 'violet', 'rose'].includes(input.colorTheme)) return privateResponse(Response.json({ error: 'invalid_color_theme' }, { status: 400 }));
       if (input.visualStyle !== undefined && !['vega', 'nova', 'maia', 'lyra', 'mira'].includes(input.visualStyle)) return privateResponse(Response.json({ error: 'invalid_visual_style' }, { status: 400 }));
-      const updated = await env.DB.prepare('UPDATE "user" SET savia_language = COALESCE(?, savia_language), savia_theme = COALESCE(?, savia_theme), savia_color_theme = COALESCE(?, savia_color_theme), savia_visual_style = COALESCE(?, savia_visual_style), savia_preferences_revision = savia_preferences_revision + 1 WHERE id = ? RETURNING savia_language AS language, savia_theme AS theme, savia_color_theme AS colorTheme, savia_visual_style AS visualStyle').bind(input.language ?? null, input.theme ?? null, input.colorTheme ?? null, input.visualStyle ?? null, session.user.id).first();
+      if (input.market !== undefined && !['CO', 'ES', 'ALL'].includes(input.market)) return privateResponse(Response.json({ error: 'invalid_market' }, { status: 400 }));
+      const updated = await env.DB.prepare('UPDATE "user" SET savia_language = COALESCE(?, savia_language), savia_theme = COALESCE(?, savia_theme), savia_color_theme = COALESCE(?, savia_color_theme), savia_visual_style = COALESCE(?, savia_visual_style), savia_market = COALESCE(?, savia_market), savia_preferences_revision = savia_preferences_revision + 1 WHERE id = ? RETURNING savia_language AS language, savia_theme AS theme, savia_color_theme AS colorTheme, savia_visual_style AS visualStyle, savia_market AS market').bind(input.language ?? null, input.theme ?? null, input.colorTheme ?? null, input.visualStyle ?? null, input.market ?? null, session.user.id).first();
       return privateResponse(Response.json(updated));
     }
     if(url.pathname==='/api/runner/export-format-capture'){const runner=await authenticateRunner(request,env);if(!runner)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await runnerExportFormatCapture(request,env,runner));}
@@ -905,13 +906,13 @@ const apiWorker = {
       if (!session) return privateResponse(Response.json({error:'unauthorized'},{status:401}));
       return privateResponse(await secopSelectedImports(request,env,session.workspaceId,selectedSecopImports[1],selectedSecopImports[2]));
     }
-    const projectSecopDocuments = /^\/api\/projects\/([^/]+)\/secop\/documents(?:\/(\d+)\/import)?$/.exec(url.pathname);
+    const projectSecopDocuments = /^\/api\/projects\/([^/]+)\/secop\/documents(?:\/([^/]+)\/import)?$/.exec(url.pathname);
     if (projectSecopDocuments) {
       const session = await getScopedSession();
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
       return privateResponse(await secopDocuments(request, env, session.workspaceId, projectSecopDocuments[1], projectSecopDocuments[2]));
     }
-    if (['/api/secop/search','/api/secop/preferences','/api/secop/categories','/api/secop/detail','/api/secop/documents'].includes(url.pathname) || url.pathname === '/api/projects/from-secop' || projectSecop) {
+    if (['/api/secop/search','/api/secop/preferences','/api/secop/categories','/api/secop/detail','/api/secop/documents','/api/secop/placsp/sync'].includes(url.pathname) || url.pathname === '/api/projects/from-secop' || projectSecop) {
       const session = await getScopedSession();
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
       if (url.pathname === '/api/secop/search') return privateResponse(await searchSecop(request, env, session.workspaceId));
@@ -919,6 +920,7 @@ const apiWorker = {
       if (url.pathname === '/api/secop/categories') return privateResponse(await secopCategories(request, env));
       if (url.pathname === '/api/secop/detail') return privateResponse(await secopDetail(request, env));
       if (url.pathname === '/api/secop/documents') return privateResponse(await secopDocumentCatalog(request, env));
+      if (url.pathname === '/api/secop/placsp/sync') return privateResponse(await syncPlacsp(request, env));
       if (url.pathname === '/api/projects/from-secop') return privateResponse(await createSecopProject(request, env, session.workspaceId));
       return privateResponse(await getProjectSecop(request, env, session.workspaceId, projectSecop[1]));
     }

@@ -71,16 +71,19 @@ test('sesiones, proyectos y documentos permanecen aislados y persisten', async (
     assert.equal((await (await preferences(alice)).json()).theme, 'system');
     assert.equal((await changeTheme(alice, 'invalid')).status, 400);
     assert.equal((await changeTheme(alice, 'dark')).status, 200);
-    assert.deepEqual(await (await preferences(alice)).json(), {language:'en',theme:'dark',colorTheme:'neutral',visualStyle:'vega'});
+    assert.deepEqual(await (await preferences(alice)).json(), {language:'en',theme:'dark',colorTheme:'neutral',visualStyle:'vega',market:'ALL'});
     assert.equal((await changeLanguage(alice, 'es')).status, 200);
-    assert.deepEqual(await (await preferences(alice)).json(), {language:'es',theme:'dark',colorTheme:'neutral',visualStyle:'vega'});
+    assert.deepEqual(await (await preferences(alice)).json(), {language:'es',theme:'dark',colorTheme:'neutral',visualStyle:'vega',market:'ALL'});
     assert.equal((await changeLanguage(alice, 'en')).status, 200);
     const changeAppearance = value => request('/api/preferences', {method:'PUT', headers:{cookie:alice,origin:'http://localhost','content-type':'application/json'},body:JSON.stringify(value)});
     assert.equal((await changeAppearance({colorTheme:'unknown'})).status, 400);
     assert.equal((await changeAppearance({visualStyle:'unknown'})).status, 400);
+    assert.equal((await changeAppearance({market:'FR'})).status, 400);
     assert.equal((await changeAppearance({colorTheme:'blue'})).status, 200);
     assert.equal((await changeAppearance({visualStyle:'mira'})).status, 200);
-    assert.deepEqual(await (await preferences(alice)).json(), {language:'en',theme:'dark',colorTheme:'blue',visualStyle:'mira'});
+    assert.deepEqual(await (await preferences(alice)).json(), {language:'en',theme:'dark',colorTheme:'blue',visualStyle:'mira',market:'ALL'});
+    assert.equal((await changeAppearance({market:'ES'})).status, 200);
+    assert.equal((await (await preferences(alice)).json()).market, 'ES');
     assert.equal((await (await preferences(bob)).json()).colorTheme, 'neutral');
     assert.equal((await (await preferences(bob)).json()).theme, 'system');
 

@@ -1,15 +1,24 @@
 import {opportunitySourceState} from './opportunity-source-state.js';
 import secop from '../../client/electron/services/secopService.cjs';
+import {searchPlacspD1} from './secop.js';
 const clean = (value, max = 500) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 const normalize = value => clean(value, 100).toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 export function isOpenOpportunity(item, now = Date.now()) {
-  if (!/^(publicad[oa]|convocad[oa])$/.test(normalize(item.status))) return false;
-  if (/evaluacion|adjudic|cerrad|terminad|cancelad|desiert|liquidad/.test(normalize(item.phase))) return false;
-  const rawDeadline = item.source === 'secop-ii' && item.deadlineVerified === true ? String(item.deadline || '') : '';
+  const isPlacsp = item.source === 'placsp';
+  if (isPlacsp) {
+    const st = normalize(item.status);
+    if (!/^(publicad[oa]|convocad[oa]|en plazo)$/.test(st) && String(item.statusCode || '').toUpperCase() !== 'PUB') return false;
+    if (/evaluacion|adjudic|resuelt|anulad|cerrad|desiert|cancelad/.test(st)) return false;
+  } else {
+    if (!/^(publicad[oa]|convocad[oa])$/.test(normalize(item.status))) return false;
+    if (/evaluacion|adjudic|cerrad|terminad|cancelad|desiert|liquidad/.test(normalize(item.phase))) return false;
+  }
+  const rawDeadline = (item.source === 'secop-ii' || isPlacsp) && item.deadlineVerified === true ? String(item.deadline || '') : '';
   const deadline = rawDeadline.slice(0, 10);
   const parsed = /^\d{4}-\d{2}-\d{2}$/.test(deadline) ? new Date(`${deadline}T00:00:00Z`) : null;
   if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== deadline) return true;
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(now)).map(part => [part.type, part.value]));
+  const timeZone = isPlacsp ? 'Europe/Madrid' : 'America/Bogota';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(now)).map(part => [part.type, part.value]));
   const today = `${parts.year}-${parts.month}-${parts.day}`;
   if (deadline !== today) return deadline > today;
   const time = rawDeadline.match(/T(\d{2}:\d{2}:\d{2})/)?.[1];
@@ -35,14 +44,16 @@ export async function refreshOpportunityStatuses(items, getDetail) {
 }
 
 // Returns the original processes separately from the limited summaries sent to Pi.
-export async function searchOpportunityCandidates({ profile, terms, searchProcesses, now = Date.now(), language = 'es' }) {
+export async function searchOpportunityCandidates({ profile, terms, searchProcesses, now = Date.now(), language = 'es', market = 'CO' }) {
   const facts = profile.reviewedRup || [];
-  const classes = [...new Set(facts.map(fact => fact.value.slice(0, 6)))].slice(0, 4);
+  const cpvs = Array.isArray(profile.cpvCodes) ? profile.cpvCodes : [];
+  const classes = [...new Set([...facts.map(fact => fact.value.slice(0, 6)), ...cpvs.map(c => String(c).slice(0, 6))])].slice(0, 4);
   const queries = [...terms.map(keyword => ({ keyword })), ...classes.map(classificationClass => ({ classificationClass }))];
   if (!queries.length) throw new Error(language === 'en' ? 'No search sources are available.' : 'No hay fuentes de búsqueda disponibles.');
   const since = new Date(now - 45 * 86400000).toISOString().slice(0, 10);
+  const datasets = market === 'ES' ? ['placsp'] : market === 'ALL' ? ['secop-ii', 'secop-i', 'placsp'] : ['secop-ii', 'secop-i'];
   const candidates = new Map();
-  for (const dataset of ['secop-ii', 'secop-i']) for (const query of queries) {
+  for (const dataset of datasets) for (const query of queries) {
     const response = await searchProcesses({dataset, ...query, fromDate:since, limit:50, fresh:true});
     if (!response?.success || !Array.isArray(response.data?.items) || response.data.partial) throw new Error(language === 'en' ? 'The SECOP search did not finish.' : 'No se completó la consulta SECOP.');
     for (const item of response.data.items) {
@@ -53,7 +64,7 @@ export async function searchOpportunityCandidates({ profile, terms, searchProces
   }
   const classSet = new Set(classes);
   const ranked = [...candidates.entries()].sort((a,b) => Number(classSet.has(String(b[1].classificationCode || '').replace(/^V1\./i,'').slice(0,6))) - Number(classSet.has(String(a[1].classificationCode || '').replace(/^V1\./i,'').slice(0,6)))).slice(0,60);
-  const shortlist = ranked.map(([id,item]) => ({id, title:clean(item.title,500), entity:clean(item.entity,160), classificationCode:clean(item.classificationCode,20), department:clean(item.department,100), status:clean(item.status,100), value:item.value ?? null, currency:item.currencyVerified === true ? item.currency || null : null, deadline:item.source === 'secop-ii' && item.deadlineVerified === true ? item.deadline : undefined}));
+  const shortlist = ranked.map(([id,item]) => ({id, title:clean(item.title,500), entity:clean(item.entity,160), classificationCode:clean(item.classificationCode,20), department:clean(item.department,100), status:clean(item.status,100), value:item.value ?? null, currency:item.currencyVerified === true ? item.currency || null : null, deadline:(item.source === 'secop-ii' || item.source === 'placsp') && item.deadlineVerified === true ? item.deadline : undefined}));
   return {candidates:ranked.map(([id,process]) => ({id,process})), shortlist};
 }
 
@@ -68,10 +79,15 @@ export async function opportunitySearch(request, env, owner, searchProcesses) {
   if (!before) return Response.json({error:'settings_unavailable'},{status:409});
   const {suggestionSources} = await import('./opportunity-suggestion-settings.js');
   const sources = await suggestionSources(env,owner,before.keywords,!!before.include_rup);
-  if (!sources.terms.length && !sources.profile.reviewedRup.length) return Response.json({error:'sources_unavailable'},{status:409});
-  if (!searchProcesses) searchProcesses = secop.createSecopService({configStore:{load:()=>({ui_language:input.language})}}).searchProcesses;
+  if (!sources.terms.length && !sources.profile.reviewedRup.length && !(sources.profile.cpvCodes?.length)) return Response.json({error:'sources_unavailable'},{status:409});
+  const userRow = await env.DB.prepare('SELECT savia_market AS market FROM "user" WHERE id = ?').bind(owner).first();
+  const market = ['CO', 'ES', 'ALL'].includes(userRow?.market) ? userRow.market : 'CO';
+  if (!searchProcesses) {
+    const secopApi = secop.createSecopService({configStore:{load:()=>({ui_language:input.language})}});
+    searchProcesses = params => params.dataset === 'placsp' ? searchPlacspD1(env, params) : secopApi.searchProcesses(params);
+  }
   let result;
-  try { result = await searchOpportunityCandidates({profile:sources.profile,terms:sources.terms,searchProcesses,language:input.language}); }
+  try { result = await searchOpportunityCandidates({profile:sources.profile,terms:sources.terms,searchProcesses,language:input.language,market}); }
   catch { return Response.json({error:'secop_unavailable'},{status:502}); }
   const after = await settings();
   if (!after || before.version !== after.version || before.credential_id !== after.credential_id) return Response.json({error:'sources_changed'},{status:409});
@@ -162,7 +178,7 @@ export async function opportunityResults(request,env,owner,action){
  const row=await findJob(input.jobId);if(!row)return missing();const item=itemsOf(row).find(item=>item.id===input.candidateId);if(!item)return missing();
  const {process}=item,now=new Date().toISOString();
  if(action==='review'){await env.DB.prepare('INSERT INTO opportunity_suggestion_reviews_web(owner_id,source,process_id,reviewed_at) VALUES(?,?,?,?) ON CONFLICT(owner_id,source,process_id) DO NOTHING').bind(owner,process.source,process.id,now).run();return Response.json({reviewed:true});}
- if(!['secop-i','secop-ii'].includes(process.source)||typeof process.id!=='string'||!process.id||typeof process.title!=='string'||!process.title.trim())return Response.json({error:'invalid_process'},{status:400});
+ if(!['secop-i','secop-ii','placsp'].includes(process.source)||typeof process.id!=='string'||!process.id||typeof process.title!=='string'||!process.title.trim())return Response.json({error:'invalid_process'},{status:400});
  const projectId=crypto.randomUUID();
  await env.DB.batch([
   env.DB.prepare('INSERT INTO projects(id,owner_id,title,created_at) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM project_secop WHERE owner_id=? AND source=? AND external_id=?)').bind(projectId,owner,process.title.trim().slice(0,300),now,owner,process.source,process.id),

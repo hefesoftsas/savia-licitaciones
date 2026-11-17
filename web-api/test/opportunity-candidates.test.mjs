@@ -44,6 +44,24 @@ test('solo muestra procesos abiertos y descarta los que ya cerraron', async () =
  assert.equal(isOpenOpportunity({source:'secop-ii',status:'Publicado',deadline:'2026-11-10T12:00:00',deadlineVerified:true},now),false);
  assert.equal(isOpenOpportunity({source:'secop-ii',status:'Publicado',deadline:'2026-11-10T15:00:00',deadlineVerified:true},now),true);
  assert.equal(isOpenOpportunity({source:'secop-i',status:'Convocado'},now),true);
+ assert.equal(isOpenOpportunity({source:'placsp',status:'Publicado',statusCode:'PUB',deadline:'2026-11-10T19:30:00',deadlineVerified:true},now),true);
+ assert.equal(isOpenOpportunity({source:'placsp',status:'Publicado',statusCode:'PUB',deadline:'2026-11-10T18:30:00',deadlineVerified:true},now),false);
+ assert.equal(isOpenOpportunity({source:'placsp',status:'Evaluación',statusCode:'EV'},now),false);
+});
+
+test('soporta market ES y ALL con PLACSP, CPV y EUR', async () => {
+ const calls=[];
+ const searchProcesses=async query=>{
+  calls.push(query.dataset);
+  if(query.dataset==='placsp' && query.keyword==='cloud'){
+   return {success:true,data:{items:[{id:'p1',source:'placsp',country:'ES',title:'Nube pública',status:'Publicado',statusCode:'PUB',classificationCode:'72000000',value:90000,currency:'EUR',currencyVerified:true,deadline:'2026-12-01',deadlineVerified:true}]}};
+  }
+  return {success:true,data:{items:[]}};
+ };
+ const esOnly=await searchOpportunityCandidates({profile:{reviewedRup:[],cpvCodes:['72000000']},terms:['cloud'],searchProcesses,now:Date.parse('2026-11-01T12:00:00Z'),market:'ES'});
+ assert.ok(calls.every(d=>d==='placsp'));
+ assert.equal(esOnly.shortlist.length,1);
+ assert.equal(esOnly.shortlist[0].currency,'EUR');
 });
 
 test('actualiza el estado antes de mostrar recomendaciones y oculta las que no pudo verificar', async () => {
