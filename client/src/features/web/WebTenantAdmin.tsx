@@ -9,9 +9,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/primitives/table';
 import { useToast } from '@/shared/ui/ToastProvider';
 import { request } from './api.mjs';
+import type { ProcurementMarket } from '@/shared/types/secop';
 
 type Language = 'es' | 'en';
-export type Tenant = { id: string; name: string; ownerUserId?: string | null; createdAt?: string; memberCount?: number };
+export type Tenant = { id: string; name: string; country?: ProcurementMarket; ownerUserId?: string | null; createdAt?: string; memberCount?: number };
 export type Member = {
   id: string;
   name: string;
@@ -23,7 +24,7 @@ export type Member = {
   isWorkspaceOwner?: number | boolean;
 };
 
-type CreateTenantValues = { name: string };
+type CreateTenantValues = { name: string; country: ProcurementMarket };
 type CreateTenantUserValues = { name: string; email: string; password: string; role: 'user' | 'superadmin' };
 
 const createTenantSchema = (en: boolean) =>
@@ -33,7 +34,14 @@ const createTenantSchema = (en: boolean) =>
       .trim()
       .min(2, en ? 'Enter at least 2 characters.' : 'Ingresa al menos 2 caracteres.')
       .max(200, en ? 'Maximum 200 characters.' : 'Máximo 200 caracteres.'),
+    country: z.enum(['CO', 'ES', 'ALL']),
   });
+
+const countryLabel = (country: ProcurementMarket | undefined, en: boolean) => {
+  if (country === 'ES') return en ? 'Spain (PLACSP / EUR)' : 'España (PLACSP / EUR)';
+  if (country === 'CO') return en ? 'Colombia (SECOP / COP)' : 'Colombia (SECOP / COP)';
+  return en ? 'Colombia & Spain (All)' : 'Colombia y España (Todos)';
+};
 
 const createTenantUserSchema = (en: boolean) =>
   z.object({
@@ -67,6 +75,7 @@ type FormProps = {
   availableUsers?: Member[];
   onAssignExisting?: (userId: string) => void;
   onRenameTenant?: (tenantId: string, name: string) => Promise<void>;
+  onUpdateTenantCountry?: (tenantId: string, country: ProcurementMarket) => Promise<void>;
   children?: React.ReactNode;
 };
 
@@ -83,6 +92,7 @@ export function TenantForms({
   availableUsers = [],
   onAssignExisting,
   onRenameTenant,
+  onUpdateTenantCountry,
   children,
 }: FormProps) {
   const en = language === 'en';
@@ -90,6 +100,7 @@ export function TenantForms({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [tenantName, setTenantName] = useState('');
+  const [tenantCountry, setTenantCountry] = useState<ProcurementMarket>('ALL');
   const [tenantError, setTenantError] = useState('');
   const [userSheetOpen, setUserSheetOpen] = useState(false);
   const [userValues, setUserValues] = useState<CreateTenantUserValues>({ name: '', email: '', password: '', role: 'user' });
@@ -122,7 +133,7 @@ export function TenantForms({
   const submitTenant = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy) return;
-    const parsed = createTenantSchema(en).safeParse({ name: tenantName });
+    const parsed = createTenantSchema(en).safeParse({ name: tenantName, country: tenantCountry });
     if (!parsed.success) {
       setTenantError(parsed.error.issues[0]?.message || (en ? 'Invalid name.' : 'Nombre inválido.'));
       return;
@@ -131,6 +142,7 @@ export function TenantForms({
     const ok = await onCreateTenant(parsed.data);
     if (ok) {
       setTenantName('');
+      setTenantCountry('ALL');
       onTenantSheetOpenChange(false);
     }
   };
@@ -164,6 +176,7 @@ export function TenantForms({
             <TableHeader>
               <TableRow>
                 <SortableHead label={en ? 'Organization' : 'Organización'} active={tenantSortKey === 'name'} direction={tenantSortDir} onToggle={() => toggleTenantSort('name')} />
+                <TableHead>{en ? 'Country' : 'País'}</TableHead>
                 <SortableHead label={en ? 'Type' : 'Tipo'} active={tenantSortKey === 'type'} direction={tenantSortDir} onToggle={() => toggleTenantSort('type')} />
                 <SortableHead label={en ? 'Members' : 'Miembros'} active={tenantSortKey === 'members'} direction={tenantSortDir} onToggle={() => toggleTenantSort('members')} />
                 <TableHead className="web-admin-actions-col">{en ? 'Status' : 'Estado'}</TableHead>
@@ -188,6 +201,9 @@ export function TenantForms({
                           <strong>{tenant.name}</strong>
                         </div>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="web-market-badge is-subtle">{countryLabel(tenant.country, en)}</span>
                     </TableCell>
                     <TableCell>
                       <span className="web-market-badge is-subtle">
@@ -301,6 +317,29 @@ export function TenantForms({
             </div>
           </div>
 
+          {onUpdateTenantCountry && (
+            <div className="web-admin-assign-row">
+              <label className="web-admin-sheet-field" style={{ flex: 1 }}>
+                <span>{en ? 'Procurement country (activates portal & rules)' : 'País de contratación (activa portal y reglas)'}</span>
+                <SelectField
+                  value={currentTenant.country || 'ALL'}
+                  disabled={busy}
+                  aria-label={en ? 'Organization country' : 'País de la organización'}
+                  options={[
+                    { value: 'CO', label: en ? 'Colombia — SECOP I/II, RUP, UNSPSC, COP & Market' : 'Colombia — SECOP I/II, RUP, UNSPSC, COP y Mercado' },
+                    { value: 'ES', label: en ? 'Spain — PLACSP, ROLECE/DEUC, CPV, EUR & LCSP' : 'España — PLACSP, ROLECE/DEUC, CPV, EUR y LCSP' },
+                    { value: 'ALL', label: en ? 'Both (Colombia & Spain)' : 'Ambos (Colombia y España)' },
+                  ]}
+                  onChange={(next) => {
+                    if (next === 'CO' || next === 'ES' || next === 'ALL') {
+                      void onUpdateTenantCountry(currentTenant.id, next);
+                    }
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
           {onAssignExisting && availableUsers.length > 0 && (
             <div className="web-admin-assign-row">
               <select
@@ -376,6 +415,20 @@ export function TenantForms({
                   {tenantError}
                 </p>
               )}
+            </label>
+            <label className="web-admin-sheet-field">
+              <span>{en ? 'Procurement country' : 'País de contratación'}</span>
+              <SelectField
+                value={tenantCountry}
+                disabled={busy}
+                aria-label={en ? 'Procurement country' : 'País de contratación'}
+                options={[
+                  { value: 'CO', label: en ? 'Colombia (SECOP, RUP, COP)' : 'Colombia (SECOP, RUP, COP)' },
+                  { value: 'ES', label: en ? 'Spain (PLACSP, ROLECE/DEUC, EUR)' : 'España (PLACSP, ROLECE/DEUC, EUR)' },
+                  { value: 'ALL', label: en ? 'Both (Colombia & Spain)' : 'Ambos (Colombia y España)' },
+                ]}
+                onChange={(next) => setTenantCountry(next === 'CO' || next === 'ES' ? next : 'ALL')}
+              />
             </label>
             <div className="web-admin-sheet-actions">
               <Button type="button" variant="outline" disabled={busy} onClick={() => onTenantSheetOpenChange(false)}>
@@ -659,11 +712,11 @@ export default function WebTenantAdmin({
     };
   }, [open, selected, revision, en, showToast]);
 
-  const createTenant = async ({ name }: CreateTenantValues) => {
+  const createTenant = async ({ name, country }: CreateTenantValues) => {
     if (busy) return false;
     setBusy(true);
     try {
-      const data = (await request('/api/admin/tenants', { method: 'POST', json: { name } })) as { tenant: Tenant };
+      const data = (await request('/api/admin/tenants', { method: 'POST', json: { name, country } })) as { tenant: Tenant };
       setSelected(data.tenant.id);
       setRevision((value) => value + 1);
       onChanged?.();
@@ -687,6 +740,21 @@ export default function WebTenantAdmin({
       showToast(en ? 'Organization updated.' : 'Organización actualizada.', 'success');
     } catch {
       showToast(en ? 'Could not rename the organization.' : 'No se pudo renombrar la organización.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateTenantCountry = async (tenantId: string, country: ProcurementMarket) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await request(`/api/admin/tenants/${encodeURIComponent(tenantId)}`, { method: 'PATCH', json: { country } });
+      setRevision((value) => value + 1);
+      onChanged?.();
+      showToast(en ? 'Country updated.' : 'País actualizado.', 'success');
+    } catch {
+      showToast(en ? 'Could not update the country.' : 'No se pudo actualizar el país.', 'error');
     } finally {
       setBusy(false);
     }
@@ -775,6 +843,7 @@ export default function WebTenantAdmin({
         availableUsers={availableUsers}
         onAssignExisting={(userId) => void assignExistingUser(userId)}
         onRenameTenant={renameTenant}
+        onUpdateTenantCountry={updateTenantCountry}
       >
         {selected && <TenantMembers language={language} members={members} />}
       </TenantForms>

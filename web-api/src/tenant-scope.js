@@ -1,5 +1,9 @@
 export async function ensureUserTenant(env,userId) {
- const find=()=>env.DB.prepare('SELECT t.id,t.name,t.owner_user_id AS ownerId FROM tenant_members m JOIN tenants t ON t.id=m.tenant_id WHERE m.user_id=?').bind(userId).first();
+ const find=async()=>{
+  const row=await env.DB.prepare('SELECT t.id,t.name,t.country,t.owner_user_id AS ownerId FROM tenant_members m JOIN tenants t ON t.id=m.tenant_id WHERE m.user_id=?').bind(userId).first();
+  if(!row)return null;
+  return {...row,country:['CO','ES','ALL'].includes(row.country)?row.country:'ALL'};
+ };
  let tenant=await find();
  if (tenant) {
   if (!tenant.ownerId) throw new Error('Tenant has no workspace owner');

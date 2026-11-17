@@ -187,7 +187,7 @@ const apiWorker = {
       const session = await auth.api.getSession({headers:request.headers});
       if (!session) return scopedSession = null;
       const tenant = await ensureUserTenant(env,session.user.id);
-      return scopedSession = {...session, workspaceId:tenant.ownerId, tenant:{id:tenant.id,name:tenant.name}};
+      return scopedSession = {...session, workspaceId:tenant.ownerId, tenant:{id:tenant.id,name:tenant.name,country:tenant.country}};
     };
     if(url.pathname.startsWith('/api/')){try{await bootstrapSuperadmin(env);}catch{return privateResponse(Response.json({error:'superadmin_bootstrap_failed'},{status:503}));}}
     if (url.pathname === '/api/admin/runner-config' || url.pathname.startsWith('/api/admin/runner-config/')) {
@@ -229,9 +229,11 @@ const apiWorker = {
     if (url.pathname === '/api/preferences') {
       const session = await getScopedSession();
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
+      const tenantCountry = ['CO', 'ES', 'ALL'].includes(session.tenant?.country) ? session.tenant.country : 'ALL';
       if (request.method === 'GET') {
         const row = await env.DB.prepare('SELECT savia_language AS language, savia_theme AS theme, savia_color_theme AS colorTheme, savia_visual_style AS visualStyle, savia_market AS market FROM "user" WHERE id = ?').bind(session.user.id).first();
-        return privateResponse(Response.json({ language: row?.language === 'en' ? 'en' : 'es', theme: ['light', 'dark', 'system'].includes(row?.theme) ? row.theme : 'system', colorTheme: ['neutral', 'blue', 'green', 'violet', 'rose'].includes(row?.colorTheme) ? row.colorTheme : 'neutral', visualStyle: ['vega', 'nova', 'maia', 'lyra', 'mira'].includes(row?.visualStyle) ? row.visualStyle : 'vega', market: ['CO', 'ES', 'ALL'].includes(row?.market) ? row.market : 'ALL' }));
+        const userMarket = ['CO', 'ES', 'ALL'].includes(row?.market) ? row.market : 'ALL';
+        return privateResponse(Response.json({ language: row?.language === 'en' ? 'en' : 'es', theme: ['light', 'dark', 'system'].includes(row?.theme) ? row.theme : 'system', colorTheme: ['neutral', 'blue', 'green', 'violet', 'rose'].includes(row?.colorTheme) ? row.colorTheme : 'neutral', visualStyle: ['vega', 'nova', 'maia', 'lyra', 'mira'].includes(row?.visualStyle) ? row.visualStyle : 'vega', market: tenantCountry !== 'ALL' ? tenantCountry : userMarket }));
       }
       if (request.method !== 'PUT') return privateResponse(new Response('Method not allowed', { status: 405 }));
       if (request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return privateResponse(Response.json({ error: 'invalid_origin' }, { status: 403 }));
@@ -244,7 +246,7 @@ const apiWorker = {
       if (input.visualStyle !== undefined && !['vega', 'nova', 'maia', 'lyra', 'mira'].includes(input.visualStyle)) return privateResponse(Response.json({ error: 'invalid_visual_style' }, { status: 400 }));
       if (input.market !== undefined && !['CO', 'ES', 'ALL'].includes(input.market)) return privateResponse(Response.json({ error: 'invalid_market' }, { status: 400 }));
       const updated = await env.DB.prepare('UPDATE "user" SET savia_language = COALESCE(?, savia_language), savia_theme = COALESCE(?, savia_theme), savia_color_theme = COALESCE(?, savia_color_theme), savia_visual_style = COALESCE(?, savia_visual_style), savia_market = COALESCE(?, savia_market), savia_preferences_revision = savia_preferences_revision + 1 WHERE id = ? RETURNING savia_language AS language, savia_theme AS theme, savia_color_theme AS colorTheme, savia_visual_style AS visualStyle, savia_market AS market').bind(input.language ?? null, input.theme ?? null, input.colorTheme ?? null, input.visualStyle ?? null, input.market ?? null, session.user.id).first();
-      return privateResponse(Response.json(updated));
+      return privateResponse(Response.json({ ...updated, market: tenantCountry !== 'ALL' ? tenantCountry : (['CO', 'ES', 'ALL'].includes(updated?.market) ? updated.market : 'ALL') }));
     }
     if(url.pathname==='/api/runner/export-format-capture'){const runner=await authenticateRunner(request,env);if(!runner)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await runnerExportFormatCapture(request,env,runner));}
     if(url.pathname==='/api/runner/paa-capture'){const runner=await authenticateRunner(request,env);if(!runner)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await runnerPaaCapture(request,env,runner));}

@@ -63,6 +63,12 @@ async function createTenantUser(env, tenantId, input) {
   return Response.json({user:{id,name,email,role,tenantId:targetTenantId}},{status:201});
 }
 
+function normalizeCountry(value) {
+  if (value === undefined) return undefined;
+  const code = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  return ['CO', 'ES', 'ALL'].includes(code) ? code : null;
+}
+
 export async function tenantAdmin(request, env, session) {
   if (!session) return Response.json({error:'unauthorized'}, {status:401});
   if (env.AUTH_REQUIRE_VERIFIED_EMAIL==='true' && !session.user.emailVerified) return Response.json({error:'email_not_verified'},{status:403});
@@ -70,8 +76,8 @@ export async function tenantAdmin(request, env, session) {
   if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({error:'invalid_origin'}, {status:403});
   const path = new URL(request.url).pathname;
   if (path === '/api/admin/tenants' && request.method === 'GET') {
-    const {results} = await env.DB.prepare('SELECT t.id,t.name,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,COUNT(m.user_id) AS memberCount FROM tenants t LEFT JOIN tenant_members m ON m.tenant_id=t.id GROUP BY t.id ORDER BY t.name,t.id').all();
-    return Response.json({tenants:results});
+    const {results} = await env.DB.prepare('SELECT t.id,t.name,t.country,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,COUNT(m.user_id) AS memberCount FROM tenants t LEFT JOIN tenant_members m ON m.tenant_id=t.id GROUP BY t.id ORDER BY t.name,t.id').all();
+    return Response.json({tenants:results.map(t=>({...t,country:['CO','ES','ALL'].includes(t.country)?t.country:'ALL'}))});
   }
   if (path === '/api/admin/users' && request.method === 'GET') {
     const {results} = await env.DB.prepare('SELECT u.id,u.name,u.email,u.role,u.banned,m.tenant_id AS tenantId,t.name AS tenantName,CASE WHEN t.owner_user_id=u.id THEN 1 ELSE 0 END AS isWorkspaceOwner FROM "user" u LEFT JOIN tenant_members m ON m.user_id=u.id LEFT JOIN tenants t ON t.id=m.tenant_id ORDER BY u.name,u.id').all();
@@ -85,18 +91,25 @@ export async function tenantAdmin(request, env, session) {
   if (path === '/api/admin/tenants' && request.method === 'POST') {
     const name=typeof input.name==='string'?input.name.trim():'';
     if (!name || name.length>200) return Response.json({error:'invalid_name'},{status:400});
-    const tenant={id:crypto.randomUUID(),name,ownerUserId:null,createdAt:new Date().toISOString(),memberCount:0};
-    await env.DB.prepare('INSERT INTO tenants(id,name,created_at) VALUES(?,?,?)').bind(tenant.id,tenant.name,tenant.createdAt).run();
+    const parsedCountry=normalizeCountry(input.country);
+    if (parsedCountry===null) return Response.json({error:'invalid_country'},{status:400});
+    const country=parsedCountry || 'ALL';
+    const tenant={id:crypto.randomUUID(),name,country,ownerUserId:null,createdAt:new Date().toISOString(),memberCount:0};
+    await env.DB.prepare('INSERT INTO tenants(id,name,country,created_at) VALUES(?,?,?,?)').bind(tenant.id,tenant.name,tenant.country,tenant.createdAt).run();
     return Response.json({tenant},{status:201});
   }
   const tenantEditMatch=/^\/api\/admin\/tenants\/([^/]+)$/.exec(path);
   if (tenantEditMatch && (request.method==='PATCH' || request.method==='PUT')) {
     const tenantId=decodeURIComponent(tenantEditMatch[1]);
-    const name=typeof input.name==='string'?input.name.trim():'';
-    if (!name || name.length>200) return Response.json({error:'invalid_name'},{status:400});
-    const updated=await env.DB.prepare('UPDATE tenants SET name=? WHERE id=? RETURNING id,name,owner_user_id AS ownerUserId,created_at AS createdAt').bind(name,tenantId).first();
+    const hasName=input.name!==undefined;
+    const name=hasName?(typeof input.name==='string'?input.name.trim():''):null;
+    if (hasName && (!name || name.length>200)) return Response.json({error:'invalid_name'},{status:400});
+    const parsedCountry=normalizeCountry(input.country);
+    if (parsedCountry===null) return Response.json({error:'invalid_country'},{status:400});
+    if (!hasName && parsedCountry===undefined) return Response.json({error:'invalid_request'},{status:400});
+    const updated=await env.DB.prepare('UPDATE tenants SET name=COALESCE(?,name),country=COALESCE(?,country) WHERE id=? RETURNING id,name,country,owner_user_id AS ownerUserId,created_at AS createdAt').bind(name,parsedCountry??null,tenantId).first();
     if (!updated) return Response.json({error:'not_found'},{status:404});
-    return Response.json({tenant:updated});
+    return Response.json({tenant:{...updated,country:['CO','ES','ALL'].includes(updated.country)?updated.country:'ALL'}});
   }
   const userTenantMatch=/^\/api\/admin\/users\/([^/]+)\/tenant$/.exec(path);
   if (userTenantMatch && (request.method==='PUT' || request.method==='POST')) {

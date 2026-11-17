@@ -80,8 +80,10 @@ export async function opportunitySearch(request, env, owner, searchProcesses) {
   const {suggestionSources} = await import('./opportunity-suggestion-settings.js');
   const sources = await suggestionSources(env,owner,before.keywords,!!before.include_rup);
   if (!sources.terms.length && !sources.profile.reviewedRup.length && !(sources.profile.cpvCodes?.length)) return Response.json({error:'sources_unavailable'},{status:409});
+  const tenantRow = await env.DB.prepare('SELECT country FROM tenants WHERE owner_user_id = ?').bind(owner).first();
+  const tenantCountry = ['CO', 'ES', 'ALL'].includes(tenantRow?.country) ? tenantRow.country : 'ALL';
   const userRow = await env.DB.prepare('SELECT savia_market AS market FROM "user" WHERE id = ?').bind(owner).first();
-  const market = ['CO', 'ES', 'ALL'].includes(userRow?.market) ? userRow.market : 'CO';
+  const market = tenantCountry !== 'ALL' ? tenantCountry : (['CO', 'ES', 'ALL'].includes(userRow?.market) ? userRow.market : 'CO');
   if (!searchProcesses) {
     const secopApi = secop.createSecopService({configStore:{load:()=>({ui_language:input.language})}});
     searchProcesses = params => params.dataset === 'placsp' ? searchPlacspD1(env, params) : secopApi.searchProcesses(params);

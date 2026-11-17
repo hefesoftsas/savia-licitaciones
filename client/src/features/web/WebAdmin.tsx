@@ -8,7 +8,7 @@ import {request} from './api.mjs';
 
 type Language='es'|'en';
 
-export default function WebAdmin({language,currentUserId}:{language:Language;currentUserId:string}){
+export default function WebAdmin({language,currentUserId,onTenantUpdated}:{language:Language;currentUserId:string;onTenantUpdated?:()=>void}){
   const en=language==='en';
   const [tab,setTab]=useState('tenants');
   const [userFilter,setUserFilter]=useState<'all'|'active'|'superadmin'>('all');
@@ -76,7 +76,7 @@ export default function WebAdmin({language,currentUserId}:{language:Language;cur
         <TabsTrigger value="runner-config" data-admin-tab="runner-config">{en?'Skills, Hooks & Prompts':'Skills, Hooks y Prompts'}</TabsTrigger>
       </TabsList>
       <TabsContent value="tenants">
-        <WebTenantAdmin key={`tenants-${revision}`} language={language} defaultOpen onChanged={()=>setRevision(v=>v+1)} />
+        <WebTenantAdmin key={`tenants-${revision}`} language={language} defaultOpen onChanged={()=>{setRevision(v=>v+1);onTenantUpdated?.();}} />
       </TabsContent>
       <TabsContent value="users">
         <WebAdminUsers key={`users-${revision}`} language={language} currentUserId={currentUserId} defaultOpen userFilter={userFilter} onUserFilterChange={setUserFilter} onChanged={()=>setRevision(v=>v+1)} />
