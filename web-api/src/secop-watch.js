@@ -1,3 +1,4 @@
+import { isLicitTenderId } from './licit.js';
 import secop from '../../client/electron/services/secopService.cjs';
 import { getPlacspDetail, syncPlacspFeed } from './secop.js';
 const missing=()=>Response.json({error:'not_found'},{status:404});
@@ -16,8 +17,11 @@ async function check(env,owner,record){
  const oldProcess=JSON.parse(previous.process_json),oldDocs=previous.documents_json?JSON.parse(previous.documents_json):null;
  const isPlacsp=record.source==='placsp';
  const api=isPlacsp?null:service();
- const sync=isPlacsp?await syncPlacspFeed(env,{force:true}).catch(err=>({synced:false,error:err?.message||'No se pudo sincronizar PLACSP.'})):null;
- const result=isPlacsp?await getPlacspDetail(env,record.external_id):await api.getProcessDetail(record.external_id,record.source,{fresh:true});
+ const isLicit=isPlacsp&&isLicitTenderId(record.external_id);
+ const sync=isPlacsp&&!isLicit?await syncPlacspFeed(env,{force:true}).catch(err=>({synced:false,error:err?.message||'No se pudo sincronizar PLACSP.'})):null;
+ const result=isPlacsp
+  ?await getPlacspDetail(env,record.external_id,{fresh:isLicit})
+  :await api.getProcessDetail(record.external_id,record.source,{fresh:true});
  const isCurrent=async()=>{const [current,revision]=await Promise.all([lookup(env,owner,project),env.DB.prepare('SELECT revision FROM secop_watch_baselines_web WHERE project_id = ? AND owner_id = ?').bind(project,owner).first()]);return current?.process_json===record.process_json && revision?.revision===previous.revision;};
  if(!await isCurrent())return conflict();
  let process={...oldProcess},docs=oldDocs,issues=[];const changes=[];

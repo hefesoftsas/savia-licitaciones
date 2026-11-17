@@ -1,7 +1,7 @@
 export const MAX_OPPORTUNITY_DOCUMENTS = 100;
 const supported = new Set(['pdf','doc','docx','xls','xlsx','zip']);
 export function selectableDocument(doc) {
-  return /^(?:\d+|[A-Za-z][A-Za-z0-9._-]*-\d+)$/.test(doc.id) && supported.has(doc.extension) && (doc.size == null || doc.size <= 50*1024*1024);
+  return /^(?:\d+|[A-Za-z][A-Za-z0-9._-]*-\d+|PLACSP-[a-f0-9]{32})$/.test(doc.id) && supported.has(doc.extension) && (doc.size == null || doc.size <= 50*1024*1024);
 }
 export function selectLoadedDocuments(documents) {
   return [...new Set(documents.filter(selectableDocument).map(doc=>doc.id))].slice(0,MAX_OPPORTUNITY_DOCUMENTS);

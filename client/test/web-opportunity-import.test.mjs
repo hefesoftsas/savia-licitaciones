@@ -28,3 +28,8 @@ test('abre el proyecto existente al repetir el guardado de una oportunidad', asy
   assert.equal(result.existing, true);
   assert.deepEqual(calls, ['/api/projects/from-secop']);
 });
+
+test('permite seleccionar adjuntos oficiales de PLACSP con identificador estable', () => {
+ const official = {id:'PLACSP-68a65fb7e812d42cb64155162ed8cc2a', extension:'pdf'};
+ assert.deepEqual(selectLoadedDocuments([official]), [official.id]);
+});

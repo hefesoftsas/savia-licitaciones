@@ -33,6 +33,9 @@ test('seguimiento SECOP detecta cambios y conserva fuentes incompletas',async()=
 
 test('seguimiento PLACSP detecta cambios de estado, plazo y documentos',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'savia-placsp-watch-'));let worker,statusCode='PUB',deadline='2026-12-20',extraDoc=false,unavailable=false;
+ const licitId='11111111-2222-3333-4444-555555555555';
+ let licitCalls=0, atomCalls=0, licitStatus='EN PLAZO', licitUnavailable=false;
+
  const atom=()=>{
   const docExtra=extraDoc?`\n      <cac:TechnicalDocumentReference>\n        <cbc:ID>ADENDA-1.pdf</cbc:ID>\n        <cac:Attachment><cac:ExternalReference><cbc:URI>https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=ADENDA1</cbc:URI></cac:ExternalReference></cac:Attachment>\n      </cac:TechnicalDocumentReference>`:'';
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -72,7 +75,15 @@ test('seguimiento PLACSP detecta cambios de estado, plazo y documentos',async()=
   execFileSync('pnpm',['exec','wrangler','deploy','--dry-run','--outdir',dir],{cwd:root,stdio:'pipe',env:{...process.env,CLOUDFLARE_SEND_METRICS:'false'}});
   const outboundService=async request=>{
    const url=new URL(request.url);
+   if (url.hostname === 'api.licit.es') {
+    if (url.pathname !== '/v1/licitacion/' + licitId) return new Response('unavailable',{status:503});
+    licitCalls++;
+    if (licitUnavailable) return new Response('unavailable',{status:503});
+    return Response.json({id:licitId, titulo:'Obras de saneamiento', expediente:'LICIT-100', estado:licitStatus,
+      fecha_limite:'2026-12-31', hora_limite:'13:00:00', fecha_actualizacion:'2026-11-30'});
+   }
    assert.equal(url.hostname,'contrataciondelsectorpublico.gob.es');
+   atomCalls++;
    if(unavailable)return new Response('unavailable',{status:503});
    return new Response(atom(),{headers:{'content-type':'application/atom+xml'}});
   };
@@ -104,5 +115,25 @@ test('seguimiento PLACSP detecta cambios de estado, plazo y documentos',async()=
   state=await (await req(path,{headers:{cookie}})).json();
   assert.ok(state.error);
   assert.equal(state.baseline.deadline,'2026-12-28T14:00:00');
+
+  const licitTender={source:'placsp',id:'licit:' + licitId,title:'Obras de saneamiento',reference:'LICIT-100'};
+  const licitProject=(await (await send('/api/projects/from-secop','POST',{process:licitTender},cookie)).json()).project;
+  const licitPath=`/api/projects/${licitProject.id}/secop-watch`;
+  const previousAtomCalls=atomCalls;
+  assert.equal((await send(licitPath,'POST',{},cookie)).status,200);
+  const initialLicit=await (await req(licitPath,{headers:{cookie}})).json();
+  assert.equal(initialLicit.baseline.status,'Publicado');
+  assert.equal(initialLicit.baseline.deadline,'2026-12-31T13:00:00');
+  licitStatus='ADJUDICADA';
+  assert.equal((await send(licitPath,'POST',{},cookie)).status,200);
+  state=await (await req(licitPath,{headers:{cookie}})).json();
+  assert.equal(state.alerts.find(item=>item.kind==='status')?.current,'Adjudicado');
+  licitUnavailable=true;
+  assert.equal((await send(licitPath,'POST',{},cookie)).status,200);
+  state=await (await req(licitPath,{headers:{cookie}})).json();
+  assert.ok(state.error);
+  assert.equal(state.baseline.status,'Adjudicado');
+  assert.equal(licitCalls,3);
+  assert.equal(atomCalls,previousAtomCalls);
  }finally{await worker?.dispose();await rm(dir,{recursive:true,force:true});}
 });

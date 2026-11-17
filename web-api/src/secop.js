@@ -1,3 +1,7 @@
+import {fetchPlacspPortalDocuments, placspDocumentHeaders} from './placsp-portal.js';
+import {getLicitTender, isLicitTenderId, searchLicit} from './licit.js';
+import {upsertPlacspEntries} from './placsp-store.js';
+import {findRecentBoeTenders} from './placsp-boe.js';
 import {uploadSecopStream} from './secop-stream.js';
 import {cleanupDesktopUploads,uploadLeaseMs} from './desktop-file-cleanup.js';
 import secop from '../../client/electron/services/secopService.cjs';
@@ -37,20 +41,27 @@ async function enqueueSecopRunnerJob(env, ownerId, projectId, portfolioId, doc, 
   if (await env.DB.prepare('SELECT 1 AS present FROM secop_zip_files WHERE project_id=? AND document_id=? LIMIT 1').bind(projectId, documentId).first()) return { imported: true };
   return { conflict: true };
 }
+async function resolvePlacspDocuments(env, id, row, process = {}) {
+  const saved = !id.startsWith('licit:') && Array.isArray(process.documents) && process.documents.length
+    ? process.documents : JSON.parse(row?.documents_json || '[]');
+  if (saved.length) return saved;
+  const docs = await (id.startsWith('pscp:')
+    ? placsp.createPlacspService().fetchPscpProcessDocuments(id, {reference:row?.reference || process.reference || ''})
+    : id.startsWith('licit:') && row?.url
+      ? fetchPlacspPortalDocuments(row.url)
+      : Promise.resolve([])).catch(() => []);
+  if (docs.length && row) {
+    await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?')
+      .bind(JSON.stringify(docs), id).run();
+  }
+  return docs;
+}
 export async function secopDocuments(request, env, ownerId, projectId, documentId) {
   const process = await projectProcess(env, ownerId, projectId);
   if (!process) return Response.json({ error: 'not_found' }, { status: 404 });
   if (process.source === 'placsp') {
-    const row = await env.DB.prepare('SELECT documents_json, reference FROM placsp_tenders WHERE id = ?').bind(process.id).first();
-    let docs = Array.isArray(process.documents) && process.documents.length ? process.documents : (row ? JSON.parse(row.documents_json || '[]') : []);
-    if (!docs.length && String(process.id || '').startsWith('pscp:')) {
-      try {
-        docs = await placsp.createPlacspService().fetchPscpProcessDocuments(process.id, { reference: row?.reference || process.reference || '' });
-        if (docs.length && row) {
-          await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?').bind(JSON.stringify(docs), process.id).run();
-        }
-      } catch { /* leave empty if unreachable */ }
-    }
+    const row = await env.DB.prepare('SELECT documents_json, reference, url FROM placsp_tenders WHERE id = ?').bind(process.id).first();
+    const docs = await resolvePlacspDocuments(env, process.id, row, process);
     if (!documentId && request.method === 'GET') {
       const saved = await env.DB.prepare('SELECT document_id AS id FROM project_secop_files WHERE project_id = ?').bind(projectId).all();
       const imported = new Set(saved.results.map(item => item.id));
@@ -67,7 +78,14 @@ export async function secopDocuments(request, env, ownerId, projectId, documentI
     if (!safeUrl) return Response.json({ error: 'invalid_document' }, { status: 400 });
     if (!fileTypes[doc.extension]) return Response.json({ error: 'unsupported_document' }, { status: 400 });
     let response;
-    try { response = await fetch(safeUrl, { redirect: 'follow', signal: AbortSignal.timeout(60_000) }); } catch { return Response.json({ error: 'download_failed' }, { status: 502 }); }
+    try {
+      const officialAttachment = process.id.startsWith('licit:');
+      response = await fetch(safeUrl, {
+        redirect: officialAttachment ? 'manual' : 'follow',
+        headers: officialAttachment ? placspDocumentHeaders(fileTypes[doc.extension]) : undefined,
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch { return Response.json({ error: 'download_failed' }, { status: 502 }); }
     if (!response.ok || !response.body || /text\/html/i.test(response.headers.get('content-type') || '')) return Response.json({ error: 'download_failed' }, { status: 502 });
     if (Number(response.headers.get('content-length')) > maxFileBytes) return Response.json({ error: 'file_too_large' }, { status: 413 });
     const name = (doc.name || `documento.${doc.extension}`).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 240) || `documento.${doc.extension}`;
@@ -208,19 +226,6 @@ function placspRowToProcess(row) {
   };
 }
 
-async function upsertPlacspEntries(env, entries, now = Date.now()) {
-  if (!Array.isArray(entries) || entries.length === 0) return;
-  for (let i = 0; i < entries.length; i += 40) {
-    const chunk = entries.slice(i, i + 40);
-    await env.DB.batch(chunk.map(item =>
-      env.DB.prepare(`INSERT INTO placsp_tenders (id, reference, title, entity, entity_id, modality, status, status_code, value, currency, publication_date, deadline, territory, city, classification_code, cpv_codes_json, url, documents_json, updated_at, synced_at, description)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET reference=excluded.reference, title=excluded.title, entity=excluded.entity, entity_id=excluded.entity_id, modality=excluded.modality, status=excluded.status, status_code=excluded.status_code, value=excluded.value, currency=excluded.currency, publication_date=excluded.publication_date, deadline=excluded.deadline, territory=excluded.territory, city=excluded.city, classification_code=excluded.classification_code, cpv_codes_json=excluded.cpv_codes_json, url=excluded.url, documents_json=CASE WHEN excluded.id LIKE 'pscp:%' AND excluded.documents_json = '[]' THEN placsp_tenders.documents_json ELSE excluded.documents_json END, updated_at=excluded.updated_at, synced_at=excluded.synced_at, description=excluded.description`)
-        .bind(item.id, item.reference || '', item.title, item.entity || '', item.entityId || '', item.modality || '', item.status || '', item.statusCode || '', item.value ?? null, item.currency || 'EUR', item.publicationDate || '', item.deadline || '', item.territory || '', item.city || '', item.classificationCode || '', JSON.stringify(item.cpvCodes || []), item.url || '', JSON.stringify(item.documents || []), item.updatedAt || '', now, item.description || '')
-    ));
-  }
-}
-
 export async function syncPlacspFeed(env, { force = false, maxPages = 1 } = {}) {
   const now = Date.now();
   const state = await env.DB.prepare('SELECT last_synced_at, entry_count FROM placsp_sync_state WHERE id = 1').first();
@@ -258,24 +263,77 @@ export async function syncPlacsp(request, env) {
   }
 }
 
-export async function searchPlacspD1(env, params = {}) {
-  try {
-    await syncPlacspFeed(env, { force: params.fresh === true });
-  } catch (error) {
-    const count = await env.DB.prepare('SELECT COUNT(*) AS cnt FROM placsp_tenders').first();
-    if (!count?.cnt) {
-      return { success: false, message: error?.message || 'No se pudo conectar con PLACSP.' };
+async function searchCatalanTenders(params, deadlineCutoff, target) {
+  const service = placsp.createPlacspService();
+  const items = [];
+  const limit = Math.min(100, target + 1);
+  let offset = 0;
+  let truncated;
+  do {
+    const page = await service.searchPscpSocrata({...params, deadlineCutoff, offset, limit});
+    items.push(...page.items);
+    truncated = page.truncated;
+    offset += limit;
+  } while (truncated && offset <= target && offset < 1200);
+  return {items, truncated};
+}
+
+function pscpPublication(url) {
+  return /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\//i.test(url || '') ? url : null;
+}
+
+function uniquePlacspSearchIds(entries) {
+  const preferred = new Map();
+  for (const item of entries) {
+    const key = pscpPublication(item.url) || item.id;
+    const existing = preferred.get(key);
+    // Keep the PSCP identity because it carries the official time and document catalog.
+    if (!existing || item.id.startsWith('pscp:') && (!existing.startsWith('pscp:') || item.id < existing)) {
+      preferred.set(key, item.id);
     }
+  }
+  return [...preferred.values()];
+}
+
+export async function searchPlacspD1(env, params = {}) {
+  const deadlineCutoff = params.openOnly ? placsp.placspDeadlineCutoff() : null;
+  const keywords = placsp.placspKeywordVariants(params.keyword);
+  const offset = Math.max(Math.floor(Number(params.offset) || 0), 0);
+  const limit = Math.min(Math.max(Math.floor(Number(params.limit) || 20), 1), 100);
+  const market = await Promise.all([
+    searchLicit(params, deadlineCutoff, offset + limit).catch(() => null),
+    searchCatalanTenders(params, deadlineCutoff, offset + limit).catch(() => ({items:[], truncated:false})),
+  ]);
+  const [primary, pscp] = market;
+  const boe = !primary && deadlineCutoff && !offset && keywords.length
+    ? findRecentBoeTenders(keywords, deadlineCutoff, {
+        fresh: params.fresh === true,
+        cached: async (key, ttl, load, fresh) => (await cached(env, `placsp:boe:${key}`, ttl, async () => {
+          const data = await load();
+          return { success: data !== null, data };
+        }, fresh)).data,
+      }).catch(() => [])
+    : Promise.resolve([]);
+  let syncError;
+  try {
+    if (!primary) await syncPlacspFeed(env, { force: params.fresh === true });
+  } catch (error) {
+    syncError = error;
   }
   const where = [];
   const binds = [];
-  const deadlineCutoff = params.openOnly ? placsp.placspDeadlineCutoff() : null;
+  if (primary) {
+    const entries = [...primary.items, ...pscp.items];
+    await upsertPlacspEntries(env, entries);
+    where.push('id IN (SELECT value FROM json_each(?))');
+    binds.push(JSON.stringify(uniquePlacspSearchIds(entries)));
+  }
   if (deadlineCutoff) {
     where.push("status_code = ? AND deadline > ? AND (id NOT LIKE 'pscp:%' OR status = ?)");
     binds.push(placsp.PLACSP_OPEN_STATUS, deadlineCutoff, placsp.PSCP_OPEN_PHASE);
+    where.push("id NOT LIKE 'boe:%' OR NOT EXISTS (SELECT 1 FROM placsp_tenders native WHERE native.reference = placsp_tenders.reference AND native.entity = placsp_tenders.entity COLLATE NOCASE AND native.id NOT LIKE 'boe:%' AND native.id NOT LIKE 'pscp:%')");
   }
-  const keywords = placsp.placspKeywordVariants(params.keyword);
-  if (keywords.length) {
+  if (!primary && keywords.length) {
     const columns = ['title', 'entity', 'reference', 'cpv_codes_json', 'description'];
     where.push(`(${keywords.flatMap(() => columns.map(column => `${column} LIKE ?`)).join(' OR ')})`);
     binds.push(...keywords.flatMap(term => columns.map(() => `%${term}%`)));
@@ -318,16 +376,14 @@ export async function searchPlacspD1(env, params = {}) {
     else if (k === 'publicationDate' || k === 'deadline') { where.push(`${col} LIKE ?`); binds.push(`${String(v).slice(0, 10)}%`); }
     else { where.push(`${col} LIKE ?`); binds.push(`%${String(v).trim()}%`); }
   }
-  const limit = Math.min(Math.max(Math.floor(Number(params.limit) || 20), 1), 100);
-  const offset = Math.max(Math.floor(Number(params.offset) || 0), 0);
   const orderCol = colMap[params.sortBy] || 'publication_date';
   const orderDir = params.sortDirection === 'asc' ? 'ASC' : 'DESC';
-  const sql = `SELECT * FROM placsp_tenders${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY ${orderCol} ${orderDir}, id ASC LIMIT ? OFFSET ?`;
+  const sql = `SELECT * FROM placsp_tenders${where.length ? ` WHERE ${where.map(clause => `(${clause})`).join(' AND ')}` : ''} ORDER BY ${orderCol} ${orderDir}, id ASC LIMIT ? OFFSET ?`;
   const readPage = async () => (await env.DB.prepare(sql).bind(...binds, limit + 1, offset).all()).results || [];
   let rows = await readPage();
-  let liveHasMore = false;
+  let liveHasMore = Boolean(primary && (primary.truncated || pscp.truncated));
   const canExpand = Boolean(params.openOnly || params.keyword?.trim() || params.classificationClass);
-  if (!rows.length || (rows.length <= limit && canExpand)) {
+  if (!primary && (!rows.length || (rows.length <= limit && canExpand))) {
     try {
       const live = await placsp.createPlacspService().searchPscpSocrata({ ...params, deadlineCutoff, limit, offset });
       if (live.items.length) {
@@ -340,6 +396,24 @@ export async function searchPlacspD1(env, params = {}) {
     }
   }
 
+  const notices = await boe;
+  if (notices.length) {
+    for (const item of notices) {
+      const canonical = await env.DB.prepare("SELECT id FROM placsp_tenders WHERE reference = ? AND entity = ? COLLATE NOCASE AND id NOT LIKE 'boe:%' AND id NOT LIKE 'pscp:%' LIMIT 1").bind(item.reference, item.entity).first();
+      if (canonical && item.verifiedOnPlacsp) {
+        await env.DB.prepare('UPDATE placsp_tenders SET status = ?, status_code = ?, deadline = ? WHERE id = ?').bind(item.status, item.statusCode, item.deadline, canonical.id).run();
+      } else if (!canonical) {
+        const prior = await env.DB.prepare('SELECT status FROM placsp_tenders WHERE id = ?').bind(item.id).first();
+        if (item.verifiedOnPlacsp || !prior || prior.status === 'Anuncio BOE') await upsertPlacspEntries(env, [item]);
+      }
+    }
+    rows = await readPage();
+  }
+
+  if (syncError && !notices.length && !rows.length) {
+    const count = await env.DB.prepare('SELECT COUNT(*) AS cnt FROM placsp_tenders').first();
+    if (!count?.cnt) return { success: false, message: syncError.message || 'No se pudo conectar con PLACSP.' };
+  }
   const items = rows.slice(0, limit).map(placspRowToProcess);
   const truncated = rows.length > limit || (items.length > 0 && liveHasMore);
   return { success: true, data: { items, truncated }, message: items.length ? 'ok' : 'No se encontraron procesos con esos criterios' };
@@ -352,7 +426,16 @@ async function getPlacspCategories(env, category) {
   return { success: true, data: (rows.results || []).map(r => r.val), message: 'ok' };
 }
 
-export async function getPlacspDetail(env, id) {
+export async function getPlacspDetail(env, id, {fresh = false} = {}) {
+  if (fresh && isLicitTenderId(id)) {
+    try {
+      const tender = await getLicitTender(id);
+      try { tender.documents = await fetchPlacspPortalDocuments(tender.url); } catch { /* Keep the cached catalog. */ }
+      await upsertPlacspEntries(env, [tender]);
+    } catch {
+      return {success:false, data:null, message:'No se pudo actualizar el expediente en licit.es.'};
+    }
+  }
   const row = await env.DB.prepare('SELECT * FROM placsp_tenders WHERE id = ?').bind(id).first();
   if (!row) return { success: false, data: null, message: 'No se encontró el proceso en PLACSP.' };
   return { success: true, data: placspRowToProcess(row), message: 'ok' };
@@ -405,16 +488,8 @@ export async function secopDocumentCatalog(request, env) {
   const url = new URL(request.url), source = url.searchParams.get('source'), id = url.searchParams.get('id') || '';
   if (source === 'placsp') {
     if (!id.trim() || id.length > 200) return Response.json({ error: 'invalid_process' }, { status: 400 });
-    const row = await env.DB.prepare('SELECT documents_json, reference FROM placsp_tenders WHERE id = ?').bind(id).first();
-    let docs = row ? JSON.parse(row.documents_json || '[]') : [];
-    if (!docs.length && id.startsWith('pscp:')) {
-      try {
-        docs = await placsp.createPlacspService().fetchPscpProcessDocuments(id, { reference: row?.reference || '' });
-        if (docs.length && row) {
-          await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?').bind(JSON.stringify(docs), id).run();
-        }
-      } catch { /* leave empty if unreachable */ }
-    }
+    const row = await env.DB.prepare('SELECT documents_json, reference, url FROM placsp_tenders WHERE id = ?').bind(id).first();
+    const docs = await resolvePlacspDocuments(env, id, row);
     const items = docs.map(({ url: _url, ...item }) => item);
     return Response.json({ success: true, data: { items, truncated: false, partial: false }, message: 'ok' });
   }
@@ -425,6 +500,30 @@ export async function secopDocumentCatalog(request, env) {
   if (!result.success) return Response.json(result,{status:502});
   return Response.json({...result,data:{...result.data,items:result.data.items.map(({url: _url,...item})=>item)}});
 }
+function placspPublication(url) {
+  const safe = placsp.validatePlacspUrl(url);
+  if (!safe) return null;
+  const pscp = pscpPublication(safe);
+  if (pscp) return pscp;
+  const parsed = new URL(safe);
+  if (!['contrataciondelestado.es', 'contrataciondelsectorpublico.gob.es'].includes(parsed.hostname)
+      || parsed.pathname !== '/wps/poc') return null;
+  const id = parsed.searchParams.get('idEvl')?.replaceAll(' ', '+');
+  return id ? 'placsp:' + id : null;
+}
+
+async function findSavedPlacspPublication(env, ownerId, id) {
+  const tender = await env.DB.prepare('SELECT url FROM placsp_tenders WHERE id = ?').bind(id).first();
+  const publication = placspPublication(tender?.url);
+  if (!publication) return null;
+  const candidates = await env.DB.prepare(`
+    SELECT saved.project_id, COALESCE(NULLIF(tender.url, ''), json_extract(saved.process_json, '$.url')) AS url
+    FROM project_secop saved LEFT JOIN placsp_tenders tender ON tender.id = saved.external_id
+    WHERE saved.owner_id = ? AND saved.source = 'placsp' AND saved.external_id <> ?
+  `).bind(ownerId, id).all();
+  return candidates.results.find(candidate => placspPublication(candidate.url) === publication)?.project_id || null;
+}
+
 export async function createSecopProject(request, env, ownerId) {
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
   if (!sameOrigin(request, env)) return Response.json({ error: 'invalid_origin' }, { status: 403 });
@@ -434,6 +533,10 @@ export async function createSecopProject(request, env, ownerId) {
   const ids = input.documentIds ?? [];
   const validDocId = id => typeof id === 'string' && (process.source === 'placsp' ? /^[A-Za-z0-9._-]{1,100}$/.test(id) : /^\d+$/.test(id));
   if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => !validDocId(id)) || new Set(ids).size !== ids.length || (ids.length && process.source === 'secop-i') || (ids.length && process.source === 'secop-ii' && !/^CO1\.BDOS\.\d+$/.test(process.portfolioId || ''))) return Response.json({error:'invalid_documents'},{status:400});
+  if (process.source === 'placsp') {
+    const existingProject = await findSavedPlacspPublication(env, ownerId, process.id);
+    if (existingProject) return Response.json({error:'already_saved', projectId:existingProject}, {status:409});
+  }
   const project = { id: crypto.randomUUID(), title: process.title.trim().slice(0, 300), createdAt: new Date().toISOString() };
   try {
     await env.DB.batch([

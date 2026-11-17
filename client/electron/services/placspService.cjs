@@ -690,6 +690,7 @@ module.exports = {
   placspDeadlineCutoff,
   placspKeywordVariants,
   parseAtomFeed,
+  parseDocuments,
   validatePlacspUrl,
   extractPscpDocumentsFromPublicationJson,
   createPlacspService,

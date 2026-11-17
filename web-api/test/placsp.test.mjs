@@ -108,16 +108,89 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
       stdio: 'pipe',
       env: { ...process.env, CLOUDFLARE_SEND_METRICS: 'false' },
     });
+    let boePortalStatus = 'Publicada';
+    const floodNotices = [
+      ['BOE-B-2099-1', 'QA-BOE', 'Defensa contra inundaciones'],
+      ['BOE-B-2099-2', '22706.26.021', 'Defensa contra inundaciones del arroyo de Letur'],
+      ['BOE-B-2099-3', 'FP.499.079/2111', 'Protección contra inundaciones de Cogullada'],
+      ['BOE-B-2099-4', 'FP.499.079/0611', 'Control de las obras de protección contra inundaciones de Cogullada'],
+    ];
+    let useLicit = false;
+    let atomRequests = 0;
+    const duplicatePscpUrl = 'https://contractaciopublica.cat/ca/detall-publicacio/test/123';
+    const licitRows = [
+      ['22706.26.021', 'Defensa contra inundaciones del arroyo de Letur', '2099-11-30'],
+      ['FP.499.079/2111', 'Protección contra inundaciones de Cogullada', '2099-12-01'],
+      ['FP.499.079/0611', 'Control de obras contra inundaciones de Cogullada', '2099-12-02'],
+      ['QA-VENCIDA', 'Defensa contra inundaciones vencida', '2000-01-01'],
+      ['QA-VENCIDA-HOY', 'Defensa contra inundaciones vencida hoy', placsp.placspDeadlineCutoff().slice(0, 10)],
+    ].map(([expediente, titulo, fecha_limite], index) => ({
+      id: '00000000-0000-0000-0000-00000000000' + index, expediente, titulo, fecha_limite,
+      estado: 'EN PLAZO', fecha_publicacion: '2026-11-15', organo: 'Confederación',
+      url_place: 'https://contrataciondelestado.es/wps/poc?idEvl=licit-cog',
+    }));
     const outboundService = async request => {
       const url = new URL(request.url);
+      if (url.hostname === 'api.licit.es') {
+        if (!useLicit) return new Response(null, {status:503});
+        if (url.pathname.startsWith('/v1/licitacion/')) {
+          return Response.json({...licitRows.at(-1), hora_limite:'00:00:00'});
+        }
+        const {q, filtros} = await request.json();
+        assert.deepEqual(filtros.estado, ['EN PLAZO']);
+        if (q === 'saneamiento') return Response.json({resultados:[{
+          ...licitRows[0], id:'00000000-0000-0000-0000-000000000005',
+          expediente:'QA-PSCP-OVERLAP', titulo:'Saneamiento municipal', url_place:duplicatePscpUrl,
+        }]});
+        return Response.json({resultados:licitRows.filter(row => row.titulo.toLowerCase().includes(q.toLowerCase()))});
+      }
       if (url.hostname === 'contrataciondelsectorpublico.gob.es') {
+        if (url.pathname.endsWith('.atom')) atomRequests++;
         if (url.pathname.endsWith('page2.atom')) {
           return new Response('<feed xmlns="http://www.w3.org/2005/Atom"></feed>', { headers: { 'content-type': 'application/atom+xml' } });
         }
         return new Response(SAMPLE_ATOM, { headers: { 'content-type': 'application/atom+xml' } });
       }
+      if (url.hostname === 'www.boe.es') {
+        if (url.pathname.includes('/sumario/')) {
+          return Response.json({data:{sumario:{diario:[{seccion:[{codigo:'5A',departamento:[{item:floodNotices.map(([identificador, reference, title]) => ({
+            identificador, titulo: `Anuncio de licitación de: Confederación. Objeto: ${title}. Expediente: ${reference}.`,
+          }))}]}]}]}}});
+        }
+        const id = url.searchParams.get('id');
+        return new Response(`<documento><p>https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&amp;idEvl=${id}</p>`
+          + '<dt>19. Plazo para la recepción de ofertas:</dt><dd>Hasta las 12:00 horas del 1 de enero de 2099.</dd></documento>');
+      }
+      const notice = url.pathname === '/wps/poc' && floodNotices.find(([id]) => id === url.searchParams.get('idEvl'));
+      if (notice) {
+        const [, reference, title] = notice;
+        const status = reference === 'QA-BOE' ? boePortalStatus : 'Publicada';
+        if (!status) return new Response('', {status:503});
+        return new Response(`<span id="app:form1:text_Expediente">${reference}</span>`
+          + `<span id="app:form1:text_ObjetoContrato">${title}</span>`
+          + `<span id="app:form1:text_Estado">${status}</span>`
+          + '<span id="app:form1:text_FechaPresentacionOfertaConHora">02/01/2099 14:00</span>'
+          + '<span id="app:form1:text_OC_con">Confederación</span>');
+      }
+      if (url.pathname === '/wps/poc' && url.searchParams.get('idEvl') === 'licit-cog') {
+        return new Response('<table id="myTablaDetalleVISUOE"><tr><td>03/11/2026</td><td>Rectificaci&#243;n de Pliego</td>'
+          + '<td><a href="https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=COG-PCAP">'
+          + '<img alt="Documento pdf"></a><a href="https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=COG-XML">'
+          + '<img alt="Documento xml"></a></td></tr></table>');
+      }
+      if (url.searchParams.get('DocumentIdParam') === 'COG-XML') {
+        assert.match(request.headers.get('accept'), /application\/xml/);
+        return new Response('<CallForTenders><cac:LegalDocumentReference><cbc:ID>PCAP Cogullada.pdf</cbc:ID>'
+          + '<cac:Attachment><cac:ExternalReference><cbc:URI>https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=COG-ATTACHMENT</cbc:URI>'
+          + '</cac:ExternalReference></cac:Attachment></cac:LegalDocumentReference></CallForTenders>', {headers:{'content-type':'application/xml'}});
+      }
       if (url.hostname === 'analisi.transparenciacatalunya.cat') {
         const where = url.searchParams.get('$where') || '';
+        if (where.includes('SANEAMIENTO')) return Response.json(['0', '1'].map(lot => ({
+          id_intern:'qa-overlap_' + lot, codi_expedient:'QA-PSCP-OVERLAP',
+          denominacio:'Saneamiento municipal', enllac_publicacio:duplicatePscpUrl,
+          fase_publicacio:'Anunci de licitació', termini_presentacio_ofertes:'2099-11-30T14:00:00',
+        })));
         if (where.includes('INUNDACIONS')) {
           return Response.json([{id_intern:'qa-flood', denominacio:'QA Torrent', objecte_contracte:'Prevenció d’inundacions',
             fase_publicacio:'Anunci de licitació', termini_presentacio_ofertes:'2099-01-01T12:00:00'}]);
@@ -213,7 +286,63 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
 
     const floodSearch = await post('/api/secop/search', {dataset:'placsp',keyword:'inundaciones',openOnly:true}, cookie);
     assert.equal(floodSearch.status, 200);
-    assert.deepEqual((await floodSearch.json()).data.items.map(item=>item.id), ['pscp:qa-flood']);
+    const floodItems = (await floodSearch.json()).data.items;
+    assert.ok(floodItems.some(item=>item.id==='pscp:qa-flood'));
+    assert.ok(floodItems.some(item=>item.reference==='QA-BOE' && item.deadline==='2099-01-02T14:00:00'));
+    for (const [keyword, expected] of [
+      ['Letur', ['22706.26.021']],
+      ['Cogullada', ['FP.499.079/0611', 'FP.499.079/2111']],
+    ]) {
+      assert.deepEqual(floodItems.filter(item => item.title.includes(keyword)).map(item => item.reference).sort(), expected);
+      const targetedSearch = await post('/api/secop/search', {dataset:'placsp',keyword,openOnly:true}, cookie);
+      assert.equal(targetedSearch.status, 200);
+      assert.deepEqual((await targetedSearch.json()).data.items.map(item => item.reference).sort(), expected);
+    }
+    useLicit = true;
+    const priorAtomRequests = atomRequests;
+    const overlap = await post('/api/secop/search', {dataset:'placsp',keyword:'saneamiento',openOnly:true}, cookie);
+    assert.equal(overlap.status, 200);
+    assert.deepEqual((await overlap.json()).data.items.map(({id, deadline}) => ({id, deadline})), [
+      {id:'pscp:qa-overlap_0', deadline:'2099-11-30T14:00:00'},
+    ]);
+    await db.prepare('DELETE FROM placsp_tenders WHERE reference = ?').bind('QA-PSCP-OVERLAP').run();
+    for (const [keyword, expected] of [
+      ['inundaciones', ['22706.26.021', 'FP.499.079/0611', 'FP.499.079/2111']],
+      ['Letur', ['22706.26.021']],
+      ['Cogullada', ['FP.499.079/0611', 'FP.499.079/2111']],
+    ]) {
+      const response = await post('/api/secop/search', {dataset:'placsp',keyword,openOnly:true,fresh:true}, cookie);
+      assert.equal(response.status, 200);
+      const items = (await response.json()).data.items;
+      assert.deepEqual(items.filter(item => item.id.startsWith('licit:')).map(item => item.reference).sort(), expected);
+      assert.ok(!items.some(item => item.reference?.startsWith('QA-VENCIDA')));
+      if (keyword === 'inundaciones') assert.ok(items.some(item => item.id === 'pscp:qa-flood'));
+    }
+    const cogId = 'licit:' + licitRows[2].id;
+    const catalog = await req('/api/secop/documents?source=placsp&id=' + encodeURIComponent(cogId), {headers:{cookie}});
+    const pliego = (await catalog.json()).data.items.find(item => item.docType === 'PCAP');
+    assert.equal(pliego?.name, 'PCAP Cogullada.pdf');
+    const cogProject = await post('/api/projects/from-secop', {
+      process:{source:'placsp', id:cogId, title:licitRows[2].titulo}, documentIds:[pliego.id],
+    }, cookie);
+    assert.equal(cogProject.status, 201);
+    const {project: cog} = await cogProject.json();
+    const importedCog = await post('/api/projects/' + cog.id + '/secop/documents/' + pliego.id + '/import', {}, cookie);
+    assert.equal(importedCog.status, 201, await importedCog.clone().text());
+    const {file:cogFile} = await importedCog.json();
+    const downloaded = await req('/api/projects/' + cog.id + '/files/' + cogFile.id, {headers:{cookie}});
+    assert.equal(downloaded.status, 200);
+    assert.match(await downloaded.text(), /^%PDF-/);
+    assert.equal(atomRequests, priorAtomRequests);
+    useLicit = false;
+    boePortalStatus = null;
+    const fallbackSearch = await post('/api/secop/search', {dataset:'placsp',keyword:'inundaciones',openOnly:true,fresh:true}, cookie);
+    const fallbackItems = (await fallbackSearch.json()).data.items;
+    assert.ok(fallbackItems.some(item=>item.reference==='QA-BOE' && item.deadline==='2099-01-02T14:00:00'));
+    boePortalStatus = 'Anulada';
+    const closedSearch = await post('/api/secop/search', {dataset:'placsp',keyword:'inundaciones',openOnly:true,fresh:true}, cookie);
+    assert.ok(!(await closedSearch.json()).data.items.some(item=>item.reference==='QA-BOE'));
+    await db.prepare("DELETE FROM placsp_tenders WHERE id LIKE 'boe:BOE-B-2099-%'").run();
     await db.prepare('DELETE FROM placsp_tenders WHERE id = ?').bind('pscp:qa-flood').run();
 
     const searchRes = await post('/api/secop/search', {
@@ -260,6 +389,16 @@ test('web-api sincroniza PLACSP en D1, busca por CPV/territorio e importa pliego
     const importedFile = (await importRes.json()).file;
     assert.equal(importedFile.name, 'PCAP-2026.pdf');
     assert.equal(importedFile.contentType, 'application/pdf');
+
+    const aliasId = 'licit:00000000-0000-0000-0000-000000000999';
+    await db.prepare('INSERT INTO placsp_tenders (id, title, url, synced_at) VALUES (?, ?, ?, ?)')
+      .bind(aliasId, tender.title, 'https://contrataciondelsectorpublico.gob.es/wps/poc?idEvl=ABC123&uri=deeplink:detalle_licitacion', Date.now()).run();
+    const duplicate = await post('/api/projects/from-secop', {
+      process:{...tender,id:aliasId,url:'https://contrataciondelestado.es/wps/poc?idEvl=untrusted'},
+    }, cookie);
+    assert.equal(duplicate.status, 409);
+    assert.deepEqual(await duplicate.json(), {error:'already_saved', projectId:project.id});
+
   } finally {
     await worker?.dispose();
     await rm(build, { recursive: true, force: true });
