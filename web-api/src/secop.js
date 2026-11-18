@@ -501,7 +501,7 @@ export async function searchSecop(request, env, ownerId) {
   }
   const key = 'search:' + await searchCacheHash([ownerId,params]);
   const result = await cached(env,key,60*60*1000,() => service(input.language).searchProcesses(params),input.fresh === true);
-  return Response.json(result, { status: result.success ? 200 : 502 });
+  return Response.json(result, { status: result.success ? 200 : result.error === 'secop_source_timeout' ? 504 : 502 });
 }
 export async function secopDetail(request, env) {
   if (request.method !== 'GET') return new Response('Method not allowed',{status:405});

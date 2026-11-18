@@ -277,7 +277,7 @@ function createSecopService({ configStore, cacheDirectory } = {}) {
     } catch (cause) {
       const timedOut = cause?.name === 'TimeoutError' || cause?.cause?.code === 'UND_ERR_CONNECT_TIMEOUT';
       const message = timedOut ? (locale() === 'en' ? 'The data source took too long to respond. Retry the request.' : 'La fuente de datos tardó demasiado en responder. Reintenta la consulta.') : networkErrorMessage();
-      throw Object.assign(new Error(message, { cause }), { transient: true });
+      throw Object.assign(new Error(message, { cause }), { transient: true, timedOut });
     }
     if (!response.ok) {
       throw Object.assign(new Error(pickLocaleMessage(
@@ -285,7 +285,7 @@ function createSecopService({ configStore, cacheDirectory } = {}) {
         `SECOP 数据请求失败：HTTP ${response.status}`,
         `Error al consultar datos SECOP: HTTP ${response.status}`,
         `SECOP data request failed: HTTP ${response.status}`,
-      )), { status: response.status, transient: [502, 503, 504].includes(response.status) });
+      )), { status: response.status, timedOut: response.status === 504, transient: [502, 503, 504].includes(response.status) });
     }
     try {
       const data = await response.json();
@@ -341,10 +341,14 @@ function createSecopService({ configStore, cacheDirectory } = {}) {
         }
       } else whereParts.push(orLikeClause([columns[key]], String(value).trim()));
     }
+    const sortField = columns[searchParams.sortBy] || config.orderField;
+    const sortDirection = searchParams.sortDirection === 'asc' ? 'ASC' : 'DESC';
+    // Socrata's compound signing-date sort can time out on the contracts dataset.
+    const sortBySigningDate = config === DATASETS.contratos && sortField === config.orderField;
     const full = {
       $limit: limit + 1,
       $offset: offset,
-      $order: `${columns[searchParams.sortBy] || config.orderField} ${searchParams.sortDirection === 'asc' ? 'ASC' : 'DESC'}, ${config.idField} ASC`,
+      $order: sortBySigningDate ? `${sortField} ${sortDirection}` : `${sortField} ${sortDirection}, ${config.idField} ASC`,
     };
     if (searchParams.keyword) full.$q = searchParams.keyword;
     const where = whereParts.filter(Boolean).join(' and ');
@@ -409,6 +413,11 @@ function createSecopService({ configStore, cacheDirectory } = {}) {
         message: items.length === 0 ? emptyResultMessage() : 'ok',
       };
     } catch (error) {
+      if (error?.timedOut) return {
+        success: false,
+        error: 'secop_source_timeout',
+        message: locale() === 'en' ? 'SECOP took too long to respond. Retry the search.' : 'SECOP tardó demasiado en responder. Vuelve a intentar la búsqueda.',
+      };
       return { success: false, message: error?.message || networkErrorMessage() };
     }
   }
