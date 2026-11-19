@@ -1,3 +1,4 @@
+import {deduplicateSecopDocuments, secopFileUrl} from './secop-document-dedup.js';
 import {fetchPlacspPortalDocuments, placspDocumentHeaders} from './placsp-portal.js';
 import {getLicitTender, isLicitTenderId, searchLicit} from './licit.js';
 import {upsertPlacspEntries} from './placsp-store.js';
@@ -117,7 +118,7 @@ export async function secopDocuments(request, env, ownerId, projectId, documentI
   if (!documentId && request.method === 'GET') {
     const rawOffset=new URL(request.url).searchParams.get('offset') || '0';
     if (!/^\d+$/.test(rawOffset) || Number(rawOffset)>5000) return Response.json({error:'invalid_offset'},{status:400});
-    const listing = await api.getProcessDocuments(process.portfolioId,{offset:Number(rawOffset)});
+    const listing = await secopDocumentPage(env,api,process.portfolioId,Number(rawOffset));
     if (!listing.success) return Response.json({ error: 'secop_unavailable' }, { status: 502 });
     const saved = await env.DB.prepare('SELECT document_id AS id FROM project_secop_files WHERE project_id = ? UNION SELECT document_id AS id FROM secop_zip_files WHERE project_id = ?').bind(projectId,projectId).all();
     const jobs = await env.DB.prepare("SELECT id,state,result_json,json_extract(payload_json,'$.documentId') AS document_id FROM jobs WHERE project_id=? AND owner_id=? AND kind='secop.import-zip' ORDER BY created_at DESC,rowid DESC").bind(projectId,ownerId).all();
@@ -143,8 +144,7 @@ export async function secopDocuments(request, env, ownerId, projectId, documentI
   }
   if (!fileTypes[doc.extension]) return Response.json({ error: 'unsupported_document' }, { status: 400 });
   if (doc.size > maxFileBytes) return Response.json({ error: 'file_too_large' }, { status: 413 });
-  const url = new URL('https://community.secop.gov.co/Public/Archive/RetrieveFile/Index');
-  url.searchParams.set('DocumentId', documentId); url.searchParams.set('InCommunity', 'False'); url.searchParams.set('InPaymentGateway', 'False'); url.searchParams.set('DocUniqueIdentifier', '');
+  const url = secopFileUrl(documentId);
   const fallbackToRunner = async () => {
     if (!await hasOnlineRunner(env, ownerId)) return Response.json({ error: 'secop_captcha_required', officialUrl: url.toString() }, { status: 502 });
     const queued = await enqueueSecopRunnerJob(env, ownerId, projectId, process.portfolioId, doc, true);
@@ -515,6 +515,34 @@ export async function secopDetail(request, env) {
   const result = await cached(env,key,5*60*1000,()=>service(url.searchParams.get('language')).getProcessDetail(id,source));
   return Response.json(result,{status:result.success?200:502});
 }
+async function secopDocumentPage(env, api, portfolioId, offset) {
+  // Build the order once, so a slow annual feed cannot shift offsets between pages.
+  const load = async () => {
+    const result = await api.getProcessDocuments(portfolioId,{catalog:true});
+    if (!result.success) return result;
+    const items = await deduplicateSecopDocuments(result.data.items);
+    return {...result,data:{items:items.slice(0,5100),partial:result.data.partial}};
+  };
+  const key = `secop-document-snapshot:v1:${portfolioId}`;
+  const now = Date.now();
+  const row = await env.DB.prepare('SELECT response_json FROM secop_search_cache WHERE cache_key=? AND expires_at>?').bind(key,now).first();
+  let result = row ? JSON.parse(row.response_json) : await load();
+  if (!row && result.success) {
+    const json = JSON.stringify(result);
+    if (new TextEncoder().encode(json).byteLength<900000) {
+      const saved = await env.DB.prepare(`INSERT INTO secop_search_cache(cache_key,response_json,expires_at) VALUES(?,?,?)
+        ON CONFLICT(cache_key) DO UPDATE SET response_json=excluded.response_json,expires_at=excluded.expires_at WHERE expires_at<=?
+        RETURNING response_json`).bind(key,json,now+5*60*1000,now).first();
+      if (!saved) {
+        const concurrent = await env.DB.prepare('SELECT response_json FROM secop_search_cache WHERE cache_key=?').bind(key).first();
+        if (concurrent) result=JSON.parse(concurrent.response_json);
+      }
+    }
+  }
+  if (!result.success) return result;
+  return {...result,data:{...result.data,items:result.data.items.slice(offset,offset+100),truncated:result.data.items.length>offset+100}};
+}
+
 export async function secopDocumentCatalog(request, env) {
   if (request.method !== 'GET') return new Response('Method not allowed',{status:405});
   const url = new URL(request.url), source = url.searchParams.get('source'), id = url.searchParams.get('id') || '';
@@ -528,7 +556,7 @@ export async function secopDocumentCatalog(request, env) {
   const portfolioId = url.searchParams.get('portfolioId') || '', rawOffset = url.searchParams.get('offset') || '0';
   if (!/^CO1\.BDOS\.\d+$/.test(portfolioId) || !/^\d+$/.test(rawOffset) || Number(rawOffset)>5000) return Response.json({error:'invalid_portfolio'},{status:400});
   const offset=Number(rawOffset);
-  const result=await cached(env,`documents:${portfolioId}:${offset}`,5*60*1000,()=>service(url.searchParams.get('language')).getProcessDocuments(portfolioId,{offset}));
+  const result=await secopDocumentPage(env,service(url.searchParams.get('language')),portfolioId,offset);
   if (!result.success) return Response.json(result,{status:502});
   return Response.json({...result,data:{...result.data,items:result.data.items.map(({url: _url,...item})=>item)}});
 }

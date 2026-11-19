@@ -575,16 +575,17 @@ function createSecopService({ configStore, cacheDirectory } = {}) {
     const ids = Array.isArray(options.ids) ? [...new Set(options.ids.map(String))] : null;
     if (ids && (!ids.length || ids.length > 20 || ids.some(value => !/^\d+$/.test(value)))) return { success: false, message: 'Identificadores de documentos no válidos' };
     const offset = Math.max(0, Math.floor(Number(options.offset) || 0));
+    const catalog = options.catalog === true && !ids;
     if (offset > 5000) return { success: false, message: 'Se alcanzó el límite de consulta; verifica el expediente completo en SECOP.' };
     try {
       const where = `proceso='${id}'${ids ? ` AND id_documento IN (${ids.join(',')})` : ''}`;
-      const settled = await Promise.allSettled(SECOP_II_DOCUMENTS_URLS.map(url => fetchRows(url, { $where: where, $limit: ids ? ids.length : offset + 101, $order: 'fecha_carga DESC, id_documento DESC' }, REQUEST_TIMEOUT_MS, options.fresh ? 0 : RESPONSE_CACHE_TTL_MS)));
+      const settled = await Promise.allSettled(SECOP_II_DOCUMENTS_URLS.map(url => fetchRows(url, { $where: where, $limit: ids ? ids.length : catalog ? 5101 : offset + 101, $order: 'fecha_carga DESC, id_documento DESC' }, REQUEST_TIMEOUT_MS, options.fresh ? 0 : RESPONSE_CACHE_TTL_MS)));
       const available = settled.filter(result => result.status === 'fulfilled');
       if (!available.length) throw new Error(networkErrorMessage());
       const rows = available.flatMap(result => result.value);
       const unique = [...new Map(rows.map(row => [firstText(row, ['id_documento']), row])).values()]
         .sort((a, b) => firstText(b, ['fecha_carga']).localeCompare(firstText(a, ['fecha_carga'])) || firstText(b, ['id_documento']).localeCompare(firstText(a, ['id_documento']), undefined, { numeric: true }));
-      const page = ids ? unique : unique.slice(offset, offset + 100);
+      const page = ids || catalog ? unique : unique.slice(offset, offset + 100);
       const items = page.map(row => ({
         id: firstText(row, ['id_documento']),
         name: firstText(row, ['nombre_archivo']) || 'Documento',

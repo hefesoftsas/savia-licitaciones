@@ -17,10 +17,17 @@ test('busca datos públicos y guarda una oportunidad aislada por usuario', async
   const build = await mkdtemp(join(tmpdir(), 'savia-secop-test-')); let worker; const calls = []; let mode = 'valid';
   try {
     execFileSync('pnpm', ['exec', 'wrangler', 'deploy', '--dry-run', '--outdir', build], { cwd: root, stdio: 'pipe', env: { ...process.env, CLOUDFLARE_SEND_METRICS: 'false' } });
-    const outboundService = async request => { const url = new URL(request.url); calls.push(url); if (url.hostname === 'community.secop.gov.co') { assert.equal(url.pathname, '/Public/Archive/RetrieveFile/Index'); assert.match(url.searchParams.get('DocumentId'), /^4[23]$/); if (mode === 'large') return new Response('x', { headers: { 'content-length': String(51 * 1024 * 1024) } }); if(mode==='stream'){let sent=0;return new Response(new ReadableStream({pull(controller){if(sent===6){controller.close();return;}const chunk=new Uint8Array(1024*1024);if(sent++===0)chunk.set(new TextEncoder().encode('%PDF-1.7'));controller.enqueue(chunk);}}),{headers:{'content-type':'application/pdf'}});} if (mode === 'html') return new Response('<html>not pdf</html>', { headers: { 'content-type': 'text/html' } }); if (mode === 'invalid') return new Response('not a pdf', { headers: { 'content-type': 'application/pdf' } }); if (mode === 'redirect') return new Response(null, { status: 302, headers: { location: 'https://other.example/file' } }); return new Response('%PDF-1.4 fixture', { headers: { 'content-type': 'application/pdf' } }); } assert.equal(url.hostname, 'www.datos.gov.co'); if (url.pathname === '/resource/jbjy-vk9h.json') {
+    const outboundService = async request => { const url = new URL(request.url); calls.push(url); if (url.hostname === 'community.secop.gov.co') { assert.equal(url.pathname, '/Public/Archive/RetrieveFile/Index'); if (['9000','9101'].includes(url.searchParams.get('DocumentId'))) return new Response('%PDF-same',{headers:{'content-type':'application/pdf'}});
+    assert.match(url.searchParams.get('DocumentId'), /^4[23]$/); if (mode === 'large') return new Response('x', { headers: { 'content-length': String(51 * 1024 * 1024) } }); if(mode==='stream'){let sent=0;return new Response(new ReadableStream({pull(controller){if(sent===6){controller.close();return;}const chunk=new Uint8Array(1024*1024);if(sent++===0)chunk.set(new TextEncoder().encode('%PDF-1.7'));controller.enqueue(chunk);}}),{headers:{'content-type':'application/pdf'}});} if (mode === 'html') return new Response('<html>not pdf</html>', { headers: { 'content-type': 'text/html' } }); if (mode === 'invalid') return new Response('not a pdf', { headers: { 'content-type': 'application/pdf' } }); if (mode === 'redirect') return new Response(null, { status: 302, headers: { location: 'https://other.example/file' } }); return new Response('%PDF-1.4 fixture', { headers: { 'content-type': 'application/pdf' } }); } assert.equal(url.hostname, 'www.datos.gov.co'); if (url.pathname === '/resource/jbjy-vk9h.json') {
       if (url.searchParams.get('$q') === 'consulta lenta') return new Response('timeout', { status: 504 });
       return Response.json([{ id_contrato: 'CO1.PCCNTR.1', proceso_de_compra:'CO1.BDOS.123', descripcion_del_proceso: 'Consultoría' }]);
-    } if (mode === 'partial' && url.pathname === '/resource/dmgg-8hin.json') return new Response('unavailable', { status: 503 }); if (url.pathname !== '/resource/p6dx-8zbt.json') return Response.json(url.searchParams.get('$where').includes('999') ? [] : [{ id_documento: mode === 'zip-list' || url.searchParams.get('$where').includes('(44)') ? '44' : url.searchParams.get('$where').includes('(43)') ? '43' : '42', nombre_archivo: 'pliego.pdf', extensi_n: mode === 'zip-list' || url.searchParams.get('$where').includes('(44)') ? 'zip' : 'pdf', tamanno_archivo: '15', fecha_carga: '2026-01-01' }]); return Response.json([{ id_del_proceso: 'CO1.PRO.123', id_del_portafolio: 'CO1.BDOS.123', entidad: 'Entidad', nombre_del_procedimiento: 'Compra', precio_base: '123', referencia_del_proceso: 'REF-1', departamento_entidad: 'Bogotá', urlproceso: { url: 'https://community.secop.gov.co/Public/Tendering/OpportunityDetail/Index?noticeUID=CO1.NTC.123' } }]); };
+    }
+    if (url.searchParams.get('$where') === "proceso='CO1.BDOS.9999'") {
+      return Response.json(url.pathname.endsWith('/f8va-cf4m.json')
+        ? Array.from({length:102},(_,index)=>({id_documento:String(9101-index),nombre_archivo:index===0||index===101?'Acta.pdf':`Documento ${index}.pdf`,extensi_n:'pdf',tamanno_archivo:index===0||index===101?9:100+index,fecha_carga:'2026-01-01'}))
+        : []);
+    }
+    if (mode === 'partial' && url.pathname === '/resource/dmgg-8hin.json') return new Response('unavailable', { status: 503 }); if (url.pathname !== '/resource/p6dx-8zbt.json') return Response.json(url.searchParams.get('$where').includes('999') ? [] : [{ id_documento: mode === 'zip-list' || url.searchParams.get('$where').includes('(44)') ? '44' : url.searchParams.get('$where').includes('(43)') ? '43' : '42', nombre_archivo: 'pliego.pdf', extensi_n: mode === 'zip-list' || url.searchParams.get('$where').includes('(44)') ? 'zip' : 'pdf', tamanno_archivo: '15', fecha_carga: '2026-01-01' }]); return Response.json([{ id_del_proceso: 'CO1.PRO.123', id_del_portafolio: 'CO1.BDOS.123', entidad: 'Entidad', nombre_del_procedimiento: 'Compra', precio_base: '123', referencia_del_proceso: 'REF-1', departamento_entidad: 'Bogotá', urlproceso: { url: 'https://community.secop.gov.co/Public/Tendering/OpportunityDetail/Index?noticeUID=CO1.NTC.123' } }]); };
     const options = convertV4MiniflareOptions({ modules: true, script: await readFile(join(build, 'index.js'), 'utf8'), compatibilityDate: '2026-10-30', compatibilityFlags: ['nodejs_compat'], d1Databases: { DB: 'secop-test' }, r2Buckets: ['FILES'], bindings: {AUTH_ALLOW_REGISTRATION:'true', BETTER_AUTH_SECRET: 'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz', BETTER_AUTH_URL: 'http://localhost' }, outboundService });
     worker = new Miniflare(options);
     const db = await worker.getD1Database('DB');
@@ -81,6 +88,17 @@ test('busca datos públicos y guarda una oportunidad aislada por usuario', async
     const catalog=await req('/api/secop/documents?portfolioId=CO1.BDOS.123&offset=0',{headers:{cookie:alice}});
     assert.equal(catalog.status,200,await catalog.clone().text()); const catalogData=await catalog.json();assert.equal(catalogData.data.items[0].id,'42');assert.equal('url' in catalogData.data.items[0],false);
     assert.equal((await req('/api/secop/documents?portfolioId=invalid',{headers:{cookie:alice}})).status,400);
+    const dedupPage=offset=>req(`/api/secop/documents?portfolioId=CO1.BDOS.9999&offset=${offset}`,{headers:{cookie:alice}})
+      .then(async response=>{assert.equal(response.status,200,await response.clone().text());return (await response.json()).data;});
+    const firstPage=await dedupPage(0);
+    const upstreamCalls=calls.length;
+    const secondPage=await dedupPage(100);
+    assert.equal(calls.length,upstreamCalls,'the second page uses the same catalog snapshot');
+    assert.equal(firstPage.items.length,100);
+    assert.equal(firstPage.truncated,true);
+    assert.deepEqual(secondPage.items.map(item=>item.id),['9001']);
+    assert.equal(secondPage.truncated,false);
+    assert.deepEqual([...firstPage.items,...secondPage.items].filter(item=>item.name==='Acta.pdf').map(item=>item.id),['9101']);
     const created = await post('/api/projects/from-secop', { process: result.data.items[0] }, alice);
     assert.equal(created.status, 201, await created.clone().text()); const project = (await created.json()).project;
     const saved = await req(`/api/projects/${project.id}/secop`, { headers: { cookie: alice } });
@@ -113,6 +131,7 @@ test('busca datos públicos y guarda una oportunidad aislada por usuario', async
     assert.equal((await req(`/api/projects/${project.id}/jobs`,{method:'POST',headers:{origin:'http://localhost',cookie:alice,'content-type':'application/json','idempotency-key':'forged'},body:JSON.stringify({kind:'secop.import-zip',payload:{documentId:'999'}})})).status,400);
     assert.equal((await post(`/api/projects/${project.id}/jobs/${zipJobs[0].job.id}/cancel`,{},alice)).status,200);
     const retry=await post(`${documentsPath}/44/import`,{},alice);assert.equal(retry.status,201);assert.notEqual((await retry.json()).job.id,zipJobs[0].job.id);
+    await db.prepare("DELETE FROM secop_search_cache WHERE cache_key LIKE 'secop-document-snapshot:%'").run();
     mode='zip-list';const withJob=await (await req(documentsPath,{headers:{cookie:alice}})).json();assert.equal(withJob.items[0].zipJob.state,'queued');assert.equal(withJob.items[0].imported,false);
     const pairing=await(await post('/api/runner-pairings',{},alice)).json(),runner=await(await post('/api/runners/pair',{code:pairing.code,name:'Equipo'})).json();
     const zip=new AdmZip();zip.addFile('pliego.pdf',Buffer.from('%PDF-contenido'));zip.addFile('anexo.pdf',Buffer.from('%PDF-anexo'));zip.addFile('notas.txt',Buffer.from('ignorar'));
@@ -130,6 +149,7 @@ test('busca datos públicos y guarda una oportunidad aislada por usuario', async
     const owner=(await db.prepare('SELECT owner_id FROM projects WHERE id=?').bind(project.id).first()).owner_id;
     for(const [id,state] of [['zz-older','cancelled'],['aa-newer','failed']]) await db.prepare("INSERT INTO jobs(id,project_id,owner_id,kind,client_request_id,payload_json,state,created_at,updated_at) VALUES(?,?,?,'secop.import-zip',?,'{\"documentId\":\"44\"}',?,'9999-01-01','9999-01-01')").bind(id,project.id,owner,id,state).run();
     const sameTime=await (await req(documentsPath,{headers:{cookie:alice}})).json();assert.equal(sameTime.items[0].zipJob.id,'aa-newer');
+    await db.prepare("DELETE FROM secop_search_cache WHERE cache_key LIKE 'secop-document-snapshot:%'").run();
     mode = 'partial'; const partialListing = await req(documentsPath, { headers: { cookie: alice } }); assert.equal((await partialListing.json()).partial, true);
     const downloaded = await req(`/api/projects/${project.id}/files/${files[0].id}`, { headers: { cookie: alice } }); assert.equal(await downloaded.text(), '%PDF-1.4 fixture');
     mode='valid';
