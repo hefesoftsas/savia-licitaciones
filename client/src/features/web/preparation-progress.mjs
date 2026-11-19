@@ -5,9 +5,10 @@ export function preparationProgress({selectedFiles=[],analyses=[],outline={},fac
  const analysisDone=['project-overview','technical-score','response-requirements'].every(category=>analyses.some(item=>item.category===category&&item.current));
  const outlineDone=analysisDone&&!!plan.outline?.length;
  const factsDone=outlineDone&&facts.current===true&&facts.revision>0&&!facts.importReviewPending&&!(facts.groups||[]).some(group=>hasPendingFacts(group.title+' '+group.content));
- const reviewedWord=jobs.some(job=>job.kind==='technical-plan.export-word'&&job.state==='succeeded'&&job.artifactState==='stored'&&job.wordRevision>0&&!job.sourcesStale&&job.payload?.planVersion===plan.version);
+ const currentWords=jobs.filter(job=>job.kind==='technical-plan.export-word'&&job.state==='succeeded'&&job.artifactState==='stored'&&!job.sourcesStale&&job.payload?.planVersion===plan.version&&(!job.payload?.draftBatchId||job.wordRevision>0));
+ const reviewedWord=currentWords.some(job=>job.wordRevision>0);
  const draftDone=reviewedWord||factsDone&&nodes.length>0&&nodes.every(node=>typeof node.content==='string'&&node.content.trim()&&!hasPendingFacts(node.content));
- const exportDone=draftDone&&jobs.some(job=>job.kind==='technical-plan.export-word'&&job.state==='succeeded'&&job.artifactState==='stored'&&job.payload?.planVersion===plan.version);
+ const exportDone=draftDone&&currentWords.length>0;
  const complete=[selectedFiles.length>0,analysisDone,outlineDone,factsDone,draftDone,exportDone];
  const stage=kind=>kind==='technical-plan.analyze'?1:['technical-plan.generate-roots','technical-plan.expand-outline'].includes(kind)?2:kind.includes('facts')?3:kind==='technical-plan.export-word'||kind==='technical-plan.extract-template'?5:kind.startsWith('technical-plan.')?4:-1;
  const activeSteps=jobs.filter(active).map(job=>stage(job.kind)).filter(index=>index>=0);
@@ -31,4 +32,25 @@ export function preparationBlocker(step, snapshot, selectedFiles = []) {
  if (!nodes.length) return 'outline';
  if (nodes.some(node => !node.content?.trim())) return 'drafts';
  return 'pending-values';
+}
+
+// Polls can share a pending read. A write needs a read started after it completed.
+export function createPreparationRefresh(read) {
+ let pending = false;
+ let invalidated = false;
+ return async function refresh(afterWrite = false) {
+  if (pending) {
+   invalidated ||= afterWrite;
+   return;
+  }
+  pending = true;
+  try {
+   do {
+    invalidated = false;
+    await read(() => !invalidated);
+   } while (invalidated);
+  } finally {
+   pending = false;
+  }
+ };
 }

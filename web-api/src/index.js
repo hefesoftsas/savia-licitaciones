@@ -1,3 +1,4 @@
+import { automaticPreparation, advanceOwnerPreparation } from './automatic-preparation.js';
 import {wordFormatPreview} from './word-format-preview.js';
 import {agendaLayout} from './agenda-layout.js';
 import {ensureUserTenant} from './tenant-scope.js';
@@ -691,6 +692,12 @@ const apiWorker = {
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
       return privateResponse(await userRequirementSuggestions(request, env, session.workspaceId, suggestionRoute[1], suggestionRoute[2]));
     }
+    const preparation = /^\/api\/projects\/([^/]+)\/automatic-preparation$/.exec(url.pathname);
+    if (preparation) {
+      const session = await getScopedSession();
+      if (!session) return privateResponse(Response.json({error:'unauthorized'},{status:401}));
+      return privateResponse(await automaticPreparation(request,env,session.workspaceId,preparation[1]));
+    }
     const facts = /^\/api\/projects\/([^/]+)\/technical-facts(?:\/(apply|review-import|attempts))?$/.exec(url.pathname);
     if (facts) {
       const session = await getScopedSession();
@@ -973,6 +980,9 @@ const apiWorker = {
     if (url.pathname.startsWith('/api/runner/jobs/')) {
       const runner = await authenticateRunner(request, env);
       if (!runner) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
+      if (url.pathname === '/api/runner/jobs/claim' && request.method === 'POST') {
+        await advanceOwnerPreparation(env,runner.ownerId).catch(()=>console.warn('Could not advance automatic preparation'));
+      }
       return privateResponse(await handleAgentJobs(request, env, runner));
     }
     const chatHistory = /^\/api\/projects\/([^/]+)\/chat-history$/.exec(url.pathname);

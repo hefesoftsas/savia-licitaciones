@@ -30,3 +30,10 @@ test('continue requires accepted analyses and an applied outline',()=>{
  assert.equal(preparationBlocker(2,{analyses,outline:{selection:{current:true}}},['f']),'outline');
  assert.equal(preparationBlocker(2,{analyses,plan:{outline:[{content:''}]}},['f']),null);
 });
+
+test('a stale Word cannot complete delivery for an otherwise ready plan',()=>{
+ const base={selectedFiles:['f'],analyses,plan:{version:3,outline:[{content:'saved'}]},facts:{current:true,revision:1}};
+ const word={kind:'technical-plan.export-word',state:'succeeded',artifactState:'stored',wordRevision:1,sourcesStale:true,payload:{planVersion:3,draftBatchId:'batch'}};
+ assert.equal(progress({...base,jobs:[word]}).states[5],'current');
+ assert.equal(progress({...base,jobs:[{...word,wordRevision:0,sourcesStale:false}]}).states[5],'current');
+});

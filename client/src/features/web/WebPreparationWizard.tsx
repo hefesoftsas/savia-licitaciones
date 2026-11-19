@@ -1,6 +1,7 @@
+import { WebAutomaticPreparation } from './WebAutomaticPreparation';
 import {useWebRouteDetail} from './useWebRouteDetail';
 import WebWordDocument from './WebWordDocument';
-import {preparationProgress,preparationBlocker} from './preparation-progress.mjs';
+import {createPreparationRefresh,preparationProgress,preparationBlocker} from './preparation-progress.mjs';
 import {request} from './api.mjs';
 import WebJobQuestions, {type Question} from './WebJobQuestions';
 import {WebPreparationHelp} from './WebPreparationHelp';
@@ -12,7 +13,7 @@ import {Input} from '@/shared/ui/primitives/input';
 
 const WordCanvas = lazy(() => import('./WebWordCanvas'));
 type File={id:string;name:string;deleting?:number|boolean};
-type Props={projectId:string;language:'es'|'en';files:File[];selectedFiles:string[];onFiles:(ids:string[])=>void;credentials:{id:string;provider:string;model:string}[];credential:string;onCredential:(id:string)=>void;onDocuments:()=>void;analysis:ReactNode;outline:ReactNode;facts:ReactNode;plan:ReactNode;enabled:boolean;deliveryRequest:number;routeStep:number|null;onRouteStep:(step:number)=>void;jobs:{kind:string;state:string;artifactState?:string;payload:unknown}[]};
+type Props={automaticConsent?:boolean;automaticDirty?:boolean;onAutomaticPlanChange?:()=>void;projectId:string;language:'es'|'en';files:File[];selectedFiles:string[];onFiles:(ids:string[])=>void;credentials:{id:string;provider:string;model:string}[];credential:string;onCredential:(id:string)=>void;onDocuments:()=>void;analysis:ReactNode;outline:ReactNode;facts:ReactNode;plan:ReactNode;enabled:boolean;deliveryRequest:number;routeStep:number|null;onRouteStep:(step:number)=>void;jobs:{kind:string;state:string;artifactState?:string;payload:unknown}[]};
 function SourceReader({projectId,file,en}:{projectId:string;file:File|undefined;en:boolean}){
  const [source,setSource]=useState<{bytes?:Uint8Array;text?:string}>({}),[loading,setLoading]=useState(false),[failed,setFailed]=useState(false),[retry,setRetry]=useState(0);
  const extension=file?.name.split('.').pop()?.toLowerCase(),supported=['pdf','txt','md','markdown','docx'].includes(extension||'');
@@ -20,7 +21,7 @@ function SourceReader({projectId,file,en}:{projectId:string;file:File|undefined;
  if(!file)return <p className="web-wizard-reader-empty">{en?'Choose a document to read it here.':'Elige un documento para leerlo aquí.'}</p>;
  return <div className="web-wizard-reader-body">{loading&&<p role="status">{en?'Opening document…':'Abriendo documento…'}</p>}{failed&&<div role="alert"><p>{en?'Could not open this document.':'No se pudo abrir este documento.'}</p><Button icon={RefreshCw} iconOnly variant="outline" onClick={()=>setRetry(value=>value+1)}>{en?'Retry':'Reintentar'}</Button></div>}{!supported&&<p>{en?'Preview is not available for this format. Download it to read it.':'Este formato no tiene vista previa. Descárgalo para leerlo.'}</p>}{source.bytes&&extension==='pdf'&&<RupPdfPreview key={file.id} bytes={source.bytes} en={en}/>}{source.bytes&&extension==='docx'&&<div className="web-source-word"><WebWordDocument key={file.id} language={en?'en':'es'} name={file.name} url={`/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(file.id)}`} label={en?'View Word document':'Ver documento Word'}/><div className="web-source-word-preview"><Suspense fallback={<p>{en?'Opening Word…':'Abriendo Word…'}</p>}><WordCanvas bytes={source.bytes} name={file.name} language={en?'en':'es'}/></Suspense></div></div>}{source.text!==undefined&&<><small>{en?'Text preview; original formatting is available in the download.':'Vista de texto; el formato original se conserva en la descarga.'}</small><pre>{source.text|| (en?'No readable text found.':'No se encontró texto legible.')}</pre></>}{(!supported||failed)&&<a href={`/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(file.id)}`}>{en?'Download document':'Descargar documento'}</a>}</div>;
 }
-export function WebPreparationWizard({projectId,language,files,selectedFiles,onFiles,credentials,credential,onCredential,onDocuments,analysis,outline,facts,plan,enabled,deliveryRequest,routeStep,onRouteStep,jobs}:Props){
+export function WebPreparationWizard({automaticConsent=false,automaticDirty=false,onAutomaticPlanChange,projectId,language,files,selectedFiles,onFiles,credentials,credential,onCredential,onDocuments,analysis,outline,facts,plan,enabled,deliveryRequest,routeStep,onRouteStep,jobs}:Props){
  const en=language==='en',[step,setStep]=useState(routeStep??0),[preview,setPreview]=useState(''),[sourceByStep,setSourceByStep]=useState<Record<number,boolean>>({}),[query,setQuery]=useState('');const root=useRef<HTMLDivElement>(null),lastDeliveryRequest=useRef(deliveryRequest);
  const available=files.filter(file=>!file.deleting&&!/\.zip$/i.test(file.name)),file=available.find(file=>file.id===preview)||available.find(file=>selectedFiles.includes(file.id))||available[0];
  const [linkedExpanded,linkExpanded]=useWebRouteDetail('expanded',['yes','no'],'no');
@@ -34,8 +35,44 @@ export function WebPreparationWizard({projectId,language,files,selectedFiles,onF
  const [pendingQuestions,setPendingQuestions]=useState<Question[]>([]);
  const [snapshot,setSnapshot]=useState<any>(null),[progressError,setProgressError]=useState(false),[resumeKey,setResumeKey]=useState(0);
  const touched=useRef(false),liveInputs=useRef({selectedFiles,jobs});liveInputs.current={selectedFiles,jobs};
- useEffect(()=>{if(!enabled)return;let live=true,first=true,pending=false;touched.current=routeStep!==null;
- const load=async()=>{if(pending)return;pending=true;try{const [analysis,outline,facts,plan]=await Promise.all([request<any>(`/api/projects/${projectId}/technical-analyses`),request<any>(`/api/projects/${projectId}/technical-outline`),request<any>(`/api/projects/${projectId}/technical-facts`),request<any>(`/api/projects/${projectId}/technical-plan`)]);if(!live)return;const value={analyses:analysis.analyses,outline,facts,plan};setSnapshot(value);setProgressError(false);if(first&&!touched.current){setStep(preparationProgress({...value,...liveInputs.current}).resume);setResumeKey(value=>value+1);}first=false;}catch{if(live)setProgressError(true);}finally{pending=false;}};const changed=(event:Event)=>{if((event as CustomEvent).detail?.projectId===projectId)void load();};window.addEventListener('savia:preparation-changed',changed);void load();const timer=window.setInterval(()=>void load(),10000);return()=>{live=false;window.clearInterval(timer);window.removeEventListener('savia:preparation-changed',changed);};},[projectId,enabled]);
+ useEffect(()=>{
+  if(!enabled)return;
+  let live=true,first=true;
+  touched.current=routeStep!==null;
+  const load=createPreparationRefresh(async isCurrent=>{
+   if(!live)return;
+   try{
+    const [analysis,outline,facts,plan]=await Promise.all([
+     request<any>(`/api/projects/${projectId}/technical-analyses`),
+     request<any>(`/api/projects/${projectId}/technical-outline`),
+     request<any>(`/api/projects/${projectId}/technical-facts`),
+     request<any>(`/api/projects/${projectId}/technical-plan`),
+    ]);
+    if(!live||!isCurrent())return;
+    const value={analyses:analysis.analyses,outline,facts,plan};
+    setSnapshot(value);
+    setProgressError(false);
+    if(first&&!touched.current){
+     setStep(preparationProgress({...value,...liveInputs.current}).resume);
+     setResumeKey(value=>value+1);
+    }
+    first=false;
+   }catch{
+    if(live&&isCurrent())setProgressError(true);
+   }
+  });
+  const changed=(event:Event)=>{
+   if((event as CustomEvent).detail?.projectId===projectId)void load(true);
+  };
+  window.addEventListener('savia:preparation-changed',changed);
+  void load();
+  const timer=window.setInterval(()=>void load(),10000);
+  return()=>{
+   live=false;
+   window.clearInterval(timer);
+   window.removeEventListener('savia:preparation-changed',changed);
+  };
+ },[projectId,enabled]);
  useEffect(()=>{const reviewed=(event:Event)=>{if((event as CustomEvent).detail?.projectId===projectId){touched.current=true;setStep(5);onRouteStep(5);}};window.addEventListener('savia:word-reviewed',reviewed);return()=>window.removeEventListener('savia:word-reviewed',reviewed);},[projectId]);
  const progress=snapshot?preparationProgress({...snapshot,selectedFiles,jobs}):null;
  const chooseStep=(value:number)=>{touched.current=true;setStep(value);onRouteStep(value);};
@@ -61,6 +98,7 @@ export function WebPreparationWizard({projectId,language,files,selectedFiles,onF
   blockerText.analyses=missing.length?(en?`To continue, generate, review and accept: ${missing.join(', ')}.`:`Para continuar, genera, revisa y acepta: ${missing.join(', ')}.`):(running?(en?'The three analyses are accepted. Wait for the analysis in progress to finish.':'Los tres análisis están aceptados. Espera a que termine el análisis en curso.'):(en?'Checking the analyses…':'Comprobando los análisis…'));
  }
  const revealPending=()=>{
+  if(narrow&&showSource)setShowSource(false);
   if(blocker==='analyses'&&snapshot){
    const category=['project-overview','technical-score','response-requirements'].find(name=>!snapshot.analyses?.some((item:{category:string;current:boolean})=>item.category===name&&item.current));
    if(category)window.dispatchEvent(new CustomEvent('savia:guide-analysis',{detail:{projectId,category}}));
@@ -70,7 +108,6 @@ export function WebPreparationWizard({projectId,language,files,selectedFiles,onF
   if(step===4&&jobs.some(job=>job.kind==='technical-plan.generate-batch'&&['queued','running'].includes(job.state))){const activity=root.current?.querySelector<HTMLElement>('.web-wizard-batch .web-batch-job');activity?.scrollIntoView({block:'center'});setGuideMessage(en?'Wait for the runner to finish drafting the chapters.':'Espera a que el runner termine de redactar los capítulos.');return;}
   if(blocker==='outline'){if(step!==2)chooseStep(2);else window.dispatchEvent(new CustomEvent('savia:guide-outline',{detail:{projectId}}));return;}
   if(blocker==='facts'&&jobs.some(job=>job.kind==='technical-plan.generate-facts'&&['queued','running'].includes(job.state))){setGuideMessage(en?'Wait for the runner to finish preparing the facts.':'Espera a que el runner termine de preparar los datos.');return;}
-  if(narrow&&showSource)setShowSource(false);
   const findTarget=()=>{
    const scope=root.current?.querySelector<HTMLElement>('.web-wizard-step:not([hidden])');if(!scope)return null;
    if(step===4){const freshBatch=scope.querySelector<HTMLDetailsElement>('.web-batch-new');const hasWord=Array.from(scope.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')).some(button=>/abrir y editar word|open and edit word/i.test(button.textContent||'')&&button.getClientRects().length>0);if(freshBatch&&!hasWord)freshBatch.open=true;}
@@ -84,6 +121,9 @@ export function WebPreparationWizard({projectId,language,files,selectedFiles,onF
  };
  return <div className={`web-preparation-wizard${expandedWizard?' web-wizard-fullscreen':''}`} data-step={step} ref={root}>
   <nav className="web-wizard-steps" aria-label={en?'Bid preparation steps':'Pasos para preparar la oferta'}>{labels.map((label,index)=><button key={label} type="button" data-status={progress?.states[index]||'unknown'} aria-current={step===index?'step':undefined} title={progress?.states[index]==='complete'?(en?'Completed':'Completado'):progress?.states[index]==='running'?(index===step&&pendingQuestions.length?(en?'Waiting for your answer':'Esperando tu respuesta'):(en?'Runner working':'Runner trabajando')):progress?.states[index]==='current'?(en?'Next pending step':'Paso pendiente actual'):(en?'Pending':'Pendiente')} onClick={()=>chooseStep(index)}><span>{progress?.states[index]==='complete'?'✓':index+1}</span>{label}</button>)}</nav>
+  <WebAutomaticPreparation projectId={projectId} language={language} fileIds={selectedFiles} credentialId={credential}
+    consent={automaticConsent} dirty={automaticDirty} enabled={enabled} onStep={value=>{chooseStep(value);if(value>=3)onAutomaticPlanChange?.();
+      window.dispatchEvent(new CustomEvent('savia:preparation-changed',{detail:{projectId}}));}}/>
   {progressError&&<p role="status">{en?'Could not refresh progress. You can still navigate the steps.':'No se pudo actualizar el progreso. Puedes seguir navegando por los pasos.'}</p>}
   <div className="web-wizard-heading"><div><h3>{labels[step]}</h3><p>{descriptions[step]}</p></div><div className="web-wizard-heading-actions">{(expandedWizard||![1,2].includes(step))&&<Button icon={expandedWizard?Minimize2:Maximize2} iconOnly variant="ghost" onClick={()=>{const next=!expandedWizard;setExpandedWizard(next);linkExpanded(next?'yes':'no');}}>{expandedWizard?(en?'Exit expanded view':'Cerrar vista ampliada'):(en?'Expand workspace':'Ampliar espacio de trabajo')}</Button>}<WebPreparationHelp step={step} labels={labels} language={language} blocker={blocker ? blockerText[blocker] : undefined}/><Button icon={showSource?PanelLeftClose:PanelLeftOpen} iconOnly variant="ghost" aria-expanded={showSource} onClick={()=>setShowSource(value=>!value)}>{showSource?(en?'Hide tender document':'Ocultar pliego'):(en?'Show tender document':'Mostrar pliego')}</Button></div></div>
   {!credential&&<p role="status">{en?'Configure your account model to use AI.':'Configura el modelo de la cuenta para usar la IA.'} <Button icon={Settings} variant="link" onClick={()=>onCredential('')}>{en?'Settings':'Configuración'}</Button></p>}
