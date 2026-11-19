@@ -16,8 +16,50 @@ export function WebOpportunityDetail({item,language,saving,onClose,onSave,select
   const [process,setProcess]=useState(item),[loading,setLoading]=useState(true),[detailError,setDetailError]=useState(false);
   const [selectedIds,setSelectedIds]=useState<string[]>([]);
   const [docs,setDocs]=useState<Listing|null>(null),[docError,setDocError]=useState(false),[docLoading,setDocLoading]=useState(false),[offset,setOffset]=useState(0);
-  useEffect(()=>{let live=true;const load=async()=>{let effective=item;try{const data=await request<{data:SecopProcess}>(`/api/secop/detail?source=${encodeURIComponent(item.source)}&id=${encodeURIComponent(item.id)}&language=${language}`);if(!live)return;effective=data.data;setProcess(effective);}catch{if(live)setDetailError(true);}finally{if(live)setLoading(false);}if(!live || (effective.source!=='placsp' && !effective.portfolioId))return;setDocLoading(true);try{const docPath=effective.source==='placsp'?`/api/secop/documents?source=placsp&id=${encodeURIComponent(effective.id)}`:`/api/secop/documents?portfolioId=${encodeURIComponent(effective.portfolioId!)}`;const result=await request<{data:Listing}>(docPath);if(live){setDocs(result.data);if(selectDocumentsByDefault)setSelectedIds(selectLoadedDocuments(result.data.items));}}catch{if(live)setDocError(true);}finally{if(live)setDocLoading(false);}};void load();return()=>{live=false;};},[item.id,item.source,language]);
-  const loadMore=async()=>{if((process.source!=='placsp' && !process.portfolioId)||docLoading)return;setDocLoading(true);setDocError(false);try{const next=offset+100,docPath=process.source==='placsp'?`/api/secop/documents?source=placsp&id=${encodeURIComponent(process.id)}&offset=${next}`:`/api/secop/documents?portfolioId=${encodeURIComponent(process.portfolioId!)}&offset=${next}`,result=await request<{data:Listing}>(docPath);setDocs(current=>({items:Array.from(new Map([...(current?.items||[]),...result.data.items].map(doc=>[doc.id,doc])).values()),partial:!!current?.partial||result.data.partial,truncated:result.data.truncated}));setOffset(next);}catch{setDocError(true);}finally{setDocLoading(false);}};
+  const [retryDocs,setRetryDocs]=useState(0);
+  useEffect(()=>{
+    const controller=new AbortController();
+    setLoading(true);
+    setDetailError(false);
+    request<{data:SecopProcess}>(`/api/secop/detail?source=${encodeURIComponent(item.source)}&id=${encodeURIComponent(item.id)}&language=${language}`,{signal:controller.signal})
+      .then(({data})=>{if(!controller.signal.aborted)setProcess({...data,portfolioId:data.portfolioId||item.portfolioId});})
+      .catch(()=>{if(!controller.signal.aborted)setDetailError(true);})
+      .finally(()=>{if(!controller.signal.aborted)setLoading(false);});
+    return()=>controller.abort();
+  },[item.id,item.source,item.portfolioId,language]);
+  const documentPath=process.source==='placsp'
+    ? `/api/secop/documents?source=placsp&id=${encodeURIComponent(process.id)}`
+    : process.portfolioId ? `/api/secop/documents?portfolioId=${encodeURIComponent(process.portfolioId)}` : null;
+  useEffect(()=>{
+    if(!documentPath)return;
+    const controller=new AbortController();
+    setDocLoading(true);
+    setDocError(false);
+    setDocs(null);
+    setSelectedIds([]);
+    request<{data:Listing}>(documentPath,{signal:controller.signal})
+      .then(({data})=>{
+        if(controller.signal.aborted)return;
+        setDocs(data);
+        setOffset(0);
+        if(selectDocumentsByDefault)setSelectedIds(selectLoadedDocuments(data.items));
+      })
+      .catch(()=>{if(!controller.signal.aborted)setDocError(true);})
+      .finally(()=>{if(!controller.signal.aborted)setDocLoading(false);});
+    return()=>controller.abort();
+  },[documentPath,retryDocs,selectDocumentsByDefault]);
+  const loadMore=async()=>{
+    if(!documentPath||docLoading)return;
+    setDocLoading(true);
+    setDocError(false);
+    try{
+      const next=offset+100;
+      const {data}=await request<{data:Listing}>(`${documentPath}&offset=${next}`);
+      setDocs(current=>({items:Array.from(new Map([...(current?.items||[]),...data.items].map(doc=>[doc.id,doc])).values()),partial:!!current?.partial||data.partial,truncated:data.truncated}));
+      setOffset(next);
+    }catch{setDocError(true);}
+    finally{setDocLoading(false);}
+  };
   const date=(value?:string)=>formatDateValue(value,language,{country:process.country,source:process.source,timeZone:'UTC'});
   const spain = isSpainMarket(process.source, process.country);
   const fields:Array<[string,string]>=[[en?'Reference':'Referencia',process.reference||process.id],[en?'Entity':'Entidad',process.entity],[en?'Procedure':'Modalidad',process.modality||'—'],[en?'Status':'Estado',process.status||'—'],[en?'Phase':'Fase',process.phase||'—'],[en?'Value':'Valor',formatSecopValue(process,language)],[en?'Published':'Publicación',date(process.publicationDate)],[en?'Deadline':'Cierre',date(process.deadline)],[spain?(en?'Territory':'Territorio'):(en?'Department':'Departamento'),process.territory||process.department||'—'],...(process.cpvCodes?.length?[[en?'CPV':'CPV',process.cpvCodes.join(', ')] as [string,string]]:[]),[en?'City':'Ciudad',process.city||'—'],[en?'Source':'Fuente',sourceDisplayName(process.source,language)]];
@@ -27,9 +69,9 @@ export function WebOpportunityDetail({item,language,saving,onClose,onSave,select
     {loading && <p role="status">{en?'Loading current process…':'Consultando el proceso actualizado…'}</p>}{detailError && <p role="status">{en?'Current details could not be loaded; showing search results.':'No se pudo actualizar el detalle; se muestran los datos de la búsqueda.'}</p>}
     <dl className="web-opportunity-fields">{fields.map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value||'—'}</dd></div>)}</dl>
     <section className="web-opportunity-docs"><h3>{en?'Official documents':'Documentos oficiales'}</h3><p>{en?'This index may be incomplete. Check the official record. Select files to import when creating the project. ZIP files need a local runner.':'Este índice puede estar incompleto. Verifica el expediente oficial. Selecciona archivos para importarlos al crear el proyecto. Los ZIP necesitan un runner local.'}</p>
-    {docLoading && <p role="status">{en?'Loading documents…':'Consultando documentos…'}</p>}{docError && <p role="alert">{en?'Could not load documents.':'No se pudieron consultar los documentos.'}</p>}{docs?.partial && <p role="status">{en?'Some sources did not respond; the index may be incomplete.':'Algunas fuentes no respondieron; el índice puede estar incompleto.'}</p>}{!docLoading&&!process.portfolioId&&process.source!=='placsp'&&<p>{en?'The document index is not available for this process.':'El índice de documentos no está disponible para este proceso.'}</p>}{docs && !docs.items.length&&!docLoading&&<p>{en?'No documents found.':'No se encontraron documentos.'}</p>}
+    {docLoading && <p role="status">{en?'Loading documents…':'Consultando documentos…'}</p>}{docError && <p role="alert">{en?'Could not load documents.':'No se pudieron consultar los documentos.'} <Button variant="outline" size="sm" disabled={docLoading} onClick={()=>docs?void loadMore():setRetryDocs(value=>value+1)}>{en?'Retry':'Reintentar'}</Button></p>}{docs?.partial && <p role="status">{en?'Some sources did not respond; the index may be incomplete.':'Algunas fuentes no respondieron; el índice puede estar incompleto.'}</p>}{!docLoading&&!process.portfolioId&&process.source!=='placsp'&&<p>{en?'The document index is not available for this process.':'El índice de documentos no está disponible para este proceso.'}</p>}{docs && !docs.items.length&&!docLoading&&<p>{en?'No documents found.':'No se encontraron documentos.'}</p>}
     {!!docs?.items.length && <OpportunityDocumentSelection documents={docs.items} selectedIds={selectedIds} onChange={setSelectedIds} language={language} saving={saving} />}{docs?.truncated && <Button variant="outline" size="sm" disabled={docLoading} onClick={()=>void loadMore()}>{en?'Load more documents':'Cargar más documentos'}</Button>}</section>
-    <div className="web-opportunity-actions">{link && <a href={link} target="_blank" rel="noopener noreferrer">{en?`Open in ${sourceDisplayName(process.source,language)}`:`Abrir en ${sourceDisplayName(process.source,language)}`}</a>}<Button icon={Copy} iconOnly variant="outline" size="sm" onClick={()=>void copy()}>{en?'Copy summary':'Copiar resumen'}</Button><Button size="sm" disabled={saving||loading||docLoading||!process.id||!process.title} onClick={()=>onSave(process,selectedIds)}>{saving?(selectedIds.length?(en?'Creating project and importing…':'Creando proyecto e importando…'):(en?'Creating project…':'Creando proyecto…')):selectedIds.length?(en?`Create project with ${selectedIds.length} document(s)`:`Crear proyecto con ${selectedIds.length} documento(s)`):(en?'Save as project':'Guardar como proyecto')}</Button></div>
+    <div className="web-opportunity-actions">{link && <a href={link} target="_blank" rel="noopener noreferrer">{en?`Open in ${sourceDisplayName(process.source,language)}`:`Abrir en ${sourceDisplayName(process.source,language)}`}</a>}<Button icon={Copy} iconOnly variant="outline" size="sm" onClick={()=>void copy()}>{en?'Copy summary':'Copiar resumen'}</Button><Button size="sm" disabled={saving||(loading&&!documentPath)||docLoading||!process.id||!process.title} onClick={()=>onSave(process,selectedIds)}>{saving?(selectedIds.length?(en?'Creating project and importing…':'Creando proyecto e importando…'):(en?'Creating project…':'Creando proyecto…')):selectedIds.length?(en?`Create project with ${selectedIds.length} document(s)`:`Crear proyecto con ${selectedIds.length} documento(s)`):(en?'Save as project':'Guardar como proyecto')}</Button></div>
   </DialogContent></Dialog>;
 }
 

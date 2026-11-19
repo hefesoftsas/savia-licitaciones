@@ -552,7 +552,7 @@ function createSecopService({ configStore, cacheDirectory } = {}) {
           ),
         };
       }
-      const datasetKeys = source === 'secop-i' ? ['secop-i'] : source === 'secop-ii' ? ['secop-ii', 'contratos'] : ['secop-ii', 'contratos', 'secop-i'];
+      const datasetKeys = source === 'secop-i' ? ['secop-i'] : source === 'secop-ii' ? (/^CO1\.PCCNTR\.\d+$/.test(recordId) ? ['contratos'] : ['secop-ii', 'contratos']) : ['secop-ii', 'contratos', 'secop-i'];
       for (const key of datasetKeys) {
         const config = DATASETS[key];
         const rows = await fetchRows(config.baseUrl, {
