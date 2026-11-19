@@ -15,3 +15,8 @@ test('identifica recursos recientes sin considerarlos aprobados para respaldo',(
  assert.equal(backupTables.word_recoveries.disposition,'review');
  assert.deepEqual(backupTables.word_recoveries.objectColumns,['object_key']);
 });
+
+test('excluye el estado activo de preparación automática del inventario de recuperación',()=>{
+ assert.equal(backupTables.project_automatic_preparation.scope,'project');
+ assert.equal(backupTables.project_automatic_preparation.disposition,'exclude');
+});

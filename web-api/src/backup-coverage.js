@@ -142,6 +142,7 @@ const scopes={
     "project_files",
     "project_web_upload_receipts",
     "project_global_facts",
+    "project_automatic_preparation",
     "project_outline_applications",
     "project_outline_root_selections",
     "project_requirements",
@@ -243,7 +244,7 @@ const objectTables=new Set([
   "project_submission_evidence",
   "rup_certificates"
 ]);
-const excluded=new Set(['secop_search_cache','placsp_tenders','placsp_sync_state','auth_superadmin_bootstrap','account','rateLimit','session','twoFactor','verification','runner_pairings','runners']);
+const excluded=new Set(['project_automatic_preparation','secop_search_cache','placsp_tenders','placsp_sync_state','auth_superadmin_bootstrap','account','rateLimit','session','twoFactor','verification','runner_pairings','runners']);
 const sensitive=new Set(['provider_credentials']);
 export const backupTables=Object.freeze(Object.fromEntries(
  Object.entries(scopes).flatMap(([scope,names])=>names.map(name=>[name,Object.freeze({scope,disposition:excluded.has(name)?'exclude':sensitive.has(name)?'sensitive':'review',objectColumns:Object.freeze(objectTables.has(name)?['object_key']:[])})]))
