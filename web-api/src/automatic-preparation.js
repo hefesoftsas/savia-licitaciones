@@ -8,37 +8,69 @@ import { hasPendingFacts } from '../../client/src/features/web/preparation-readi
 
 const categories = ['project-overview', 'technical-score', 'response-requirements'];
 const stages = [...categories, 'chapters', 'outline', 'facts', 'draft', 'word'];
-const publicState = row => row ? { status:row.status, stage:stages[row.stage] || 'word', reason:row.reason, runId:row.run_id, wordId:row.word_id } : null;
+const publicState = (row, activeJob = null) => row ? { status:row.status, stage:stages[row.stage] || 'word', reason:row.reason, runId:row.run_id, wordId:row.word_id, activeJob } : null;
 const error = (code, status) => Response.json({error:code},{status});
 const readState = (env, owner, project) => env.DB.prepare('SELECT * FROM project_automatic_preparation WHERE owner_id=? AND project_id=?').bind(owner,project).first();
+
+async function readPublicState(env, owner, project) {
+  const row = await readState(env, owner, project);
+  if (!row) return null;
+  const key = `prepare:${row.run_id}:${row.stage}:${row.attempt}`;
+  const job = row.stage < stages.length
+    ? await env.DB.prepare('SELECT id,kind,state,progress FROM jobs WHERE owner_id=? AND project_id=? AND client_request_id=?').bind(owner, project, key).first()
+    : null;
+  const activeJob = job ? { id: job.id, kind: job.kind, state: job.state, progress: job.state === 'running' ? job.progress ?? null : null } : null;
+  return publicState(row, activeJob);
+}
 
 export async function automaticPreparation(request, env, owner, project) {
   const owned = await env.DB.prepare('SELECT id FROM projects WHERE owner_id=? AND id=?').bind(owner,project).first();
   if (!owned) return error('not_found',404);
-  if (request.method === 'GET') return Response.json({preparation:publicState(await readState(env,owner,project))});
+  if (request.method === 'GET') return Response.json({preparation:await readPublicState(env,owner,project)});
   if (request.method !== 'POST') return error('method_not_allowed',405);
   if (request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return error('invalid_origin',403);
   const input = await request.json().catch(() => null);
   const now = Date.now();
   if (input?.action === 'start') {
-    const {fileIds, credentialId, language} = input;
+    const {fileIds, language, allowPendingFacts, skipExistingDraft, localRunner} = input;
+    if (localRunner !== undefined && typeof localRunner !== 'boolean') return error('invalid_input',400);
+    if (allowPendingFacts !== undefined && typeof allowPendingFacts !== 'boolean') return error('invalid_input',400);
+    if (skipExistingDraft !== undefined && typeof skipExistingDraft !== 'boolean') return error('invalid_input',400);
+    const credentialId = localRunner === true && (input.credentialId === undefined || input.credentialId === null) ? 'local-runner' : input.credentialId;
     if (!Array.isArray(fileIds) || !fileIds.length || fileIds.length > 50 || fileIds.some(id=>typeof id!=='string'||!id) ||
         new Set(fileIds).size!==fileIds.length || typeof credentialId!=='string' || !credentialId || !['es','en'].includes(language) || input.consent!==true) return error('invalid_input',400);
     const files = await env.DB.prepare('SELECT COUNT(*) AS count FROM project_files WHERE project_id=? AND id IN (SELECT value FROM json_each(?))').bind(project,JSON.stringify(fileIds)).first();
     if (files.count!==fileIds.length) return error('not_found',404);
+    const settings = {fileIds,credentialId,language,...(allowPendingFacts===true?{allowPendingFacts:true}:{}),...(skipExistingDraft===true?{skipExistingDraft:true}:{})};
     await env.DB.prepare(`INSERT INTO project_automatic_preparation(project_id,owner_id,run_id,settings_json,updated_at) VALUES(?,?,?,?,?)
-      ON CONFLICT(project_id) DO NOTHING`).bind(project,owner,crypto.randomUUID(),JSON.stringify({fileIds,credentialId,language}),now).run();
+      ON CONFLICT(project_id) DO NOTHING`).bind(project,owner,crypto.randomUUID(),JSON.stringify(settings),now).run();
   } else if (input?.action === 'pause') {
     await env.DB.prepare("UPDATE project_automatic_preparation SET status='paused',updated_at=? WHERE project_id=? AND owner_id=? AND status='running'").bind(now,project,owner).run();
   } else if (input?.action === 'resume') {
     if (input.technicalScore!==undefined && !['present','none'].includes(input.technicalScore)) return error('invalid_input',400);
+    if (input.allowPendingFacts!==undefined && typeof input.allowPendingFacts!=='boolean') return error('invalid_input',400);
+    if (input.skipExistingDraft!==undefined && typeof input.skipExistingDraft!=='boolean') return error('invalid_input',400);
+    let settingsExpr = 'settings_json';
+    const binds = [];
+    if (input.technicalScore !== undefined) {
+      settingsExpr = `CASE WHEN reason='technical_score_unknown' THEN json_set(${settingsExpr},'$.technicalScore',?) ELSE ${settingsExpr} END`;
+      binds.push(input.technicalScore);
+    }
+    if (typeof input.allowPendingFacts === 'boolean') {
+      settingsExpr = `json_set(${settingsExpr},'$.allowPendingFacts',json(?))`;
+      binds.push(input.allowPendingFacts ? 'true' : 'false');
+    }
+    if (typeof input.skipExistingDraft === 'boolean') {
+      settingsExpr = `json_set(${settingsExpr},'$.skipExistingDraft',json(?))`;
+      binds.push(input.skipExistingDraft ? 'true' : 'false');
+    }
     await env.DB.prepare(`UPDATE project_automatic_preparation SET status=CASE WHEN stage>=8 THEN 'ready' ELSE 'running' END,
       attempt=attempt+CASE WHEN status='blocked' THEN 1 ELSE 0 END,
-      settings_json=CASE WHEN reason='technical_score_unknown' AND ? IS NOT NULL THEN json_set(settings_json,'$.technicalScore',?) ELSE settings_json END,
+      settings_json=${settingsExpr},
       reason=NULL,updated_at=? WHERE project_id=? AND owner_id=? AND status IN ('paused','blocked')`)
-      .bind(input.technicalScore??null,input.technicalScore??null,now,project,owner).run();
+      .bind(...binds,now,project,owner).run();
   } else return error('invalid_input',400);
-  return Response.json({preparation:publicState(await readState(env,owner,project))});
+  return Response.json({preparation:await readPublicState(env,owner,project)});
 }
 
 export async function advanceOwnerPreparation(env, owner) {
@@ -66,7 +98,7 @@ async function advancePreparation(env, owner, project) {
     return value;
   };
   const key = `prepare:${row.run_id}:${row.stage}:${row.attempt}`;
-  const {fileIds,credentialId,language,technicalScore} = JSON.parse(row.settings_json);
+  const {fileIds,credentialId,language,technicalScore,allowPendingFacts=false,skipExistingDraft=false} = JSON.parse(row.settings_json);
   const common = {fileIds,language,dataProcessingConsent:true};
   const stillRunning = async () => Boolean(await env.DB.prepare("SELECT 1 FROM project_automatic_preparation WHERE project_id=? AND lock_id=? AND status='running'").bind(project,lock).first());
   const queue = async (kind,payload,credential=credentialId) => await stillRunning() && run('POST','jobs',{kind,credentialId:credential,payload},handleUserJobs);
@@ -115,10 +147,10 @@ async function advancePreparation(env, owner, project) {
     if (stage===5) {
       const facts=await get('technical-facts',globalFacts);
       if (facts.current && facts.revision>0) {
-        if (facts.importReviewPending || facts.groups.some(group=>hasPendingFacts(group.title+' '+group.content))) return await block('facts_need_input');
+        if (!allowPendingFacts && (facts.importReviewPending || facts.groups.some(group=>hasPendingFacts(group.title+' '+group.content)))) return await block('facts_need_input');
         return await next();
       }
-      if (facts.affectedChapterCount>0) return await block('existing_draft');
+      if (facts.affectedChapterCount>0) return skipExistingDraft ? await next() : await block('existing_draft');
       if (!job) return await queue('technical-plan.generate-facts',{...common,planVersion:plan.version,mode:'omit'});
       if (job.state!=='succeeded') return await block('task_failed');
       await post('technical-facts',globalFacts,{jobId:job.id,revision:facts.revision},'apply');
@@ -128,7 +160,7 @@ async function advancePreparation(env, owner, project) {
       if (!job) {
         const hasEmptyLeaf=nodes=>nodes.some(node=>node.children?.length?hasEmptyLeaf(node.children):!node.content?.trim());
         if (!hasEmptyLeaf(plan.outline)) return await next();
-        return await queue('technical-plan.generate-batch',{...common,planVersion:plan.version,mode:'missing'});
+        return await queue('technical-plan.generate-batch',{...common,planVersion:plan.version,mode:'missing',...(allowPendingFacts?{allowPendingFacts:true}:{})});
       }
       if (job.state!=='succeeded') return await block('task_failed');
       return await next(job.id);
@@ -139,7 +171,11 @@ async function advancePreparation(env, owner, project) {
     if (!artifact) return await block('draft_unavailable');
     await next(null,job.id);
   } catch (cause) {
-    await block(cause.workflowReason || 'step_failed');
+    if (cause?.workflowReason) {
+      await block(cause.workflowReason);
+    } else {
+      console.warn('Transient automatic preparation error; will retry on next runner poll:', cause?.message || cause);
+    }
   } finally {
     await env.DB.prepare('UPDATE project_automatic_preparation SET lock_id=NULL,lock_until=0,updated_at=? WHERE project_id=? AND lock_id=?').bind(Date.now(),project,lock).run();
   }

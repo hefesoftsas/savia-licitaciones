@@ -504,3 +504,40 @@ test('usa el modelo elegido en la web con la clave local del conector', async ()
   assert.ok(!JSON.stringify(completion).includes('local-only'));
  });
 });
+
+test('reintenta descargas y contexto ante errores 500 transitorios sin fallar en 404', async () => {
+ let fileCalls = 0;
+ let missingCalls = 0;
+ await fixture((req, res) => {
+  if (req.url.endsWith('/claim')) return respond(res, claim);
+  if (req.url.endsWith('/renew') || req.url.endsWith('/complete')) return respond(res);
+  if (req.url.endsWith('/files/file')) {
+   fileCalls++;
+   if (fileCalls === 1) return respond(res, { error: 'internal_error' }, 500);
+   res.writeHead(200, { 'content-type': 'text/plain' });
+   res.end('ok-after-retry');
+   return;
+  }
+  if (req.url.endsWith('/files/missing')) {
+   missingCalls++;
+   return respond(res, { error: 'not_found' }, 404);
+  }
+ }, async server => {
+  const result = await runOnce({
+   server,
+   token: 'token',
+   ...opts,
+   handlers: {
+    test: async (_payload, context) => {
+     const data = await context.getFile('file');
+     assert.equal(Buffer.from(data).toString('utf8'), 'ok-after-retry');
+     await assert.rejects(context.getFile('missing'), /404/);
+     return { ok: true };
+    },
+   },
+  });
+  assert.equal(result.state, 'succeeded');
+  assert.equal(fileCalls, 2);
+  assert.equal(missingCalls, 1);
+ });
+});

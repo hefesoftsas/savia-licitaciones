@@ -167,6 +167,18 @@ export async function runOnce({ server, token, handlers, outbox, draftOutbox, ar
       }
     }
   };
+  const requestWithRetry = async (path, payload, options = {}) => {
+    const maxAttempts = 4;
+    for (let attempt = 1; ; attempt++) {
+      abort.signal.throwIfAborted();
+      try {
+        return await request(server, token, path, payload, { signal: abort.signal, timeoutMs: requestTimeoutMs, ...options });
+      } catch (error) {
+        if (abort.signal.aborted || !transient(error) || attempt >= maxAttempts) throw error;
+        await delay(retryDelayMs * attempt, undefined, { signal: abort.signal });
+      }
+    }
+  };
   const saveRecoverableTechnicalBatch = async (path,payload,status,result) => {
     if(draftOutbox){try{await draftOutbox.save(job.id,{lease,status,result});}catch{throw Object.assign(new Error('No se pudo conservar la etapa técnica cifrada.'),{code:'OUTBOX_UNAVAILABLE'});}}
     try{const response=await saveTechnicalBatch(path,payload);if(draftOutbox)await draftOutbox.remove(job.id,'pending');return response;}
@@ -257,18 +269,18 @@ export async function runOnce({ server, token, handlers, outbox, draftOutbox, ar
           return current.response;
         },
         getCredential: async () => {
-          const credential = ((job.kind==='opportunity.analyze'&&!job.credentialId)||job.payload.localRunner===true) ? localCredential : (await request(server, token, `/api/runner/jobs/${job.id}/credential`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs })).credential;
+          const credential = ((job.kind==='opportunity.analyze'&&!job.credentialId)||job.payload.localRunner===true) ? localCredential : (await requestWithRetry(`/api/runner/jobs/${job.id}/credential`, { lease })).credential;
           if (!credential) throw new TaskInputError('No se encontró el modelo local de OpenCode en este equipo.');
           if (typeof credential?.secret === 'string' && credential.secret) secrets.push(credential.secret);
           if (credential === localCredential && credential.provider === 'opencode-go' && typeof claimed.localModel === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(claimed.localModel)) { usedModel = claimed.localModel; return {...credential, model:claimed.localModel}; }
           if (typeof credential.model === 'string') usedModel = credential.model;
           return credential;
         },
-        getFile: fileId => request(server, token, `/api/runner/jobs/${job.id}/files/${encodeURIComponent(fileId)}`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs, binary: true }),
-        getFileInfo: fileId => request(server, token, `/api/runner/jobs/${job.id}/files/${encodeURIComponent(fileId)}`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs, fileInfo: true }),
-        getFileStream: fileId => request(server, token, `/api/runner/jobs/${job.id}/files/${encodeURIComponent(fileId)}`, { lease }, { signal: abort.signal, timeoutMs: 300_000, fileStream: true }),
-        getPlanContext: () => request(server, token, `/api/runner/jobs/${job.id}/plan-context`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        getTechnicalBatchContext: () => request(server, token, `/api/runner/jobs/${job.id}/technical-batch`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
+        getFile: fileId => requestWithRetry(`/api/runner/jobs/${job.id}/files/${encodeURIComponent(fileId)}`, { lease }, { binary: true }),
+        getFileInfo: fileId => requestWithRetry(`/api/runner/jobs/${job.id}/files/${encodeURIComponent(fileId)}`, { lease }, { fileInfo: true }),
+        getFileStream: fileId => requestWithRetry(`/api/runner/jobs/${job.id}/files/${encodeURIComponent(fileId)}`, { lease }, { timeoutMs: 300_000, fileStream: true }),
+        getPlanContext: () => requestWithRetry(`/api/runner/jobs/${job.id}/plan-context`, { lease }),
+        getTechnicalBatchContext: () => requestWithRetry(`/api/runner/jobs/${job.id}/technical-batch`, { lease }),
         getTechnicalBatchLedger: async nodeId => (await saveTechnicalBatch(`/api/runner/jobs/${job.id}/technical-batch/ledger/${encodeURIComponent(nodeId)}`,{lease,fetch:true})).entry,
         getTechnicalBatchSection: async (nodeId,stage) => (await saveTechnicalBatch(`/api/runner/jobs/${job.id}/technical-batch/section/${encodeURIComponent(nodeId)}`,{lease,...(stage?{stage}:{})})).section,
         saveTechnicalBatchPlans: plans => saveRecoverableTechnicalBatch(`/api/runner/jobs/${job.id}/technical-batch/plan`,{lease,plans},'technical-plan',{plans}),
@@ -278,25 +290,25 @@ export async function runOnce({ server, token, handlers, outbox, draftOutbox, ar
         getTechnicalBatchWordAdjustment: async nodeId => (await saveTechnicalBatch(`/api/runner/jobs/${job.id}/technical-batch/word-adjustment/${encodeURIComponent(nodeId)}`,{lease,fetch:true})).adjustment,
         saveTechnicalBatchWordAdjustment: (nodeId,targetWords,content) => saveRecoverableTechnicalBatch(`/api/runner/jobs/${job.id}/technical-batch/word-adjustment/${encodeURIComponent(nodeId)}`,{lease,targetWords,content},'technical-word-adjustment',{nodeId,targetWords,content}),
         saveTechnicalBatchLedger: entry => saveRecoverableTechnicalBatch(`/api/runner/jobs/${job.id}/technical-batch/ledger/${encodeURIComponent(entry.id)}`,{lease,entry},'technical-ledger',{entry}),
-        getPlanAsset: assetId => request(server, token, `/api/runner/jobs/${job.id}/plan-assets/${encodeURIComponent(assetId)}`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs, binary: true }),
-        getBidTemplate: () => request(server, token, `/api/runner/jobs/${job.id}/template`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs, binary: true }),
-        getOpportunitySources: () => request(server, token, `/api/runner/jobs/${job.id}/opportunity-context`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        assertOpportunitySources: () => request(server, token, `/api/runner/jobs/${job.id}/opportunity-context?check=1`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        getRequirementSources: () => request(server, token, `/api/runner/jobs/${job.id}/requirements-context`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        assertRequirementSources: () => request(server, token, `/api/runner/jobs/${job.id}/requirements-context?check=1`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        getKnowledgeDocumentInfo: documentId => request(server, token, `/api/runner/jobs/${job.id}/knowledge-documents/${encodeURIComponent(documentId)}`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs, fileInfo: true }),
-        getKnowledgeFile: () => request(server, token, `/api/runner/jobs/${job.id}/knowledge-source`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs, fileInfo: true }),
-        assertKnowledgeCurrent: () => request(server, token, `/api/runner/jobs/${job.id}/knowledge-source?check=1`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        getFeasibilityContentContext: () => request(server, token, `/api/runner/jobs/${job.id}/feasibility-content-context`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        getFeasibilityContentDraft: id => request(server,token,`/api/runner/jobs/${job.id}/feasibility-content-drafts/${encodeURIComponent(id)}`,{lease,fetch:true},{signal:abort.signal,timeoutMs:requestTimeoutMs}),
+        getPlanAsset: assetId => requestWithRetry(`/api/runner/jobs/${job.id}/plan-assets/${encodeURIComponent(assetId)}`, { lease }, { binary: true }),
+        getBidTemplate: () => requestWithRetry(`/api/runner/jobs/${job.id}/template`, { lease }, { binary: true }),
+        getOpportunitySources: () => requestWithRetry(`/api/runner/jobs/${job.id}/opportunity-context`, { lease }),
+        assertOpportunitySources: () => requestWithRetry(`/api/runner/jobs/${job.id}/opportunity-context?check=1`, { lease }),
+        getRequirementSources: () => requestWithRetry(`/api/runner/jobs/${job.id}/requirements-context`, { lease }),
+        assertRequirementSources: () => requestWithRetry(`/api/runner/jobs/${job.id}/requirements-context?check=1`, { lease }),
+        getKnowledgeDocumentInfo: documentId => requestWithRetry(`/api/runner/jobs/${job.id}/knowledge-documents/${encodeURIComponent(documentId)}`, { lease }, { fileInfo: true }),
+        getKnowledgeFile: () => requestWithRetry(`/api/runner/jobs/${job.id}/knowledge-source`, { lease }, { fileInfo: true }),
+        assertKnowledgeCurrent: () => requestWithRetry(`/api/runner/jobs/${job.id}/knowledge-source?check=1`, { lease }),
+        getFeasibilityContentContext: () => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-content-context`, { lease }),
+        getFeasibilityContentDraft: id => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-content-drafts/${encodeURIComponent(id)}`, { lease, fetch: true }),
         saveFeasibilityContentDraft: async (id,content,fallback) => {const deadline=performance.now()+deliveryTimeoutMs;while(true){abort.signal.throwIfAborted();try{return await request(server,token,`/api/runner/jobs/${job.id}/feasibility-content-drafts/${encodeURIComponent(id)}`,{lease,content,...(fallback===undefined?{}:{fallback})},{signal:abort.signal,timeoutMs:requestTimeoutMs});}catch(error){if(abort.signal.aborted||!transient(error)||performance.now()>=deadline)throw error;await delay(Math.min(retryDelayMs,Math.max(0,deadline-performance.now())),undefined,{signal:abort.signal});}}},
         saveFeasibilityContentReview: async (id,content,fallback) => {const deadline=performance.now()+deliveryTimeoutMs;while(true){abort.signal.throwIfAborted();try{return await request(server,token,`/api/runner/jobs/${job.id}/feasibility-content-reviews/${encodeURIComponent(id)}`,{lease,content,fallback},{signal:abort.signal,timeoutMs:requestTimeoutMs});}catch(error){if(abort.signal.aborted||!transient(error)||performance.now()>=deadline)throw error;await delay(Math.min(retryDelayMs,Math.max(0,deadline-performance.now())),undefined,{signal:abort.signal});}}},
-        getFeasibilityParametersContext: () => request(server, token, `/api/runner/jobs/${job.id}/feasibility-parameters-context`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        getFeasibilityOutlineContext: () => request(server, token, `/api/runner/jobs/${job.id}/feasibility-outline-context`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        getFeasibilityAnalysisContext: () => request(server, token, `/api/runner/jobs/${job.id}/feasibility-analysis`, { lease, projectFilesSupported:true }, { signal: abort.signal, timeoutMs: requestTimeoutMs }),
-        getFeasibilityAnalysisSource: id => request(server, token, `/api/runner/jobs/${job.id}/feasibility-analysis/${encodeURIComponent(id)}`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs, binary: true }),
-        getFeasibilityProjectFile: id => request(server, token, `/api/runner/jobs/${job.id}/feasibility-analysis/${encodeURIComponent(id)}`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs, fileInfo: true }),
-        getFeasibilityOriginal: id => request(server, token, `/api/runner/jobs/${job.id}/feasibility-original/${encodeURIComponent(id)}`, { lease }, { signal: abort.signal, timeoutMs: requestTimeoutMs, fileInfo: true }),
+        getFeasibilityParametersContext: () => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-parameters-context`, { lease }),
+        getFeasibilityOutlineContext: () => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-outline-context`, { lease }),
+        getFeasibilityAnalysisContext: () => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-analysis`, { lease, projectFilesSupported: true }),
+        getFeasibilityAnalysisSource: id => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-analysis/${encodeURIComponent(id)}`, { lease }, { binary: true }),
+        getFeasibilityProjectFile: id => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-analysis/${encodeURIComponent(id)}`, { lease }, { fileInfo: true }),
+        getFeasibilityOriginal: id => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-original/${encodeURIComponent(id)}`, { lease }, { fileInfo: true }),
         stageSecopFile: async (index, file) => {
     const deadline = performance.now() + deliveryTimeoutMs;
           while (true) {
