@@ -36,7 +36,7 @@ export async function handleProjects(request, env, userId, tenantCountry) {
     if (!['CO', 'ES', 'ALL'].includes(market)) return Response.json({ error: 'invalid_market' }, { status: 400 });
     const country = fixedCountry ?? (market === 'ALL' ? null : market);
     const countryFilter = country ? `AND CASE
-      WHEN opportunity.source = 'placsp' THEN 'ES'
+      WHEN opportunity.source IN ('placsp', 'ted') THEN 'ES'
       WHEN opportunity.source IN ('secop-i', 'secop-ii', 'contratos') THEN 'CO'
       WHEN json_extract(opportunity.process_json, '$.country') IN ('CO', 'ES')
         THEN json_extract(opportunity.process_json, '$.country')

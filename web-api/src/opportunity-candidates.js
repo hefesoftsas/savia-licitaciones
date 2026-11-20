@@ -1,11 +1,11 @@
 import {opportunitySourceState} from './opportunity-source-state.js';
 import secop from '../../client/electron/services/secopService.cjs';
-import {searchPlacspD1} from './secop.js';
+import {searchPlacspD1, searchTed} from './secop.js';
 const clean = (value, max = 500) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 const normalize = value => clean(value, 100).toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 export function isOpenOpportunity(item, now = Date.now()) {
-  const isPlacsp = item.source === 'placsp';
-  if (isPlacsp) {
+  const isSpainOrEu = item.source === 'placsp' || item.source === 'ted';
+  if (isSpainOrEu) {
     const st = normalize(item.status);
     if (!/^(publicad[oa]|convocad[oa]|en plazo)$/.test(st) && String(item.statusCode || '').toUpperCase() !== 'PUB') return false;
     if (/evaluacion|adjudic|resuelt|anulad|cerrad|desiert|cancelad/.test(st)) return false;
@@ -13,11 +13,11 @@ export function isOpenOpportunity(item, now = Date.now()) {
     if (!/^(publicad[oa]|convocad[oa])$/.test(normalize(item.status))) return false;
     if (/evaluacion|adjudic|cerrad|terminad|cancelad|desiert|liquidad/.test(normalize(item.phase))) return false;
   }
-  const rawDeadline = (item.source === 'secop-ii' || isPlacsp) && item.deadlineVerified === true ? String(item.deadline || '') : '';
+  const rawDeadline = (item.source === 'secop-ii' || isSpainOrEu) && item.deadlineVerified === true ? String(item.deadline || '') : '';
   const deadline = rawDeadline.slice(0, 10);
   const parsed = /^\d{4}-\d{2}-\d{2}$/.test(deadline) ? new Date(`${deadline}T00:00:00Z`) : null;
   if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== deadline) return true;
-  const timeZone = isPlacsp ? 'Europe/Madrid' : 'America/Bogota';
+  const timeZone = isSpainOrEu ? 'Europe/Madrid' : 'America/Bogota';
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(now)).map(part => [part.type, part.value]));
   const today = `${parts.year}-${parts.month}-${parts.day}`;
   if (deadline !== today) return deadline > today;
@@ -43,28 +43,66 @@ export async function refreshOpportunityStatuses(items, getDetail) {
   return {items: [...output, ...items.filter(item => item.reviewed)], verificationUnavailable};
 }
 
+const normDedupKey = value => normalize(value).replace(/[^a-z0-9]+/g, '');
+function candidatePublicationKey(url) {
+  try {
+    const parsed = new URL(url || '');
+    if (parsed.protocol !== 'https:') return '';
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'contractaciopublica.cat' && /\/detall-publicacio\//i.test(parsed.pathname)) {
+      return `pscp:${parsed.pathname.toLowerCase()}`;
+    }
+    if (['contrataciondelestado.es', 'contrataciondelsectorpublico.gob.es'].includes(host) && parsed.pathname === '/wps/poc') {
+      const idEvl = parsed.searchParams.get('idEvl')?.replaceAll(' ', '+');
+      if (idEvl) return `placsp:${idEvl}`;
+    }
+  } catch { /* ignore invalid URLs */ }
+  return '';
+}
+
 // Returns the original processes separately from the limited summaries sent to Pi.
 export async function searchOpportunityCandidates({ profile, terms, searchProcesses, now = Date.now(), language = 'es', market = 'CO' }) {
   const facts = profile.reviewedRup || [];
   const cpvs = Array.isArray(profile.cpvCodes) ? profile.cpvCodes : [];
-  const classes = [...new Set([...facts.map(fact => fact.value.slice(0, 6)), ...cpvs.map(c => String(c).slice(0, 6))])].slice(0, 4);
+  const rupClasses = facts.map(fact => fact.value.slice(0, 6));
+  const cpvClasses = cpvs.map(c => String(c).replace(/[^0-9]/g, '').slice(0, 8)).filter(c => c.length >= 4);
+  const classes = [...new Set([...rupClasses, ...cpvClasses])].slice(0, 4);
   const queries = [...terms.map(keyword => ({ keyword })), ...classes.map(classificationClass => ({ classificationClass }))];
   if (!queries.length) throw new Error(language === 'en' ? 'No search sources are available.' : 'No hay fuentes de búsqueda disponibles.');
   const since = new Date(now - 45 * 86400000).toISOString().slice(0, 10);
-  const datasets = market === 'ES' ? ['placsp'] : market === 'ALL' ? ['secop-ii', 'secop-i', 'placsp'] : ['secop-ii', 'secop-i'];
+  const datasets = market === 'ES' ? ['placsp', 'ted'] : market === 'ALL' ? ['secop-ii', 'secop-i', 'placsp', 'ted'] : ['secop-ii', 'secop-i'];
   const candidates = new Map();
+  const seenPubs = new Set();
+  const seenRefEntities = new Set();
   for (const dataset of datasets) for (const query of queries) {
-    const response = await searchProcesses({dataset, ...query, fromDate:since, limit:50, fresh:true});
+    const response = await searchProcesses({
+      dataset,
+      ...query,
+      fromDate: since,
+      limit: 50,
+      fresh: true,
+      ...(dataset === 'placsp' || dataset === 'ted' ? { openOnly: true } : {}),
+    });
     if (!response?.success || !Array.isArray(response.data?.items) || response.data.partial) throw new Error(language === 'en' ? 'The SECOP search did not finish.' : 'No se completó la consulta SECOP.');
     for (const item of response.data.items) {
       if (!item.id || !item.source) continue;
       if (!isOpenOpportunity(item, now)) continue;
-      candidates.set(`${item.source}:${item.id}`, item);
+      const key = `${item.source}:${item.id}`;
+      if (candidates.has(key)) continue;
+      const pubKey = candidatePublicationKey(item.portalUrl || item.url);
+      if (pubKey && seenPubs.has(pubKey)) continue;
+      const normRef = normDedupKey(item.reference);
+      const normEntity = normDedupKey(item.entity);
+      const refEntityKey = normRef.length >= 5 && normEntity.length >= 4 ? `${normRef}::${normEntity}` : '';
+      if (item.source === 'ted' && refEntityKey && seenRefEntities.has(refEntityKey)) continue;
+      candidates.set(key, item);
+      if (pubKey) seenPubs.add(pubKey);
+      if (refEntityKey) seenRefEntities.add(refEntityKey);
     }
   }
-  const classSet = new Set(classes);
+  const classSet = new Set(classes.flatMap(code => code.length > 6 ? [code, code.slice(0, 6)] : [code]));
   const ranked = [...candidates.entries()].sort((a,b) => Number(classSet.has(String(b[1].classificationCode || '').replace(/^V1\./i,'').slice(0,6))) - Number(classSet.has(String(a[1].classificationCode || '').replace(/^V1\./i,'').slice(0,6)))).slice(0,60);
-  const shortlist = ranked.map(([id,item]) => ({id, title:clean(item.title,500), entity:clean(item.entity,160), classificationCode:clean(item.classificationCode,20), department:clean(item.department,100), status:clean(item.status,100), value:item.value ?? null, currency:item.currencyVerified === true ? item.currency || null : null, deadline:(item.source === 'secop-ii' || item.source === 'placsp') && item.deadlineVerified === true ? item.deadline : undefined}));
+  const shortlist = ranked.map(([id,item]) => ({id, title:clean(item.title,500), entity:clean(item.entity,160), classificationCode:clean(item.classificationCode,20), department:clean(item.department,100), status:clean(item.status,100), value:item.value ?? null, currency:item.currencyVerified === true ? item.currency || null : null, deadline:(item.source === 'secop-ii' || item.source === 'placsp' || item.source === 'ted') && item.deadlineVerified === true ? item.deadline : undefined}));
   return {candidates:ranked.map(([id,process]) => ({id,process})), shortlist};
 }
 
@@ -86,7 +124,11 @@ export async function opportunitySearch(request, env, owner, searchProcesses) {
   const market = tenantCountry !== 'ALL' ? tenantCountry : (['CO', 'ES', 'ALL'].includes(userRow?.market) ? userRow.market : 'CO');
   if (!searchProcesses) {
     const secopApi = secop.createSecopService({configStore:{load:()=>({ui_language:input.language})}});
-    searchProcesses = params => params.dataset === 'placsp' ? searchPlacspD1(env, params) : secopApi.searchProcesses(params);
+    searchProcesses = params => params.dataset === 'placsp'
+      ? searchPlacspD1(env, params)
+      : params.dataset === 'ted'
+        ? searchTed(env, params)
+        : secopApi.searchProcesses(params);
   }
   let result;
   try { result = await searchOpportunityCandidates({profile:sources.profile,terms:sources.terms,searchProcesses,language:input.language,market}); }
@@ -166,7 +208,7 @@ export async function opportunityResults(request,env,owner,action){
   if(new URL(request.url).searchParams.get('verify')==='1'){
    const {secopDetail}=await import('./secop.js');
    const checked=await refreshOpportunityStatuses(items,async process=>{
-    const url=new URL('/api/secop/detail',request.url);url.searchParams.set('id',process.id);url.searchParams.set('source',process.source);
+    const url=new URL('/api/secop/detail',request.url);url.searchParams.set('id',process.id);url.searchParams.set('source',process.source);url.searchParams.set('fresh','1');
     const response=await secopDetail(new Request(url),env);return response.ok?response.json():null;
    });
    items=checked.items;verificationUnavailable=checked.verificationUnavailable;
@@ -180,7 +222,7 @@ export async function opportunityResults(request,env,owner,action){
  const row=await findJob(input.jobId);if(!row)return missing();const item=itemsOf(row).find(item=>item.id===input.candidateId);if(!item)return missing();
  const {process}=item,now=new Date().toISOString();
  if(action==='review'){await env.DB.prepare('INSERT INTO opportunity_suggestion_reviews_web(owner_id,source,process_id,reviewed_at) VALUES(?,?,?,?) ON CONFLICT(owner_id,source,process_id) DO NOTHING').bind(owner,process.source,process.id,now).run();return Response.json({reviewed:true});}
- if(!['secop-i','secop-ii','placsp'].includes(process.source)||typeof process.id!=='string'||!process.id||typeof process.title!=='string'||!process.title.trim())return Response.json({error:'invalid_process'},{status:400});
+ if(!['secop-i','secop-ii','placsp','ted'].includes(process.source)||typeof process.id!=='string'||!process.id||typeof process.title!=='string'||!process.title.trim())return Response.json({error:'invalid_process'},{status:400});
  const projectId=crypto.randomUUID();
  await env.DB.batch([
   env.DB.prepare('INSERT INTO projects(id,owner_id,title,created_at) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM project_secop WHERE owner_id=? AND source=? AND external_id=?)').bind(projectId,owner,process.title.trim().slice(0,300),now,owner,process.source,process.id),
@@ -205,7 +247,7 @@ export async function opportunityDue(request,env,owner,searchProcesses,options={
   const settings=await env.DB.prepare(`SELECT keywords,include_rup,version,runner_language,refresh_hours FROM opportunity_suggestion_settings s WHERE owner_id=? AND enabled=1 AND auto_enabled=1${runnerGuard}`).bind(owner).first();if(!settings)return Response.json({started:false});
   const language=options.runnerSchedule?settings.runner_language:input.language;if(!['es','en'].includes(language))return Response.json({error:'invalid_settings'},{status:409});
   const {suggestionSources}=await import('./opportunity-suggestion-settings.js');const current=await suggestionSources(env,owner,settings.keywords,!!settings.include_rup);
-  if(!current.terms.length&&!current.profile.reviewedRup.length){resetAttempt=true;return Response.json({started:false});}
+  if(!current.terms.length&&!current.profile.reviewedRup.length&&!(current.profile.cpvCodes?.length)){resetAttempt=true;return Response.json({started:false});}
   const recent=await env.DB.prepare("SELECT j.state,j.updated_at,p.source_fingerprint,p.settings_version FROM account_jobs j LEFT JOIN opportunity_search_snapshots p ON p.id=json_extract(j.payload_json,'$.snapshotId') AND p.owner_id=j.owner_id WHERE j.owner_id=? AND j.kind='opportunity.analyze' ORDER BY j.created_at DESC,j.id DESC LIMIT 1").bind(owner).first();
   const age=now-(Date.parse(recent?.updated_at)||0);
   if(recent?.state==='succeeded'&&age<settings.refresh_hours*3600000&&recent.settings_version===settings.version&&recent.source_fingerprint===current.sourceFingerprint){resetAttempt=true;return Response.json({started:false});}

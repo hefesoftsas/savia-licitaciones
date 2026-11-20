@@ -35,6 +35,7 @@ test('seguimiento PLACSP detecta cambios de estado, plazo y documentos',async()=
  const dir=await mkdtemp(join(tmpdir(),'savia-placsp-watch-'));let worker,statusCode='PUB',deadline='2026-12-20',extraDoc=false,unavailable=false;
  const licitId='11111111-2222-3333-4444-555555555555';
  let licitCalls=0, atomCalls=0, licitStatus='EN PLAZO', licitUnavailable=false;
+ let portalCalls=0, portalStatus='Publicada', portalDeadline='31/12/2099 14:00', portalExtraDoc=false;
 
  const atom=()=>{
   const docExtra=extraDoc?`\n      <cac:TechnicalDocumentReference>\n        <cbc:ID>ADENDA-1.pdf</cbc:ID>\n        <cac:Attachment><cac:ExternalReference><cbc:URI>https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=ADENDA1</cbc:URI></cac:ExternalReference></cac:Attachment>\n      </cac:TechnicalDocumentReference>`:'';
@@ -81,6 +82,11 @@ test('seguimiento PLACSP detecta cambios de estado, plazo y documentos',async()=
     if (licitUnavailable) return new Response('unavailable',{status:503});
     return Response.json({id:licitId, titulo:'Obras de saneamiento', expediente:'LICIT-100', estado:licitStatus,
       fecha_limite:'2026-12-31', hora_limite:'13:00:00', fecha_actualizacion:'2026-11-30'});
+   }
+   if (url.hostname === 'contrataciondelestado.es' && url.pathname === '/wps/poc' && url.searchParams.get('idEvl') === 'PORTAL-WATCH-1') {
+    portalCalls++;
+    const extra=portalExtraDoc?'<tr><td>02/12/2026</td><td>Adenda</td><td><a href="https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=PORTAL-ADENDA"><img alt="Documento pdf"></a></td></tr>':'';
+    return new Response(`<span id="app:form1:text_Expediente">PORTAL-100</span><span id="app:form1:text_ObjetoContrato">Servicio oficial vigilado</span><span id="app:form1:text_OC_con">Ministerio</span><span id="app:form1:text_Estado">${portalStatus}</span><span id="app:form1:text_FechaPresentacionOfertaConHora">${portalDeadline}</span><table id="myTablaDetalleVISUOE"><tr><td>01/12/2026</td><td>Pliego</td><td><a href="https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=PORTAL-PCAP"><img alt="Documento pdf"></a></td></tr>${extra}</table>`,{headers:{'content-type':'text/html; charset=UTF-8'}});
    }
    assert.equal(url.hostname,'contrataciondelsectorpublico.gob.es');
    atomCalls++;
@@ -135,5 +141,24 @@ test('seguimiento PLACSP detecta cambios de estado, plazo y documentos',async()=
   assert.equal(state.baseline.status,'Adjudicado');
   assert.equal(licitCalls,3);
   assert.equal(atomCalls,previousAtomCalls);
+
+  const portalId='portal:0123456789abcdef01234567';
+  const portalUrl='https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=PORTAL-WATCH-1';
+  await db.prepare('INSERT INTO placsp_tenders (id, title, reference, url, synced_at) VALUES (?, ?, ?, ?, ?)').bind(portalId,'Servicio oficial vigilado','PORTAL-100',portalUrl,Date.now()).run();
+  const portalTender={source:'placsp',id:portalId,title:'Servicio oficial vigilado',reference:'PORTAL-100',url:portalUrl};
+  const portalProject=(await (await send('/api/projects/from-secop','POST',{process:portalTender},cookie)).json()).project;
+  const portalWatchPath=`/api/projects/${portalProject.id}/secop-watch`;
+  const atomBeforePortal=atomCalls;
+  assert.equal((await send(portalWatchPath,'POST',{},cookie)).status,200);
+  portalStatus='Adjudicada';
+  portalDeadline='05/01/2100 10:00';
+  portalExtraDoc=true;
+  assert.equal((await send(portalWatchPath,'POST',{},cookie)).status,200);
+  const portalWatchState=await (await req(portalWatchPath,{headers:{cookie}})).json();
+  assert.deepEqual(portalWatchState.alerts.map(x=>x.kind).sort(),['deadline','document','status']);
+  assert.equal(portalWatchState.alerts.find(x=>x.kind==='status')?.current,'Adjudicada');
+  assert.equal(portalWatchState.alerts.find(x=>x.kind==='deadline')?.current,'2100-01-05T10:00:00');
+  assert.equal(portalCalls,2);
+  assert.equal(atomCalls,atomBeforePortal);
  }finally{await worker?.dispose();await rm(dir,{recursive:true,force:true});}
 });

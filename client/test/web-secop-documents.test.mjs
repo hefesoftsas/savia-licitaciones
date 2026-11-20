@@ -19,5 +19,12 @@ test('presenta la importación ZIP, su estado y reintento sin prometer que está
   const completed=render([{id:'1',name:'anexos.zip',extension:'zip',imported:true,zipJob:{id:'j',state:'succeeded',result:{imported:2,skipped:1}}}]);
   assert.match(completed,/>Importado</);assert.match(completed,/2 documentos/);assert.match(completed,/1 omitido/);
   const english=render([{id:'1',name:'annex.zip',extension:'zip',imported:false,zipJob:{id:'j',state:'running',result:null}}],'en');assert.match(english,/In progress/);assert.match(english,/Cancel/);
+  const {selectableDocument}=await server.ssrLoadModule('/src/features/web/opportunity-import.mjs');
+  const {officialTenderUrl,sourceDisplayName,isSpainMarket}=await server.ssrLoadModule('/src/features/web/secop/secopValue.mjs');
+  assert.equal(selectableDocument({id:'TED-70899-2026',extension:'pdf',size:null}),true);
+  assert.equal(officialTenderUrl({source:'ted',url:'https://ted.europa.eu/es/notice/-/detail/70899-2026'}),'https://ted.europa.eu/es/notice/-/detail/70899-2026');
+  assert.equal(officialTenderUrl({source:'ted',url:'https://evil.example/ted'}),undefined);
+  assert.equal(sourceDisplayName('ted','es'),'TED Europa');
+  assert.equal(isSpainMarket('ted','FR','ES'),true);
  }finally{await server.close();}
 });

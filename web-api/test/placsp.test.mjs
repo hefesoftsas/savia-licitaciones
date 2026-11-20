@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
+import * as placspPortal from '../src/placsp-portal.js';
+import * as placspSearch from '../src/placsp-search.js';
+
 const require = createRequire(import.meta.url);
 const placsp = require('../../client/electron/services/placspService.cjs');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -633,6 +636,9 @@ test('placspService.searchPscpSocrata construye consultas SoQL válidas y mapea 
     columnFilters: {entity: 'Girona', value: '90000', deadline: '2026-12-01'},
     department: 'Barcelona',
     modality: 'Obert',
+    entity: 'Generalitat',
+    reference: 'EXP-CAT-2026',
+    contractType: '2',
     fromDate: '2026-11-01',
     minValue: 50000,
     maxValue: 250000,
@@ -654,6 +660,9 @@ test('placspService.searchPscpSocrata construye consultas SoQL válidas y mapea 
   assert.ok(where.includes("codi_cpv like '722%'"), where);
   assert.ok(where.includes("upper(lloc_execucio) like '%BARCELONA%'"), where);
   assert.ok(where.includes("upper(procediment) like '%OBERT%'"), where);
+  assert.ok(where.includes("upper(nom_organ) like '%GENERALITAT%'"), where);
+  assert.ok(where.includes("upper(codi_expedient) like '%EXP-CAT-2026%'"), where);
+  assert.ok(where.includes("upper(tipus_contracte) like '%SERVEIS%'"), where);
   assert.ok(where.includes("data_publicacio_anunci >= '2026-11-01T00:00:00'"), where);
   assert.ok(where.includes('valor_estimat_contracte >= 50000'), where);
   assert.ok(where.includes('valor_estimat_contracte <= 250000'), where);
@@ -694,4 +703,368 @@ test('PLACSP carga las oportunidades de PSCP cuando Atom responde vacío', async
   const {entries} = await service.fetchLatestEntries({maxPages: 1});
   assert.deepEqual(entries.map(item => item.id), ['pscp:1234']);
   assert.equal(new URL(urls[1]).hostname, 'analisi.transparenciacatalunya.cat');
+});
+
+test('placsp-portal y placsp-search decodifican HTML, parsean detalles y buscan licitaciones y documentos', async () => {
+  assert.equal(placspPortal.decodePlacspMarkup('Protecci&#243;n &amp; Gesti&oacute;n 1&ordm; &#x20AC;'), 'Protección & Gestión 1º €');
+  const idA = await placspPortal.portalTenderId('https://contrataciondelsectorpublico.gob.es/wps/poc?idEvl=ABC+123&uri=deeplink:detalle_licitacion');
+  const idB = await placspPortal.portalTenderId('https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=ABC%20123');
+  assert.match(idA, /^portal:[a-f0-9]{24}$/);
+  assert.equal(idA, idB);
+
+  const detailHtml = `
+    <span id="app:form1:text_Expediente">EXP-PORTAL-01</span>
+    <span id="app:form1:text_ObjetoContrato">Plataforma de gesti&oacute;n cloud</span>
+    <span id="app:form1:text_OC_con">Ministerio de Transformaci&#243;n Digital</span>
+    <span id="app:form1:text_IdOrganoContratacion">ORG-99</span>
+    <span id="app:form1:text_Estado">Publicada</span>
+    <span id="app:form1:text_Presupuesto">1.250.500,75</span>
+    <span id="app:form1:text_TipoContrato">Servicios</span>
+    <span id="app:form1:text_Procedimiento">Abierto</span>
+    <span id="app:form1:text_CPV">72200000-Servicios de programaci&oacute;n.</span>
+    <span id="app:form1:text_LugarEjecucion">Espa&ntilde;a - Madrid</span>
+    <span id="app:form1:text_FechaPresentacionOfertaConHora">15/12/2099 14:00</span>
+    <table id="myTablaDetalleVISUOE"><tr><td>01/11/2099</td><td>Anuncio de Licitaci&oacute;n</td></tr></table>
+  `;
+  const parsedDetail = placspPortal.parsePlacspDetailHtml(detailHtml, 'https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=ABC%2B123');
+  assert.equal(parsedDetail.reference, 'EXP-PORTAL-01');
+  assert.equal(parsedDetail.title, 'Plataforma de gestión cloud');
+  assert.equal(parsedDetail.value, 1250500.75);
+  assert.equal(parsedDetail.statusCode, 'PUB');
+  assert.equal(parsedDetail.deadline, '2099-12-15T14:00:00');
+  assert.equal(parsedDetail.territory, 'Madrid');
+  assert.deepEqual(parsedDetail.cpvCodes, ['72200000']);
+  assert.equal(parsedDetail.publicationDate, '2099-11-01');
+  assert.equal(parsedDetail.modality, 'Abierto · Servicios');
+
+  const fId = 'viewns_Z7_AVEQAI930OBRD02JPMTPG21004_:form1';
+  let step = '';
+  const mockPortalFetch = async (url, init = {}) => {
+    const target = String(url);
+    if (target.startsWith(placspSearch.PLACSP_BUSQUEDA_URL) && (!init.method || init.method === 'GET')) {
+      step = 'landing';
+      return new Response(`<form id="${fId}" method="post" action="/wps/portal/plataforma/buscadores/busqueda/step1">
+        <input type="hidden" name="${fId}_SUBMIT" value="1" />
+        <input type="hidden" name="javax.faces.ViewState" value="vs-1" />
+      </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8', 'set-cookie': 'JSESSIONID=portal1; Path=/' } });
+    }
+    if (target.endsWith('/step1')) {
+      const form = new URLSearchParams(init.body);
+      assert.equal(form.get(`${fId}:_idcl`), `${fId}:linkFormularioBusqueda`);
+      step = 'form';
+      return new Response(`<form id="${fId}" method="post" action="/wps/portal/plataforma/buscadores/busqueda/step2">
+        <input type="text" name="${fId}:cpvMultiple:codigoCpv" value="" />
+        <input type="text" name="${fId}:texoorganoMAQ" value="" />
+        <select name="${fId}:estadoLici"><option value="00">Todos</option><option value="PUB">Publicada</option></select>
+        <select id="comboCPVnoPrincipal" name="cpv"><option value=""></option></select>
+        <input type="hidden" name="javax.faces.ViewState" value="vs-2" />
+      </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+    }
+    if (target.endsWith('/step2')) {
+      const form = new URLSearchParams(init.body);
+      if (form.get('parametroAnyadir') === 'cpvMultiple') {
+        const cpv = form.get(`${fId}:cpvMultiple:codigoCpv`);
+        const opt = cpv === '72200000' ? `<option value="72200000">72200000-Software</option>` : '<option value=""></option>';
+        return new Response(`<form id="${fId}" method="post" action="/wps/portal/plataforma/buscadores/busqueda/step2">
+          <select id="comboCPVnoPrincipal" name="cpv">${opt}</select>
+          <input type="hidden" name="javax.faces.ViewState" value="vs-3" />
+        </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+      }
+      assert.equal(form.get(`${fId}:estadoLici`), 'PUB');
+      assert.equal(form.get(`${fId}:texoorganoMAQ`), 'Ministerio');
+      return new Response(`<form id="${fId}" method="post" action="/wps/portal/plataforma/buscadores/busqueda/step2">
+        <input type="hidden" name="javax.faces.ViewState" value="vs-4" />
+        <span id="${fId}:textfooterTotalTotalMAQ">1</span>
+        <table id="myTablaBusquedaCustom"><tr><th>Expediente</th></tr>
+          <tr>
+            <td><div class="cell-order"><div class="flex"><a onclick="[['idLicitacion','555']]"><span id="${fId}:textoEnlace_0">EXP-LIVE-1</span></a></div><a href="https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&amp;idEvl=LIVE1">link</a></div><div>Servicio cloud estatal</div></td>
+            <td><div>Servicios</div></td><td>Publicada</td><td>120.000,00</td><td>31/12/2099</td><td>Ministerio de Ciencia</td>
+          </tr>
+        </table></form>`, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+    }
+    throw new Error('Unexpected URL ' + target);
+  };
+
+  const live = await placspSearch.searchPlacspPortalLicitaciones(
+    { classificationClass: '722000', entity: 'Ministerio', openOnly: true },
+    '2026-11-20T11:00:00',
+    20,
+    { fetchImpl: mockPortalFetch }
+  );
+  assert.equal(step, 'form');
+  assert.equal(live.items.length, 1);
+  assert.match(live.items[0].id, /^portal:/);
+  assert.equal(live.items[0].reference, 'EXP-LIVE-1');
+  assert.equal(live.items[0].value, 120000);
+  assert.equal(live.items[0].classificationCode, '72200000');
+
+  const rejectedCpv = await placspSearch.searchPlacspPortalLicitaciones(
+    { classificationClass: '99999999', openOnly: true },
+    '2026-11-20T11:00:00',
+    20,
+    { fetchImpl: mockPortalFetch }
+  );
+  assert.deepEqual(rejectedCpv.items, []);
+});
+
+test('web-api integra el buscador oficial PLACSP (estructurado y texto libre híbrido) con paginación e importación', async () => {
+  const build = await mkdtemp(join(tmpdir(), 'savia-placsp-portal-'));
+  let worker;
+  try {
+    execFileSync('pnpm', ['exec', 'wrangler', 'deploy', '--dry-run', '--outdir', build], {
+      cwd: root,
+      stdio: 'pipe',
+      env: { ...process.env, CLOUDFLARE_SEND_METRICS: 'false' },
+    });
+
+    const fId = 'viewns_Z7_AVEQAI930OBRD02JPMTPG21004_:form1';
+    const dId = 'viewns_Z7_BS88AB1A0OUMA0IL1IQEP210C1_:j_id_a';
+    let licitAvailable = true;
+    let licitCalls = 0;
+    let atomCalls = 0;
+    const portalCriteria = [];
+
+    const makeRow = (idx, { ref = `EXP-${idx}`, title = `Servicio oficial ${idx}`, idEvl = `EVL${idx}`, deadline = '31/12/2099', amount = '180.000,50', type = 'Servicios', entity = 'Ministerio de Industria' } = {}) => `
+      <tr>
+        <td>
+          <div class="cell-order"><div class="flex"><a href="#" onclick="return [['idLicitacion','${1000 + idx}']];"><span id="${fId}:textoEnlace_${idx}">${ref}</span></a></div>
+          <a href="https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&amp;idEvl=${encodeURIComponent(idEvl)}">Ver</a></div>
+          <div>${title}</div>
+        </td>
+        <td><div>${type}</div><div></div></td>
+        <td>Publicada</td>
+        <td class="textAlignRight">${amount}</td>
+        <td>${deadline}</td>
+        <td>${entity}</td>
+      </tr>`;
+
+    const outboundService = async request => {
+      const url = new URL(request.url);
+      if (url.hostname === 'api.licit.es') {
+        licitCalls++;
+        if (!licitAvailable) return new Response(null, { status: 503 });
+        return Response.json({
+          resultados: [{
+            id: '00000000-0000-0000-0000-000000000777',
+            expediente: 'EXP-SHARED',
+            titulo: 'Obra de defensa compartida',
+            organo: 'Confederación Hidrográfica',
+            estado: 'EN PLAZO',
+            presupuesto_sin_iva: 500000,
+            fecha_publicacion: '2026-11-18',
+            fecha_limite: '2099-12-20',
+            cpv_principal: '45246400',
+            url_place: 'https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=SHARED1',
+          }],
+        });
+      }
+      if (url.hostname === 'analisi.transparenciacatalunya.cat') {
+        return Response.json([]);
+      }
+      if (url.hostname === 'contrataciondelsectorpublico.gob.es') {
+        atomCalls++;
+        return new Response('<feed xmlns="http://www.w3.org/2005/Atom"></feed>', { headers: { 'content-type': 'application/atom+xml' } });
+      }
+      if (url.hostname === 'contrataciondelestado.es' && url.pathname === '/wps/portal/plataforma/buscadores/busqueda') {
+        return new Response(`<form id="${fId}" method="post" action="/wps/portal/plataforma/buscadores/busqueda/step1">
+          <input type="hidden" name="${fId}_SUBMIT" value="1" />
+          <input type="hidden" name="javax.faces.ViewState" value="vs-land" />
+        </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8', 'set-cookie': 'JSESSIONID=test1; Path=/' } });
+      }
+      if (url.hostname === 'contrataciondelestado.es' && url.pathname.endsWith('/busqueda/step1')) {
+        return new Response(`<form id="${fId}" method="post" action="/wps/portal/plataforma/buscadores/busqueda/step2">
+          <input type="text" name="${fId}:cpvMultiple:codigoCpv" value="" />
+          <input type="text" name="${fId}:texoorganoMAQ" value="" />
+          <input type="text" name="${fId}:text71ExpMAQ" value="" />
+          <select name="${fId}:combo1MAQ"><option value="00">Todos</option></select>
+          <select name="${fId}:estadoLici"><option value="00">Todos</option></select>
+          <select name="${fId}:Financiacion"><option value="00">Todas</option></select>
+          <select id="comboCPVnoPrincipal" name="cpv"><option value=""></option></select>
+          <input type="hidden" name="javax.faces.ViewState" value="vs-form" />
+        </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+      }
+      if (url.hostname === 'contrataciondelestado.es' && url.pathname.endsWith('/busqueda/step2')) {
+        const form = new URLSearchParams(await request.text());
+        if (form.get('parametroAnyadir') === 'cpvMultiple') {
+          const code = form.get(`${fId}:cpvMultiple:codigoCpv`);
+          return new Response(`<form id="${fId}" method="post" action="/wps/portal/plataforma/buscadores/busqueda/step2">
+            <select id="comboCPVnoPrincipal" name="cpv"><option value="${code}">${code}-Valid</option></select>
+            <input type="hidden" name="javax.faces.ViewState" value="vs-cpv" />
+          </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+        }
+        if (form.has(`${fId}:bt_next`)) {
+          return new Response(`<form id="${fId}" method="post" action="/wps/portal/plataforma/buscadores/busqueda/step2">
+            <input type="hidden" name="javax.faces.ViewState" value="vs-p2" />
+            <span id="${fId}:textfooterTotalTotalMAQ">21</span>
+            <table id="myTablaBusquedaCustom"><tr><th>Expediente</th></tr>${makeRow(20, { ref: 'EXP-PORTAL-20', title: 'Contrato página 2', idEvl: 'PORTAL20' })}</table>
+          </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+        }
+        portalCriteria.push(Object.fromEntries(form.entries()));
+        const rows = Array.from({ length: 20 }, (_, idx) => makeRow(idx, {
+          ref: `EXP-PORTAL-${idx}`,
+          title: idx === 0 ? 'Auditoría de ciberseguridad' : `Servicio oficial ${idx}`,
+          idEvl: `PORTAL${idx}`,
+        })).join('');
+        return new Response(`<form id="${fId}" method="post" action="/wps/portal/plataforma/buscadores/busqueda/step2">
+          <input type="hidden" name="javax.faces.ViewState" value="vs-p1" />
+          <span id="${fId}:textfooterTotalTotalMAQ">21</span>
+          <input type="submit" name="${fId}:bt_next" value="Siguiente &gt;&gt;" />
+          <table id="myTablaBusquedaCustom"><tr><th>Expediente</th></tr>${rows}</table>
+        </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+      }
+      if (url.hostname === 'contrataciondelestado.es' && url.pathname === '/wps/portal/plataforma/buscador/') {
+        return new Response(`<form id="${dId}" method="post" action="/wps/portal/plataforma/buscador/search">
+          <input type="text" name="${dId}:boxSearch" value="" />
+          <input type="hidden" name="javax.faces.ViewState" value="vs-doc" />
+        </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8', 'set-cookie': 'JSESSIONID=doc1; Path=/' } });
+      }
+      if (url.hostname === 'contrataciondelestado.es' && url.pathname === '/wps/portal/plataforma/buscador/search') {
+        return new Response(`<form id="${dId}" method="post" action="/wps/portal/plataforma/buscador/search">
+          <input type="hidden" name="javax.faces.ViewState" value="vs-doc2" />
+          <table id="${dId}:tableResultSearch">
+            <tr><th>Resultados</th></tr>
+            <tr><td></td><td><span id="${dId}:tableResultSearch:0:textColumnaExpedienteResultado">EXP-SHARED. Obra de defensa compartida</span>
+              <a href="https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&amp;idEvl=SHARED1">Detalle</a></td>
+              <td><span id="${dId}:tableResultSearch:0:textColumnaDateResultado">18/11/2026</span></td></tr>
+            <tr><td></td><td><span id="${dId}:tableResultSearch:1:textColumnaExpedienteResultado">EXP-DOC-ONLY. Canalización de aguas pluviales</span>
+              <a href="https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&amp;idEvl=DOCONLY1">Detalle</a></td>
+              <td><span id="${dId}:tableResultSearch:1:textColumnaDateResultado">19/11/2026</span></td></tr>
+          </table>
+        </form>`, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+      }
+      if (url.hostname === 'contrataciondelestado.es' && url.pathname === '/wps/poc') {
+        const idEvl = url.searchParams.get('idEvl');
+        if (idEvl === 'PORTAL0') {
+          return new Response(`
+            <span id="app:form1:text_Expediente">EXP-PORTAL-0</span>
+            <span id="app:form1:text_ObjetoContrato">Auditoría de ciberseguridad</span>
+            <span id="app:form1:text_OC_con">Ministerio de Industria</span>
+            <span id="app:form1:text_Estado">Publicada</span>
+            <span id="app:form1:text_Presupuesto">180.000,50</span>
+            <span id="app:form1:text_TipoContrato">Servicios</span>
+            <span id="app:form1:text_Procedimiento">Abierto</span>
+            <span id="app:form1:text_CPV">72200000-Software.</span>
+            <span id="app:form1:text_LugarEjecucion">España - Comunidad de Madrid</span>
+            <span id="app:form1:text_FechaPresentacionOfertaConHora">31/12/2099 14:00</span>
+            <table id="myTablaDetalleVISUOE"><tr><td>15/11/2026</td><td>Pliego de Cláusulas Administrativas</td>
+              <td><a href="https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=PORTAL-PCAP"><img alt="Documento pdf"></a></td></tr></table>
+          `, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+        }
+        return new Response(`
+          <span id="app:form1:text_Expediente">${idEvl === 'SHARED1' ? 'EXP-SHARED' : 'EXP-DOC-ONLY'}</span>
+          <span id="app:form1:text_ObjetoContrato">${idEvl === 'SHARED1' ? 'Obra de defensa compartida' : 'Canalización de aguas pluviales'}</span>
+          <span id="app:form1:text_OC_con">Confederación Hidrográfica</span>
+          <span id="app:form1:text_Estado">Publicada</span>
+          <span id="app:form1:text_Presupuesto">500.000,00</span>
+          <span id="app:form1:text_TipoContrato">Obras</span>
+          <span id="app:form1:text_Procedimiento">Abierto</span>
+          <span id="app:form1:text_CPV">45246400-Obras hidráulicas.</span>
+          <span id="app:form1:text_LugarEjecucion">España - Zaragoza</span>
+          <span id="app:form1:text_FechaPresentacionOfertaConHora">20/12/2099 12:00</span>
+        `, { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+      }
+      if (url.hostname === 'contrataciondelestado.es' && url.pathname === '/FileSystem/servlet/GetDocumentByIdServlet') {
+        return new Response('%PDF-1.4 pliego oficial', { headers: { 'content-type': 'application/pdf' } });
+      }
+      return new Response('Not found', { status: 404 });
+    };
+
+    worker = new Miniflare(convertV4MiniflareOptions({
+      modules: true,
+      script: await readFile(join(build, 'index.js'), 'utf8'),
+      compatibilityDate: '2026-10-30',
+      compatibilityFlags: ['nodejs_compat'],
+      d1Databases: { DB: 'placsp-portal-test' },
+      r2Buckets: ['FILES'],
+      bindings: {
+        AUTH_ALLOW_REGISTRATION: 'true',
+        BETTER_AUTH_SECRET: 'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz',
+        BETTER_AUTH_URL: 'http://localhost',
+      },
+      outboundService,
+    }));
+    const db = await worker.getD1Database('DB');
+    for (const file of (await readdir(join(root, 'migrations'))).filter(x => x.endsWith('.sql')).sort()) {
+      for (const sql of (await readFile(join(root, 'migrations', file), 'utf8')).split(';').map(x => x.trim()).filter(Boolean)) {
+        await db.prepare(sql).run();
+      }
+    }
+    const req = (path, opts = {}) => worker.dispatchFetch(`http://localhost${path}`, opts);
+    const post = (path, body, cookie) => req(path, {
+      method: 'POST',
+      headers: { origin: 'http://localhost', 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+      body: JSON.stringify(body),
+    });
+    const signup = await post('/api/auth/sign-up/email', { name: 'ana', email: 'ana@example.es', password: 'password-123456' });
+    const cookie = signup.headers.get('set-cookie').split(';')[0];
+
+    // 1. Structured official search: bypasses licit.es & Atom, paginates, enriches detail, imports PDF
+    const p1Res = await post('/api/secop/search', {
+      dataset: 'placsp',
+      classificationClass: '722000',
+      entity: 'Industria',
+      reference: 'EXP-PORTAL',
+      contractType: '2',
+      euFunded: 'EU',
+      fromDate: '2026-11-01',
+      openOnly: true,
+    }, cookie);
+    assert.equal(p1Res.status, 200);
+    const p1 = (await p1Res.json()).data;
+    assert.equal(p1.partial, undefined);
+    assert.equal(p1.items.length, 20);
+    assert.equal(p1.truncated, true);
+    assert.match(p1.items[0].id, /^portal:/);
+    assert.equal(licitCalls, 0);
+    assert.equal(atomCalls, 0);
+    assert.equal(portalCriteria[0][`${fId}:combo1MAQ`], '2');
+    assert.equal(portalCriteria[0][`${fId}:Financiacion`], 'EU');
+    assert.equal(portalCriteria[0][`${fId}:textMinFecAnuncioMAQ2`], '01-11-2026');
+
+    const p2Res = await post('/api/secop/search', {
+      dataset: 'placsp',
+      classificationClass: '722000',
+      entity: 'Industria',
+      reference: 'EXP-PORTAL',
+      contractType: '2',
+      euFunded: 'EU',
+      fromDate: '2026-11-01',
+      openOnly: true,
+      offset: 20,
+    }, cookie);
+    const p2 = (await p2Res.json()).data;
+    assert.equal(p2.items.length, 1);
+    assert.equal(p2.items[0].reference, 'EXP-PORTAL-20');
+    assert.equal(p2.truncated, false);
+
+    const detail = (await (await req(`/api/secop/detail?source=placsp&id=${encodeURIComponent(p1.items[0].id)}`, { headers: { cookie } })).json()).data;
+    assert.equal(detail.territory, 'Comunidad de Madrid');
+    assert.equal(detail.deadline, '2099-12-31T14:00:00');
+
+    const catalog = (await (await req(`/api/secop/documents?source=placsp&id=${encodeURIComponent(p1.items[0].id)}`, { headers: { cookie } })).json()).data;
+    assert.equal(catalog.items.length, 1);
+    assert.match(catalog.items[0].id, /^PLACSP-/);
+
+    const created = await (await post('/api/projects/from-secop', { process: detail, documentIds: [catalog.items[0].id] }, cookie)).json();
+    const imp = await post(`/api/projects/${created.project.id}/secop/imports/${catalog.items[0].id}`, {}, cookie);
+    assert.equal(imp.status, 201);
+
+    // 2. Keyword hybrid search merges licit.es + Buscador de Documentos and deduplicates SHARED1
+    const hybrid = (await (await post('/api/secop/search', { dataset: 'placsp', keyword: 'defensa', openOnly: true }, cookie)).json()).data;
+    assert.equal(hybrid.partial, undefined);
+    assert.equal(hybrid.items.filter(x => x.reference === 'EXP-SHARED').length, 1);
+    assert.ok(hybrid.items.some(x => x.reference === 'EXP-DOC-ONLY' && x.id.startsWith('portal:')));
+
+    // 3. Keyword search still succeeds (200, non-partial) via official portal when licit.es returns 503
+    licitAvailable = false;
+    const portalOnlyKeyword = await post('/api/secop/search', { dataset: 'placsp', keyword: 'pluviales', openOnly: true, fresh: true }, cookie);
+    assert.equal(portalOnlyKeyword.status, 200);
+    const portalOnlyData = (await portalOnlyKeyword.json()).data;
+    assert.equal(portalOnlyData.partial, undefined);
+    assert.ok(portalOnlyData.items.some(x => x.reference === 'EXP-SHARED' && x.id.startsWith('portal:')));
+    assert.ok(portalOnlyData.items.some(x => x.reference === 'EXP-DOC-ONLY' && x.id.startsWith('portal:')));
+  } finally {
+    await worker?.dispose();
+    await rm(build, { recursive: true, force: true });
+  }
 });

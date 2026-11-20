@@ -1,5 +1,5 @@
 export function isSpainMarket(source, country, market) {
-  if (country === 'ES' || source === 'placsp') return true;
+  if (country === 'ES' || source === 'placsp' || source === 'ted') return true;
   if (country === 'CO' || source === 'secop-i' || source === 'secop-ii' || source === 'contratos') return false;
   return market === 'ES';
 }
@@ -27,7 +27,7 @@ export function formatSecopValue(process, language, empty = '—') {
   });
   const number = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(process.value);
   const verifiedCurrency =
-    (process.currencyVerified === true || process.source === 'placsp') && process.currency
+    (process.currencyVerified === true || process.source === 'placsp' || process.source === 'ted') && process.currency
       ? process.currency
       : null;
   const unit = verifiedCurrency || (language === 'en' ? 'currency unverified' : 'moneda sin verificar');
@@ -57,6 +57,9 @@ export function officialTenderUrl(process) {
   try {
     const url = new URL(process?.url || '');
     if (url.protocol !== 'https:') return undefined;
+    if (process?.source === 'ted') {
+      return url.hostname.toLowerCase() === 'ted.europa.eu' ? url.href : undefined;
+    }
     if (process?.source === 'placsp' || process?.country === 'ES') {
       const host = url.hostname.toLowerCase();
       if (
@@ -84,6 +87,7 @@ export function officialTenderUrl(process) {
 
 export function sourceDisplayName(source, language = 'es') {
   if (source === 'placsp') return 'PLACSP';
+  if (source === 'ted') return 'TED Europa';
   if (source === 'secop-ii') return 'SECOP II';
   if (source === 'secop-i') return 'SECOP I';
   if (source === 'contratos') return language === 'en' ? 'Contracts (SECOP II)' : 'Contratos (SECOP II)';

@@ -1,4 +1,4 @@
-import {decodePlacspMarkup as decode, fetchPlacspDetail} from './placsp-portal.js';
+import {decodePlacspMarkup as decode, fetchPlacspDetail, parsePlacspDetailHtml} from './placsp-portal.js';
 import placsp from '../../client/electron/services/placspService.cjs';
 
 const boeOrigin = 'https://www.boe.es';
@@ -52,23 +52,23 @@ async function verifyNotice(notice, request) {
     return tender ? { ...base, ...tender } : null;
   };
   if (!html) return published();
-  const field = name => decode(new RegExp(`<span\\b[^>]*id="[^"]*:form1:text_${name}"[^>]*>([^<]*)</span>`, 'i').exec(html)?.[1] || '');
-  const reference = field('Expediente');
-  const title = field('ObjetoContrato');
-  const status = field('Estado');
-  const date = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}:\d{2})(?::(\d{2}))?$/.exec(field('FechaPresentacionOfertaConHora'));
-  const entity = field('OC_con');
-  if (!reference || !title || !status || !entity) return published();
-  const deadline = date ? `${date[3]}-${date[2]}-${date[1]}T${date[4]}:${date[5] || '00'}` : '';
-  const rawValue = field('Presupuesto');
-  const value = rawValue ? Number(rawValue.replace(/\./g, '').replace(',', '.')) : null;
+  const parsed = parsePlacspDetailHtml(html, url);
+  if (!parsed) return published();
   return {
-    ...base, reference, title, entity, entityId: field('IdOrganoContratacion'), status, verifiedOnPlacsp: true,
-    statusCode: /^Publicad[ao]$/i.test(status) ? placsp.PLACSP_OPEN_STATUS : '',
-    deadline, value: Number.isFinite(value) ? value : null, currency: 'EUR',
-    modality: [field('Procedimiento'), field('TipoContrato')].filter(Boolean).join(' · '),
-    territory: field('LugarEjecucion').split(' - ')[1] || '',
-    cpvCodes: [...field('CPV').matchAll(/\b(\d{8})-/g)].map(match => match[1]),
+    ...base,
+    reference: parsed.reference,
+    title: parsed.title,
+    entity: parsed.entity,
+    entityId: parsed.entityId,
+    status: parsed.status,
+    verifiedOnPlacsp: true,
+    statusCode: parsed.statusCode,
+    deadline: parsed.deadline,
+    value: parsed.value,
+    currency: 'EUR',
+    modality: parsed.modality,
+    territory: parsed.territory,
+    cpvCodes: parsed.cpvCodes,
   };
 }
 

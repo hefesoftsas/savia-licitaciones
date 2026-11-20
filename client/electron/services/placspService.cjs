@@ -172,7 +172,8 @@ function validatePlacspUrl(rawUrl) {
       url.hostname === 'contrataciondelsectorpublico.gob.es' ||
       url.hostname.endsWith('.contrataciondelsectorpublico.gob.es') ||
       url.hostname === 'contractaciopublica.cat' ||
-      url.hostname.endsWith('.contractaciopublica.cat')
+      url.hostname.endsWith('.contractaciopublica.cat') ||
+      url.hostname === 'ted.europa.eu'
     ) {
       return url.toString();
     }
@@ -374,7 +375,10 @@ function mapPscpSocrataRows(rows) {
       description: String(row.objecte_contracte || ''),
       entity: String(row.nom_organ || ''),
       entityId: String(row.codi_dir3 || row.codi_organ || ''),
-      modality: String(row.procediment || row.tipus_contracte || ''),
+      modality: [row.procediment, row.tipus_contracte]
+        .map(v => String(v || '').trim())
+        .filter((v, idx, arr) => v && arr.indexOf(v) === idx)
+        .join(' · '),
       status: statusText,
       statusCode: 'PUB',
       value,
@@ -538,6 +542,24 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
     }
     addLikeFilter('lloc_execucio', params.department);
     addLikeFilter('procediment', params.modality);
+    addLikeFilter('nom_organ', params.entity);
+    addLikeFilter('codi_expedient', params.reference);
+    if (params.contractType) {
+      const pscpContractTypes = {
+        '1': ['Subministraments', 'Suministros'],
+        '2': ['Serveis', 'Servicios'],
+        '3': ['Obres', 'Obras'],
+        '7': ['Administratiu especial', 'Administrativo especial'],
+        '8': ['Privat', 'Privado'],
+        '21': ['Gestió de serveis', 'Gestión de servicios'],
+        '22': ['Concessió de serveis', 'Concesión de servicios'],
+        '31': ["Concessió d'obres", 'Concesión de obras'],
+        '32': ["Concessió d'obres", 'Concesión de obras'],
+        '40': ['Col·laboració', 'Colaboración'],
+        '50': ['Patrimonial'],
+      };
+      addLikeFilter('tipus_contracte', pscpContractTypes[String(params.contractType).trim()]);
+    }
     if (params.fromDate && /^\d{4}-\d{2}-\d{2}/.test(String(params.fromDate).trim())) {
       where.push(`data_publicacio_anunci >= '${String(params.fromDate).trim().slice(0, 10)}T00:00:00'`);
     }

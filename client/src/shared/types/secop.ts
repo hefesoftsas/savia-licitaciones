@@ -1,4 +1,4 @@
-export type SecopSource = 'secop-ii' | 'secop-i' | 'placsp';
+export type SecopSource = 'secop-ii' | 'secop-i' | 'placsp' | 'ted';
 export type SecopDataset = SecopSource | 'contratos';
 export type SecopCategory = 'department' | 'modality' | 'status';
 export type ProcurementMarket = 'CO' | 'ES' | 'ALL';
@@ -9,7 +9,7 @@ export interface SecopProcess {
   reference?: string;
   classificationCode?: string;
   cpvCodes?: string[];
-  country?: 'CO' | 'ES';
+  country?: string;
   entity: string;
   title: string;
   modality?: string;
@@ -47,6 +47,10 @@ export interface SecopSearchParams {
   openOnly?: boolean;
   classificationClass?: string;
   cpvCode?: string;
+  entity?: string;
+  reference?: string;
+  contractType?: string;
+  euFunded?: string;
   sortBy?: SecopColumn;
   sortDirection?: 'asc' | 'desc';
   columnFilters?: Partial<Record<SecopColumn, string>>;

@@ -1,5 +1,29 @@
 import {deduplicateSecopDocuments, secopFileUrl} from './secop-document-dedup.js';
-import {fetchPlacspPortalDocuments, placspDocumentHeaders} from './placsp-portal.js';
+import {
+  fetchPlacspPortalDocuments,
+  fetchPlacspPortalTender,
+  isPortalTenderId,
+  placspDocumentHeaders,
+} from './placsp-portal.js';
+import {
+  PLACSP_CONTRACT_TYPE_CODES,
+  PLACSP_MODALITY_DEFAULTS,
+  PLACSP_STATUS_DEFAULTS,
+  PLACSP_TERRITORY_DEFAULTS,
+  enrichPlacspPortalDocumentHits,
+  searchPlacspPortalDocumentHits,
+  searchPlacspPortalLicitaciones,
+} from './placsp-search.js';
+import {
+  TED_CONTRACT_TYPE_TO_NATURE,
+  TED_COUNTRY_DEFAULTS,
+  TED_MODALITY_DEFAULTS,
+  TED_STATUS_DEFAULTS,
+  fetchTedNoticeById,
+  isTedTenderId,
+  searchTedNotices,
+  tedPublicationNumber,
+} from './ted-europa.js';
 import {getLicitTender, isLicitTenderId, searchLicit} from './licit.js';
 import {upsertPlacspEntries} from './placsp-store.js';
 import {findRecentBoeTenders} from './placsp-boe.js';
@@ -8,8 +32,8 @@ import {cleanupDesktopUploads,uploadLeaseMs} from './desktop-file-cleanup.js';
 import secop from '../../client/electron/services/secopService.cjs';
 import placsp from '../../client/electron/services/placspService.cjs';
 
-const sources = ['secop-ii', 'secop-i', 'contratos', 'placsp'];
-const projectSources = ['secop-i', 'secop-ii', 'placsp'];
+const sources = ['secop-ii', 'secop-i', 'contratos', 'placsp', 'ted'];
+const projectSources = ['secop-i', 'secop-ii', 'placsp', 'ted'];
 const PLACSP_SYNC_TTL_MS = 30 * 60 * 1000;
 function sameOrigin(request, env) { return request.headers.get('origin') === new URL(env.BETTER_AUTH_URL).origin; }
 async function body(request) { try { return await request.json(); } catch { return null; } }
@@ -46,15 +70,63 @@ function fetchPlacspDocuments(id, {url, reference} = {}) {
   const catalanId = /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\/\d+(?:[/?#]|$)/i.exec(url || '')?.[1];
   const pscpId = id.startsWith('pscp:') ? id : catalanId && 'pscp:' + catalanId;
   if (pscpId) return placsp.createPlacspService().fetchPscpProcessDocuments(pscpId, {reference});
-  if (id.startsWith('licit:') && url) return fetchPlacspPortalDocuments(url);
+  if ((id.startsWith('licit:') || isPortalTenderId(id) || isTedTenderId(id)) && url) return fetchPlacspPortalDocuments(url);
   return Promise.resolve([]);
 }
 
+async function resolveTedDocuments(env, id, { process = {}, row = null, fresh = false, language = 'es' } = {}) {
+  const pubNum = tedPublicationNumber(id);
+  if (!pubNum) return [];
+  const fetchDocs = async () => {
+    const notice = await fetchTedNoticeById(id, { language }).catch(() => null);
+    const portalUrl = notice?.portalUrl || process.portalUrl || '';
+    const reference = notice?.reference || row?.reference || process.reference || pubNum;
+    let portalDocs = [];
+    if (portalUrl) {
+      portalDocs = await fetchPlacspDocuments(id, { url: portalUrl, reference }).catch(() => []);
+    }
+    const rowSaved = JSON.parse(row?.documents_json || '[]');
+    const baseDocs = notice?.documents?.length
+      ? notice.documents
+      : rowSaved.length
+        ? rowSaved
+        : Array.isArray(process.documents) && process.documents.length
+          ? process.documents
+          : [{
+              id: `TED-${pubNum}`,
+              name: `Anuncio oficial TED ${pubNum}.pdf`,
+              extension: 'pdf',
+              docType: 'TED',
+              url: `https://ted.europa.eu/${language === 'en' ? 'en' : 'es'}/notice/${pubNum}/pdf`,
+              size: null,
+            }];
+    const merged = [];
+    const seen = new Set();
+    for (const doc of [...portalDocs, ...baseDocs]) {
+      if (!doc?.id || !doc?.url || seen.has(doc.id) || seen.has(doc.url)) continue;
+      seen.add(doc.id);
+      seen.add(doc.url);
+      merged.push(doc);
+    }
+    return merged;
+  };
+  const cachedRes = await cached(env, `ted:docs:${pubNum}`, 5 * 60 * 1000, async () => {
+    const docs = await fetchDocs();
+    return { success: true, data: docs };
+  }, fresh);
+  const docs = Array.isArray(cachedRes?.data) ? cachedRes.data : [];
+  if (docs.length && row) {
+    await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?')
+      .bind(JSON.stringify(docs), id).run();
+  }
+  return docs;
+}
+
 async function resolvePlacspDocuments(env, id, row, process = {}) {
-  const saved = !id.startsWith('licit:') && Array.isArray(process.documents) && process.documents.length
+  const saved = !id.startsWith('licit:') && !isPortalTenderId(id) && Array.isArray(process.documents) && process.documents.length
     ? process.documents : JSON.parse(row?.documents_json || '[]');
   if (saved.length) return saved;
-  const docs = await fetchPlacspDocuments(id, {url:row?.url, reference:row?.reference || process.reference}).catch(() => []);
+  const docs = await fetchPlacspDocuments(id, {url:row?.url || process.url, reference:row?.reference || process.reference}).catch(() => []);
   if (docs.length && row) {
     await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?')
       .bind(JSON.stringify(docs), id).run();
@@ -64,9 +136,12 @@ async function resolvePlacspDocuments(env, id, row, process = {}) {
 export async function secopDocuments(request, env, ownerId, projectId, documentId) {
   const process = await projectProcess(env, ownerId, projectId);
   if (!process) return Response.json({ error: 'not_found' }, { status: 404 });
-  if (process.source === 'placsp') {
+  if (process.source === 'placsp' || process.source === 'ted') {
     const row = await env.DB.prepare('SELECT documents_json, reference, url FROM placsp_tenders WHERE id = ?').bind(process.id).first();
-    const docs = await resolvePlacspDocuments(env, process.id, row, process);
+    const language = new URL(request.url).searchParams.get('language') === 'en' ? 'en' : 'es';
+    const docs = process.source === 'ted'
+      ? await resolveTedDocuments(env, process.id, { process, row, language })
+      : await resolvePlacspDocuments(env, process.id, row, process);
     if (!documentId && request.method === 'GET') {
       const saved = await env.DB.prepare('SELECT document_id AS id FROM project_secop_files WHERE project_id = ?').bind(projectId).all();
       const imported = new Set(saved.results.map(item => item.id));
@@ -83,14 +158,24 @@ export async function secopDocuments(request, env, ownerId, projectId, documentI
     if (!safeUrl) return Response.json({ error: 'invalid_document' }, { status: 400 });
     if (!fileTypes[doc.extension]) return Response.json({ error: 'unsupported_document' }, { status: 400 });
     let response;
+    let isTedPdfHost = false;
     try {
-      const officialAttachment = process.id.startsWith('licit:') && new URL(safeUrl).hostname !== 'contractaciopublica.cat';
+      const host = new URL(safeUrl).hostname.toLowerCase();
+      isTedPdfHost = host === 'ted.europa.eu';
+      const isPlacspPortalHost = host === 'contrataciondelestado.es' || host.endsWith('.contrataciondelestado.es') || host === 'contrataciondelsectorpublico.gob.es' || host.endsWith('.contrataciondelsectorpublico.gob.es');
       response = await fetch(safeUrl, {
-        redirect: officialAttachment ? 'manual' : 'follow',
-        headers: officialAttachment ? placspDocumentHeaders(fileTypes[doc.extension]) : undefined,
+        redirect: isPlacspPortalHost ? 'manual' : 'follow',
+        headers: isTedPdfHost ? { Accept: fileTypes[doc.extension] } : isPlacspPortalHost ? placspDocumentHeaders(fileTypes[doc.extension]) : undefined,
         signal: AbortSignal.timeout(60_000),
       });
     } catch { return Response.json({ error: 'download_failed' }, { status: 502 }); }
+    if (
+      isTedPdfHost &&
+      (response.headers.get('x-amzn-waf-action') ||
+        ([403, 405].includes(response.status) && /text\/html/i.test(response.headers.get('content-type') || '')))
+    ) {
+      return Response.json({ error: 'portal_captcha_required', officialUrl: safeUrl }, { status: 502 });
+    }
     if (!response.ok || !response.body || /text\/html/i.test(response.headers.get('content-type') || '')) return Response.json({ error: 'download_failed' }, { status: 502 });
     if (Number(response.headers.get('content-length')) > maxFileBytes) return Response.json({ error: 'file_too_large' }, { status: 413 });
     const name = (doc.name || `documento.${doc.extension}`).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 240) || `documento.${doc.extension}`;
@@ -224,7 +309,7 @@ function placspRowToProcess(row) {
     territory: row.territory || undefined,
     city: row.city || undefined,
     url: row.url || undefined,
-    source: 'placsp',
+    source: isTedTenderId(row.id) ? 'ted' : 'placsp',
     country: 'ES',
     documents,
   };
@@ -286,6 +371,113 @@ function pscpPublication(url) {
   return /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\//i.test(url || '') ? url : null;
 }
 
+const PLACSP_CONTRACT_TYPE_SEARCH_TERMS = {
+  '1': ['Suministros', 'Subministraments'],
+  '2': ['Servicios', 'Serveis'],
+  '3': ['Obras', 'Obres'],
+  '7': ['Administrativo especial', 'Administratiu especial'],
+  '8': ['Privado', 'Privat'],
+  '21': ['Gestión de Servicios Públicos', 'Gestió de serveis'],
+  '22': ['Concesión de Servicios', 'Concessió de serveis'],
+  '31': ['Concesión de Obras Públicas', "Concessió d'obres"],
+  '32': ['Concesión de Obras', "Concessió d'obres"],
+  '40': ['Colaboración', 'Col·laboració'],
+  '50': ['Patrimonial'],
+};
+
+const normDedupKey = value =>
+  String(value || '')
+    .trim()
+    .toLocaleLowerCase('es')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '');
+
+function mergePlacspLiveEntries(portalItems, licitItems, pscpItems, tedItems) {
+  const byId = new Map();
+  const byPub = new Map();
+  const allPubs = new Set();
+  const byRefEntity = new Set();
+  const pscpUrls = new Set((pscpItems || []).map(item => pscpPublication(item.url)).filter(Boolean));
+  const trackRefEntity = item => {
+    const normRef = normDedupKey(item?.reference);
+    const normEntity = normDedupKey(item?.entity);
+    if (normRef.length >= 5 && normEntity.length >= 4) {
+      byRefEntity.add(`${normRef}::${normEntity}`);
+    }
+  };
+
+  for (const item of portalItems || []) {
+    if (!item?.id) continue;
+    const copy = { ...item };
+    byId.set(copy.id, copy);
+    trackRefEntity(copy);
+    const pub = placspPublication(copy.url);
+    if (pub) allPubs.add(pub);
+    if (pub && pub.startsWith('placsp:') && !byPub.has(pub)) byPub.set(pub, copy);
+  }
+
+  for (const item of licitItems || []) {
+    if (!item?.id) continue;
+    const pscpUrl = pscpPublication(item.url);
+    if (pscpUrl && pscpUrls.has(pscpUrl)) continue;
+    const pub = placspPublication(item.url);
+    if (pub) allPubs.add(pub);
+    if (pub && pub.startsWith('placsp:') && byPub.has(pub)) {
+      const existing = byPub.get(pub);
+      if (!existing.publicationDate && item.publicationDate) existing.publicationDate = item.publicationDate;
+      if (!existing.territory && item.territory) {
+        existing.territory = item.territory;
+        existing.department = item.territory;
+      }
+      if ((!existing.cpvCodes || !existing.cpvCodes.length) && item.cpvCodes?.length) {
+        existing.cpvCodes = item.cpvCodes;
+        existing.classificationCode = existing.classificationCode || item.classificationCode || item.cpvCodes[0];
+      }
+      if (!existing.classificationCode && item.classificationCode) existing.classificationCode = item.classificationCode;
+      if (!existing.description && item.description) existing.description = item.description;
+      if ((!existing.modality || !existing.modality.includes('·')) && item.modality) existing.modality = item.modality;
+      if (!existing.entityId && item.entityId) existing.entityId = item.entityId;
+      if ((!existing.deadline || existing.deadline.length === 10) && item.deadline && item.deadline.length > (existing.deadline?.length || 0)) {
+        existing.deadline = item.deadline;
+        existing.deadlineVerified = Boolean(item.deadlineVerified ?? true);
+      }
+      trackRefEntity(existing);
+      continue;
+    }
+    if (!byId.has(item.id)) {
+      byId.set(item.id, item);
+      trackRefEntity(item);
+    }
+  }
+
+  for (const item of pscpItems || []) {
+    if (!item?.id || byId.has(item.id)) continue;
+    byId.set(item.id, item);
+    trackRefEntity(item);
+    const pub = placspPublication(item.url);
+    if (pub) allPubs.add(pub);
+  }
+
+  for (const item of tedItems || []) {
+    if (!item?.id || byId.has(item.id)) continue;
+    if (item.portalUrl) {
+      const pscpUrl = pscpPublication(item.portalUrl);
+      if (pscpUrl && pscpUrls.has(pscpUrl)) continue;
+      const pub = placspPublication(item.portalUrl);
+      if (pub && allPubs.has(pub)) continue;
+    }
+    const normRef = normDedupKey(item.reference);
+    const normEntity = normDedupKey(item.entity);
+    if (normRef.length >= 5 && normEntity.length >= 4 && byRefEntity.has(`${normRef}::${normEntity}`)) {
+      continue;
+    }
+    byId.set(item.id, item);
+  }
+
+  return [...byId.values()];
+}
+
 export async function searchPlacspD1(env, params = {}, ownerId) {
   const deadlineCutoff = params.openOnly ? placsp.placspDeadlineCutoff() : null;
   const keywords = placsp.placspKeywordVariants(params.keyword);
@@ -300,12 +492,88 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
     const ids = saved && JSON.parse(saved.response_json).data;
     if (ids?.length >= offset) previousIds = ids.slice(0, offset);
   }
-  const market = await Promise.all([
-    searchLicit(params, deadlineCutoff, offset + limit).catch(() => null),
-    searchCatalanTenders(params, deadlineCutoff, offset + limit).catch(() => null),
-  ]);
-  const [primary, pscp] = market;
-  const boe = !primary && deadlineCutoff && !offset && keywords.length
+
+  const hasKeyword = Boolean(params.keyword?.trim());
+  const hasEntity = Boolean(typeof params.entity === 'string' && params.entity.trim());
+  const hasReference = Boolean(typeof params.reference === 'string' && params.reference.trim());
+  const hasContractType = Boolean(typeof params.contractType === 'string' && params.contractType.trim());
+  const hasEuFunded = Boolean(typeof params.euFunded === 'string' && params.euFunded.trim());
+  const hasTerritory = Boolean(Array.isArray(params.department) ? params.department.length : typeof params.department === 'string' && params.department.trim());
+  const portalOnlyFilters = hasEntity || hasReference || hasContractType || hasEuFunded;
+
+  const cachedPortalDetail = async (url, id, publicationDate = '') => {
+    const res = await cached(env, `placsp:portal-detail:${id}`, 5 * 60 * 1000, async () => {
+      const data = await fetchPlacspPortalTender(url, { id, publicationDate });
+      return { success: Boolean(data), data };
+    }, params.fresh === true);
+    return res.data || null;
+  };
+
+  let portal = null;
+  let licit = null;
+  let pscp = null;
+  const tedEligible = !hasContractType || Boolean(TED_CONTRACT_TYPE_TO_NATURE[params.contractType.trim()]);
+  const tedPromise = tedEligible
+    ? searchTedNotices(params, {
+        defaultCountries: ['ESP'],
+        spanishTerritories: params.department,
+        openOnly: Boolean(deadlineCutoff),
+        limit: Math.min(50, offset + limit),
+        offset: 0,
+      }).catch(() => null)
+    : Promise.resolve(null);
+
+  if (!hasKeyword && (portalOnlyFilters || !hasTerritory)) {
+    const [portalRes, pscpRes] = await Promise.all([
+      searchPlacspPortalLicitaciones(params, deadlineCutoff, offset + limit, {
+        enrichDetail: (u, id) => cachedPortalDetail(u, id),
+      }).catch(() => null),
+      hasEuFunded ? Promise.resolve({ items: [], truncated: false }) : searchCatalanTenders(params, deadlineCutoff, offset + limit).catch(() => null),
+    ]);
+    portal = portalRes;
+    pscp = pscpRes;
+    if (!portal && !hasEuFunded) {
+      licit = await searchLicit(params, deadlineCutoff, offset + limit).catch(() => null);
+    }
+  } else if (hasKeyword) {
+    const [licitRes, pscpRes, portalRes] = await Promise.all([
+      hasEuFunded ? Promise.resolve(null) : searchLicit(params, deadlineCutoff, offset + limit).catch(() => null),
+      hasEuFunded ? Promise.resolve({ items: [], truncated: false }) : searchCatalanTenders(params, deadlineCutoff, offset + limit).catch(() => null),
+      portalOnlyFilters
+        ? searchPlacspPortalLicitaciones(params, deadlineCutoff, Math.min(100, (offset + limit) * 2), {
+            enrichDetail: (u, id) => cachedPortalDetail(u, id),
+          }).catch(() => null)
+        : searchPlacspPortalDocumentHits(params.keyword.trim(), { maxPages: offset ? 2 : 1 }).catch(() => null),
+    ]);
+    licit = licitRes;
+    pscp = pscpRes;
+    if (portalOnlyFilters) {
+      portal = portalRes;
+    } else if (portalRes) {
+      const excludePublications = new Set(
+        (licit?.items || []).map(item => placspPublication(item.url)).filter(Boolean)
+      );
+      const enrichedItems = await enrichPlacspPortalDocumentHits(portalRes.hits, {
+        excludePublications,
+        fromDate: params.fromDate || '',
+        deadlineCutoff,
+        maxDetails: licit ? 8 : 12,
+        fetchTender: async hit => cachedPortalDetail(hit.url, hit.id, hit.publicationDate),
+      });
+      portal = { items: enrichedItems, truncated: portalRes.truncated };
+    }
+  } else {
+    const [licitRes, pscpRes] = await Promise.all([
+      searchLicit(params, deadlineCutoff, offset + limit).catch(() => null),
+      searchCatalanTenders(params, deadlineCutoff, offset + limit).catch(() => null),
+    ]);
+    licit = licitRes;
+    pscp = pscpRes;
+  }
+
+  const primarySucceeded = Boolean(portal || licit);
+  const ted = primarySucceeded ? await tedPromise : null;
+  const boe = !primarySucceeded && deadlineCutoff && !offset && keywords.length
     ? findRecentBoeTenders(keywords, deadlineCutoff, {
         fresh: params.fresh === true,
         cached: async (key, ttl, load, fresh) => (await cached(env, `placsp:boe:${key}`, ttl, async () => {
@@ -314,22 +582,24 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
         }, fresh)).data,
       }).catch(() => [])
     : Promise.resolve([]);
-  if (!primary) await syncPlacspFeed(env, {force:params.fresh === true}).catch(() => {});
-  const unavailableSource = !primary ? 'licit.es' : !pscp ? 'PSCP' : '';
+  if (!primarySucceeded) await syncPlacspFeed(env, {force:params.fresh === true}).catch(() => {});
+  const unavailableSource = !primarySucceeded ? 'PLACSP / licit.es' : (!pscp && !hasEuFunded) ? 'PSCP' : '';
   const where = [];
   const binds = [];
-  if (primary) {
-    const entries = [...primary.items, ...(pscp?.items || [])];
+  if (primarySucceeded) {
+    const entries = mergePlacspLiveEntries(portal?.items, licit?.items, pscp?.items, ted?.items);
     await upsertPlacspEntries(env, entries);
     where.push('id IN (SELECT value FROM json_each(?))');
     binds.push(JSON.stringify(entries.map(item => item.id)));
   }
   const isPscpPublication = alias => `substr(${alias}.url, 1, 32) = 'https://contractaciopublica.cat/' AND instr(${alias}.url, '/detall-publicacio/') > 0`;
+  const isPortalPublication = alias => `instr(${alias}.url, '/wps/poc') > 0 AND instr(${alias}.url, 'idEvl=') > 0`;
   if (previousIds) {
     where.push(`NOT EXISTS (
       SELECT 1 FROM placsp_tenders previous JOIN json_each(?) seen ON seen.value = previous.id
       WHERE previous.id = placsp_tenders.id OR
-        (${isPscpPublication("placsp_tenders")} AND previous.url = placsp_tenders.url)
+        (${isPscpPublication("placsp_tenders")} AND previous.url = placsp_tenders.url) OR
+        ((previous.id LIKE 'portal:%') <> (placsp_tenders.id LIKE 'portal:%') AND ${isPortalPublication("placsp_tenders")} AND previous.url = placsp_tenders.url)
     )`);
     binds.push(JSON.stringify(previousIds));
   }
@@ -338,9 +608,10 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
     binds.push(placsp.PLACSP_OPEN_STATUS, deadlineCutoff, placsp.PSCP_OPEN_PHASE);
     where.push("id NOT LIKE 'boe:%' OR NOT EXISTS (SELECT 1 FROM placsp_tenders native WHERE native.reference = placsp_tenders.reference AND native.entity = placsp_tenders.entity COLLATE NOCASE AND native.id NOT LIKE 'boe:%' AND native.id NOT LIKE 'pscp:%')");
   }
-  if (!primary && keywords.length) {
+  if ((!primarySucceeded || (hasKeyword && portalOnlyFilters && !licit)) && keywords.length) {
     const columns = ['title', 'entity', 'reference', 'cpv_codes_json', 'description'];
-    where.push(`(${keywords.flatMap(() => columns.map(column => `${column} LIKE ?`)).join(' OR ')})`);
+    const termClause = `(${keywords.flatMap(() => columns.map(column => `${column} LIKE ?`)).join(' OR ')})`;
+    where.push(primarySucceeded ? `(${termClause} OR id LIKE 'ted:%')` : termClause);
     binds.push(...keywords.flatMap(term => columns.map(() => `%${term}%`)));
   }
   if (params.classificationClass && /^\d{4,8}$/.test(String(params.classificationClass))) {
@@ -359,7 +630,35 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
     }
   };
   addCategoryFilter('territory', params.department);
-  addCategoryFilter('modality', params.modality);
+  if (params.modality) {
+    if (Array.isArray(params.modality) && params.modality.length) {
+      where.push(`(${params.modality.map(() => '(modality = ? OR modality LIKE ?)').join(' OR ')})`);
+      for (const item of params.modality) {
+        const term = String(item || '').trim();
+        binds.push(term, `%${term}%`);
+      }
+    } else if (typeof params.modality === 'string' && params.modality.trim()) {
+      where.push('modality LIKE ?');
+      binds.push(`%${params.modality.trim()}%`);
+    }
+  }
+  if (hasEntity) {
+    where.push('entity LIKE ?');
+    binds.push(`%${params.entity.trim()}%`);
+  }
+  if (hasReference) {
+    where.push('reference LIKE ?');
+    binds.push(`%${params.reference.trim()}%`);
+  }
+  if (hasContractType) {
+    const terms = PLACSP_CONTRACT_TYPE_SEARCH_TERMS[params.contractType.trim()];
+    if (terms?.length) {
+      const clauses = terms.map(() => 'modality LIKE ?');
+      if (portal?.applied?.contractType) clauses.push("id LIKE 'portal:%'");
+      where.push(`(${clauses.join(' OR ')})`);
+      binds.push(...terms.map(term => `%${term}%`));
+    }
+  }
   if (params.status) {
     if (Array.isArray(params.status) && params.status.length) {
       const ph = params.status.map(() => '?').join(',');
@@ -372,7 +671,14 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
   }
   if (Number.isFinite(params.minValue)) { where.push('value >= ?'); binds.push(Number(params.minValue)); }
   if (Number.isFinite(params.maxValue)) { where.push('value <= ?'); binds.push(Number(params.maxValue)); }
-  if (params.fromDate) { where.push('publication_date >= ?'); binds.push(params.fromDate); }
+  if (params.fromDate) {
+    if (portal?.applied?.fromDate) {
+      where.push("(publication_date >= ? OR (id LIKE 'portal:%' AND publication_date = ''))");
+    } else {
+      where.push('publication_date >= ?');
+    }
+    binds.push(params.fromDate);
+  }
   const colMap = { title: 'title', entity: 'entity', modality: 'modality', status: 'status', value: 'value', publicationDate: 'publication_date', deadline: 'deadline', department: 'territory' };
   for (const [k, v] of Object.entries(params.columnFilters || {})) {
     const col = colMap[k];
@@ -383,6 +689,9 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
   }
   const orderCol = colMap[params.sortBy] || 'publication_date';
   const orderDir = params.sortDirection === 'asc' ? 'ASC' : 'DESC';
+  const orderExpr = orderCol === 'publication_date'
+    ? `COALESCE(NULLIF(publication_date, ''), substr(updated_at, 1, 10)) ${orderDir}, updated_at ${orderDir}`
+    : `${orderCol} ${orderDir}`;
   // Group official publications in both the live search and the cached fallback.
   const filters = where.length ? `WHERE ${where.map(clause => `(${clause})`).join(' AND ')}` : '';
   const sql = `
@@ -394,13 +703,13 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
         ((preferred.id LIKE 'pscp:%') = (current.id LIKE 'pscp:%') AND preferred.id < current.id)
       )
     )
-    ORDER BY ${orderCol} ${orderDir}, id ASC LIMIT ? OFFSET ?
+    ORDER BY ${orderExpr}, id ASC LIMIT ? OFFSET ?
   `;
   const readPage = async () => (await env.DB.prepare(sql).bind(...binds, limit + 1, previousIds ? 0 : offset).all()).results || [];
   let rows = await readPage();
-  let liveHasMore = Boolean(primary && (primary.truncated || pscp?.truncated));
+  let liveHasMore = Boolean(primarySucceeded && (portal?.truncated || licit?.truncated || pscp?.truncated || ted?.truncated));
   const canExpand = Boolean(params.openOnly || params.keyword?.trim() || params.classificationClass);
-  if (!primary && (!rows.length || (rows.length <= limit && canExpand))) {
+  if (!primarySucceeded && !hasEuFunded && (!rows.length || (rows.length <= limit && canExpand))) {
     try {
       const live = await placsp.createPlacspService().searchPscpSocrata({
         ...params, deadlineCutoff, limit:previousIds ? Math.min(100,offset+limit+1) : limit,
@@ -451,7 +760,14 @@ async function getPlacspCategories(env, category) {
   try { await syncPlacspFeed(env); } catch { /* return whatever is cached in D1 */ }
   const col = category === 'department' ? 'territory' : category === 'modality' ? 'modality' : 'status';
   const rows = await env.DB.prepare(`SELECT DISTINCT ${col} AS val FROM placsp_tenders WHERE ${col} <> '' ORDER BY val LIMIT 500`).all();
-  return { success: true, data: (rows.results || []).map(r => r.val), message: 'ok' };
+  const values = (rows.results || []).map(r => r.val);
+  if (values.length) return { success: true, data: values, message: 'ok' };
+  const defaults = category === 'department'
+    ? PLACSP_TERRITORY_DEFAULTS
+    : category === 'modality'
+      ? PLACSP_MODALITY_DEFAULTS
+      : PLACSP_STATUS_DEFAULTS;
+  return { success: true, data: defaults, message: 'ok' };
 }
 
 export async function getPlacspDetail(env, id, {fresh = false} = {}) {
@@ -464,9 +780,100 @@ export async function getPlacspDetail(env, id, {fresh = false} = {}) {
       return {success:false, data:null, message:'No se pudo actualizar el expediente en licit.es.'};
     }
   }
+  const existingRow = isPortalTenderId(id)
+    ? await env.DB.prepare('SELECT * FROM placsp_tenders WHERE id = ?').bind(id).first()
+    : null;
+  const needsPortalRefresh = Boolean(
+    isPortalTenderId(id) &&
+    existingRow?.url &&
+    (fresh || !existingRow.territory || !existingRow.cpv_codes_json || existingRow.cpv_codes_json === '[]')
+  );
+  if (needsPortalRefresh) {
+    const tender = await fetchPlacspPortalTender(existingRow.url, {
+      id,
+      publicationDate: existingRow.publication_date || '',
+      includeDocuments: fresh,
+    }).catch(() => null);
+    if (!tender) {
+      if (fresh) return {success:false, data:null, message:'No se pudo actualizar el expediente en PLACSP.'};
+    } else {
+      await upsertPlacspEntries(env, [tender]);
+    }
+  }
   const row = await env.DB.prepare('SELECT * FROM placsp_tenders WHERE id = ?').bind(id).first();
   if (!row) return { success: false, data: null, message: 'No se encontró el proceso en PLACSP.' };
   return { success: true, data: placspRowToProcess(row), message: 'ok' };
+}
+
+function stripInternalTedFields(item) {
+  if (!item) return null;
+  const { description: _description, documents: _documents, updatedAt: _updatedAt, ...rest } = item;
+  return rest;
+}
+
+export async function getTedDetail(env, id, { fresh = false, includeDocuments = false, language = 'es' } = {}) {
+  if (!isTedTenderId(id)) {
+    return { success: false, data: null, message: 'Identificador TED inválido.' };
+  }
+  const pubNum = tedPublicationNumber(id);
+  const lang = language === 'en' ? 'en' : 'es';
+  let item = null;
+  try {
+    const res = await cached(env, `ted:detail:${pubNum}:${lang}`, 5 * 60 * 1000, async () => {
+      const data = await fetchTedNoticeById(id, { language: lang });
+      return { success: Boolean(data), data };
+    }, fresh);
+    item = res?.data || null;
+  } catch {
+    item = null;
+  }
+
+  const row = await env.DB.prepare('SELECT * FROM placsp_tenders WHERE id = ?').bind(id).first();
+  if (!item) {
+    if (!fresh && row) return { success: true, data: placspRowToProcess(row), message: 'ok' };
+    return { success: false, data: null, message: 'No se pudo consultar el expediente en TED Europa.' };
+  }
+
+  let docs = item.documents || [];
+  if (includeDocuments) {
+    docs = await resolveTedDocuments(env, id, { process: item, row, fresh, language: lang }).catch(() => docs);
+  }
+  const withDocs = { ...item, documents: docs };
+  if (row || item.country === 'ES') {
+    await upsertPlacspEntries(env, [withDocs]).catch(() => {});
+  }
+  const data = includeDocuments
+    ? { ...stripInternalTedFields(withDocs), documents: docs }
+    : stripInternalTedFields(withDocs);
+  return { success: true, data, message: 'ok' };
+}
+
+export async function searchTed(env, params = {}, ownerId) {
+  const safeParams = {
+    ...params,
+    offset: Math.max(Math.floor(Number(params.offset) || 0), 0),
+    limit: Math.min(Math.max(Math.floor(Number(params.limit) || 20), 1), 100),
+  };
+  const key = 'ted:search:' + await searchCacheHash([ownerId || '', { ...safeParams, fresh: undefined }]);
+  return cached(env, key, 5 * 60 * 1000, async () => {
+    try {
+      const live = await searchTedNotices(safeParams, {
+        defaultCountries: ['ESP'],
+        openOnly: safeParams.openOnly === true,
+        limit: safeParams.limit,
+        offset: safeParams.offset,
+        language: safeParams.language === 'en' ? 'en' : 'es',
+      });
+      const items = live.items.map(stripInternalTedFields);
+      return {
+        success: true,
+        data: { items, truncated: live.truncated },
+        message: items.length ? 'ok' : 'No se encontraron procesos con esos criterios',
+      };
+    } catch {
+      return { success: false, message: 'No se pudo consultar TED Europa.' };
+    }
+  }, params.fresh === true);
 }
 
 export async function secopCategories(request, env) {
@@ -476,6 +883,14 @@ export async function secopCategories(request, env) {
   if (dataset === 'placsp') {
     const result = await cached(env, `category:placsp:${category}`, 30*60*1000, () => getPlacspCategories(env, category));
     return Response.json(result, { status: result.success ? 200 : 502 });
+  }
+  if (dataset === 'ted') {
+    const data = category === 'department'
+      ? TED_COUNTRY_DEFAULTS
+      : category === 'modality'
+        ? TED_MODALITY_DEFAULTS
+        : TED_STATUS_DEFAULTS;
+    return Response.json({ success: true, data, message: 'ok' });
   }
   const result = await cached(env, `category:${dataset}:${category}`, 7*24*60*60*1000, () => service('es').getFilterOptions(dataset,category));
   return Response.json(result,{status:result.success?200:502});
@@ -490,13 +905,17 @@ export async function searchSecop(request, env, ownerId) {
   if (!sameOrigin(request, env)) return Response.json({ error: 'invalid_origin' }, { status: 403 });
   const input = await body(request);
   const badCategory = key => input[key] !== undefined && !(typeof input[key] === 'string' && input[key].length <= 300) && !(Array.isArray(input[key]) && input[key].length <= 100 && input[key].every(x => typeof x === 'string' && x.length <= 300));
-  if (!input || (input.openOnly !== undefined && typeof input.openOnly !== 'boolean') || !sources.includes(input.dataset) || categoryNames.some(badCategory) || badCategory('territory') || ['keyword','fromDate','classificationClass','cpvCode'].some(key => input[key] !== undefined && (typeof input[key] !== 'string' || input[key].length > 300)) || (input.fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.fromDate)) || ['minValue','maxValue'].some(key => input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0)) || !Number.isInteger(input.offset ?? 0) || (input.offset ?? 0) < 0 || (input.offset ?? 0) > 100000 || (input.sortBy && !columnNames.includes(input.sortBy)) || (input.sortDirection && !['asc','desc'].includes(input.sortDirection)) || (input.columnFilters && (typeof input.columnFilters !== 'object' || Array.isArray(input.columnFilters) || Object.entries(input.columnFilters).some(([k,v]) => !columnNames.includes(k) || typeof v !== 'string' || v.length > 300)))) return Response.json({ error: 'invalid_search' }, { status: 400 });
+  if (!input || (input.openOnly !== undefined && typeof input.openOnly !== 'boolean') || !sources.includes(input.dataset) || categoryNames.some(badCategory) || badCategory('territory') || ['keyword','fromDate','classificationClass','cpvCode','entity','reference'].some(key => input[key] !== undefined && (typeof input[key] !== 'string' || input[key].length > 300)) || (input.contractType !== undefined && (typeof input.contractType !== 'string' || (input.contractType !== '' && !PLACSP_CONTRACT_TYPE_CODES.includes(input.contractType)))) || (input.euFunded !== undefined && (typeof input.euFunded !== 'string' || !['', 'EU', 'NO-EU'].includes(input.euFunded))) || (input.fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.fromDate)) || ['minValue','maxValue'].some(key => input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0)) || !Number.isInteger(input.offset ?? 0) || (input.offset ?? 0) < 0 || (input.offset ?? 0) > 100000 || (input.sortBy && !columnNames.includes(input.sortBy)) || (input.sortDirection && !['asc','desc'].includes(input.sortDirection)) || (input.columnFilters && (typeof input.columnFilters !== 'object' || Array.isArray(input.columnFilters) || Object.entries(input.columnFilters).some(([k,v]) => !columnNames.includes(k) || typeof v !== 'string' || v.length > 300)))) return Response.json({ error: 'invalid_search' }, { status: 400 });
   const params = { dataset: input.dataset, limit: 20, offset: input.offset ?? 0 };
-  for (const key of ['keyword', ...categoryNames, 'fromDate', 'minValue', 'maxValue', 'sortBy', 'sortDirection', 'columnFilters', 'classificationClass']) if (input[key] !== undefined) params[key] = input[key];
+  for (const key of ['keyword', ...categoryNames, 'fromDate', 'minValue', 'maxValue', 'sortBy', 'sortDirection', 'columnFilters', 'classificationClass', 'entity', 'reference', 'contractType', 'euFunded']) if (input[key] !== undefined) params[key] = input[key];
   if (input.cpvCode !== undefined && params.classificationClass === undefined) params.classificationClass = input.cpvCode;
   if (input.territory !== undefined && params.department === undefined) params.department = input.territory;
   if (input.dataset === 'placsp') {
     const result = await searchPlacspD1(env, { ...params, openOnly: input.openOnly === true, fresh: input.fresh === true }, ownerId);
+    return Response.json(result, { status: result.success ? 200 : 502 });
+  }
+  if (input.dataset === 'ted') {
+    const result = await searchTed(env, { ...params, openOnly: input.openOnly === true, fresh: input.fresh === true, language: input.language === 'en' ? 'en' : 'es' }, ownerId);
     return Response.json(result, { status: result.success ? 200 : 502 });
   }
   const key = 'search:' + await searchCacheHash([ownerId,params]);
@@ -508,7 +927,11 @@ export async function secopDetail(request, env) {
   const url = new URL(request.url), id = url.searchParams.get('id') || '', source = url.searchParams.get('source');
   if (!projectSources.includes(source) || !id.trim() || id.length > 200) return Response.json({error:'invalid_process'},{status:400});
   if (source === 'placsp') {
-    const result = await getPlacspDetail(env, id);
+    const result = await getPlacspDetail(env, id, { fresh: url.searchParams.get('fresh') === '1' });
+    return Response.json(result, { status: result.success ? 200 : 404 });
+  }
+  if (source === 'ted') {
+    const result = await getTedDetail(env, id, { fresh: url.searchParams.get('fresh') === '1', language: url.searchParams.get('language') === 'en' ? 'en' : 'es' });
     return Response.json(result, { status: result.success ? 200 : 404 });
   }
   const key = `detail:${source}:${id}`;
@@ -546,10 +969,12 @@ async function secopDocumentPage(env, api, portfolioId, offset) {
 export async function secopDocumentCatalog(request, env) {
   if (request.method !== 'GET') return new Response('Method not allowed',{status:405});
   const url = new URL(request.url), source = url.searchParams.get('source'), id = url.searchParams.get('id') || '';
-  if (source === 'placsp') {
+  if (source === 'placsp' || source === 'ted') {
     if (!id.trim() || id.length > 200) return Response.json({ error: 'invalid_process' }, { status: 400 });
     const row = await env.DB.prepare('SELECT documents_json, reference, url FROM placsp_tenders WHERE id = ?').bind(id).first();
-    const docs = await resolvePlacspDocuments(env, id, row);
+    const docs = source === 'ted'
+      ? await resolveTedDocuments(env, id, { row, language: url.searchParams.get('language') === 'en' ? 'en' : 'es' })
+      : await resolvePlacspDocuments(env, id, row);
     const items = docs.map(({ url: _url, ...item }) => item);
     return Response.json({ success: true, data: { items, truncated: false, partial: false }, message: 'ok' });
   }
@@ -572,16 +997,21 @@ function placspPublication(url) {
   return id ? 'placsp:' + id : null;
 }
 
-async function findSavedPlacspPublication(env, ownerId, id) {
+async function findSavedPlacspPublication(env, ownerId, id, portalUrl = '') {
   const tender = await env.DB.prepare('SELECT url FROM placsp_tenders WHERE id = ?').bind(id).first();
-  const publication = placspPublication(tender?.url);
+  const publication = placspPublication(tender?.url) || placspPublication(portalUrl);
   if (!publication) return null;
   const candidates = await env.DB.prepare(`
-    SELECT saved.project_id, COALESCE(NULLIF(tender.url, ''), json_extract(saved.process_json, '$.url')) AS url
+    SELECT saved.project_id,
+      NULLIF(tender.url, '') AS tenderUrl,
+      json_extract(saved.process_json, '$.portalUrl') AS portalUrl,
+      json_extract(saved.process_json, '$.url') AS processUrl
     FROM project_secop saved LEFT JOIN placsp_tenders tender ON tender.id = saved.external_id
-    WHERE saved.owner_id = ? AND saved.source = 'placsp' AND saved.external_id <> ?
+    WHERE saved.owner_id = ? AND saved.source IN ('placsp', 'ted') AND saved.external_id <> ?
   `).bind(ownerId, id).all();
-  return candidates.results.find(candidate => placspPublication(candidate.url) === publication)?.project_id || null;
+  return candidates.results.find(candidate =>
+    (placspPublication(candidate.tenderUrl) || placspPublication(candidate.portalUrl) || placspPublication(candidate.processUrl)) === publication
+  )?.project_id || null;
 }
 
 export async function createSecopProject(request, env, ownerId) {
@@ -591,10 +1021,10 @@ export async function createSecopProject(request, env, ownerId) {
   const process = input?.process;
   if (!process || !projectSources.includes(process.source) || typeof process.id !== 'string' || !process.id.trim() || process.id.length > 200 || typeof process.title !== 'string' || !process.title.trim() || process.title.length > 5000 || JSON.stringify(process).length > 20_000) return Response.json({ error: 'invalid_process' }, { status: 400 });
   const ids = input.documentIds ?? [];
-  const validDocId = id => typeof id === 'string' && (process.source === 'placsp' ? /^[A-Za-z0-9._-]{1,100}$/.test(id) : /^\d+$/.test(id));
+  const validDocId = id => typeof id === 'string' && ((process.source === 'placsp' || process.source === 'ted') ? /^[A-Za-z0-9._-]{1,100}$/.test(id) : /^\d+$/.test(id));
   if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => !validDocId(id)) || new Set(ids).size !== ids.length || (ids.length && process.source === 'secop-i') || (ids.length && process.source === 'secop-ii' && !/^CO1\.BDOS\.\d+$/.test(process.portfolioId || ''))) return Response.json({error:'invalid_documents'},{status:400});
-  if (process.source === 'placsp') {
-    const existingProject = await findSavedPlacspPublication(env, ownerId, process.id);
+  if (process.source === 'placsp' || process.source === 'ted') {
+    const existingProject = await findSavedPlacspPublication(env, ownerId, process.id, process.portalUrl || process.url);
     if (existingProject) return Response.json({error:'already_saved', projectId:existingProject}, {status:409});
   }
   const project = { id: crypto.randomUUID(), title: process.title.trim().slice(0, 300), createdAt: new Date().toISOString() };

@@ -9,7 +9,7 @@ import {Button} from '@/shared/ui/primitives/button';
 import {Input} from '@/shared/ui/primitives/input';
 import {Popover,PopoverContent,PopoverTrigger} from '@/shared/ui/primitives/popover';
 
-type Project={id:string;title:string;hasOffer?:number|boolean;fileCount?:number;hasPreparation?:number|boolean;hasDraft?:number|boolean;hasReviewedWord?:number|boolean;hasSubmission?:number|boolean;latestResult?:string|null;tenderEntity?:string|null;tenderReference?:string|null;tenderStatus?:string|null;tenderDeadline?:string|null;tenderValue?:number|null;tenderCurrency?:string|null;tenderDepartment?:string|null;tenderTerritory?:string|null;tenderSource?:string|null;tenderCountry?:'CO'|'ES'|null};
+type Project={id:string;title:string;hasOffer?:number|boolean;fileCount?:number;hasPreparation?:number|boolean;hasDraft?:number|boolean;hasReviewedWord?:number|boolean;hasSubmission?:number|boolean;latestResult?:string|null;tenderEntity?:string|null;tenderReference?:string|null;tenderStatus?:string|null;tenderDeadline?:string|null;tenderValue?:number|null;tenderCurrency?:string|null;tenderDepartment?:string|null;tenderTerritory?:string|null;tenderSource?:string|null;tenderCountry?:string|null};
 type Tab='feasibility'|'documents'|'chat'|'prepare'|'tracking'|'reviews'|'history';
 type Focus='prepare'|'submit'|'after'|'duplicates'|'rejection';
 export function WebProjectList({projects,language,market='ALL',onOpen,onRemove,onOpenReviews,children,feasibilityEnabled=false}:{projects:Project[];language:'es'|'en';market?:ProcurementMarket;onOpen:(id:string,tab:Tab,focus?:Focus)=>void;onRemove:(id:string)=>void;onOpenReviews?:(mode:'duplicate'|'rejection')=>void;children:ReactNode;feasibilityEnabled?:boolean}){

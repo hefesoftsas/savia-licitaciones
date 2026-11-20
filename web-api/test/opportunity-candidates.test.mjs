@@ -47,21 +47,37 @@ test('solo muestra procesos abiertos y descarta los que ya cerraron', async () =
  assert.equal(isOpenOpportunity({source:'placsp',status:'Publicado',statusCode:'PUB',deadline:'2026-11-10T19:30:00',deadlineVerified:true},now),true);
  assert.equal(isOpenOpportunity({source:'placsp',status:'Publicado',statusCode:'PUB',deadline:'2026-11-10T18:30:00',deadlineVerified:true},now),false);
  assert.equal(isOpenOpportunity({source:'placsp',status:'Evaluación',statusCode:'EV'},now),false);
+ assert.equal(isOpenOpportunity({source:'ted',status:'Publicado',statusCode:'PUB',deadline:'2026-11-10T19:30:00',deadlineVerified:true},now),true);
+ assert.equal(isOpenOpportunity({source:'ted',status:'Publicado',statusCode:'PUB',deadline:'2026-11-10T18:30:00',deadlineVerified:true},now),false);
+ assert.equal(isOpenOpportunity({source:'ted',status:'Adjudicado',statusCode:'ADJ'},now),false);
 });
 
-test('soporta market ES y ALL con PLACSP, CPV y EUR', async () => {
+test('soporta market ES y ALL con PLACSP, TED, CPV y EUR deduplicando candidatos', async () => {
  const calls=[];
  const searchProcesses=async query=>{
-  calls.push(query.dataset);
+  calls.push(query);
   if(query.dataset==='placsp' && query.keyword==='cloud'){
-   return {success:true,data:{items:[{id:'p1',source:'placsp',country:'ES',title:'Nube pública',status:'Publicado',statusCode:'PUB',classificationCode:'72000000',value:90000,currency:'EUR',currencyVerified:true,deadline:'2026-12-01',deadlineVerified:true}]}};
+   return {success:true,data:{items:[
+    {id:'p1',source:'placsp',country:'ES',reference:'EXP-PLACSP-1',entity:'Ministerio A',title:'Nube pública',status:'Publicado',statusCode:'PUB',classificationCode:'72000000',value:90000,currency:'EUR',currencyVerified:true,deadline:'2026-12-01',deadlineVerified:true,url:'https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=SAME1'},
+   ]}};
+  }
+  if(query.dataset==='ted' && query.keyword==='cloud'){
+   return {success:true,data:{items:[
+    {id:'ted:700-2026',source:'ted',country:'ES',reference:'TED-DUP-URL',entity:'Otro',title:'Duplicado URL',status:'Publicado',statusCode:'PUB',classificationCode:'72000000',value:90000,currency:'EUR',currencyVerified:true,deadline:'2026-12-01T12:00:00',deadlineVerified:true,portalUrl:'https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=SAME1'},
+    {id:'ted:701-2026',source:'ted',country:'ES',reference:'EXP-PLACSP-1',entity:'Ministerio A',title:'Duplicado ref+entidad',status:'Publicado',statusCode:'PUB',classificationCode:'72000000',value:90000,currency:'EUR',currencyVerified:true,deadline:'2026-12-01T12:00:00',deadlineVerified:true},
+    {id:'ted:70899-2026',source:'ted',country:'ES',reference:'URA/001/2026',entity:'Agencia Vasca del Agua',title:'Hidrología País Vasco',status:'Publicado',statusCode:'PUB',classificationCode:'71311100',value:500000,currency:'EUR',currencyVerified:true,deadline:'2026-12-31T12:00:00',deadlineVerified:true},
+   ]}};
   }
   return {success:true,data:{items:[]}};
  };
- const esOnly=await searchOpportunityCandidates({profile:{reviewedRup:[],cpvCodes:['72000000']},terms:['cloud'],searchProcesses,now:Date.parse('2026-11-01T12:00:00Z'),market:'ES'});
- assert.ok(calls.every(d=>d==='placsp'));
- assert.equal(esOnly.shortlist.length,1);
- assert.equal(esOnly.shortlist[0].currency,'EUR');
+ const esOnly=await searchOpportunityCandidates({profile:{reviewedRup:[],cpvCodes:['72200000']},terms:['cloud'],searchProcesses,now:Date.parse('2026-11-01T12:00:00Z'),market:'ES'});
+ assert.ok(calls.every(c=>(c.dataset==='placsp'||c.dataset==='ted') && c.openOnly===true));
+ assert.ok(calls.some(c=>c.dataset==='placsp'));
+ assert.ok(calls.some(c=>c.dataset==='ted'));
+ assert.ok(calls.some(c=>c.classificationClass==='72200000'));
+ assert.deepEqual(esOnly.shortlist.map(i=>i.id).sort(),['placsp:p1','ted:ted:70899-2026']);
+ assert.equal(esOnly.shortlist.find(i=>i.id==='placsp:p1').currency,'EUR');
+ assert.equal(esOnly.shortlist.find(i=>i.id==='ted:ted:70899-2026').deadline,'2026-12-31T12:00:00');
 });
 
 test('actualiza el estado antes de mostrar recomendaciones y oculta las que no pudo verificar', async () => {

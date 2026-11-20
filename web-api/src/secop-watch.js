@@ -1,6 +1,7 @@
 import { isLicitTenderId } from './licit.js';
+import { isPortalTenderId } from './placsp-portal.js';
 import secop from '../../client/electron/services/secopService.cjs';
-import { getPlacspDetail, syncPlacspFeed } from './secop.js';
+import { getPlacspDetail, getTedDetail, syncPlacspFeed } from './secop.js';
 const missing=()=>Response.json({error:'not_found'},{status:404});
 const conflict=()=>Response.json({error:'version_conflict'},{status:409});
 const service=()=>secop.createSecopService({configStore:{load:()=>({ui_language:'es'})}});
@@ -16,18 +17,23 @@ async function check(env,owner,record){
  const previous=await env.DB.prepare('SELECT * FROM secop_watch_baselines_web WHERE project_id = ? AND owner_id = ?').bind(project,owner).first();if(!previous)return missing();
  const oldProcess=JSON.parse(previous.process_json),oldDocs=previous.documents_json?JSON.parse(previous.documents_json):null;
  const isPlacsp=record.source==='placsp';
- const api=isPlacsp?null:service();
+ const isTed=record.source==='ted';
+ const api=(isPlacsp||isTed)?null:service();
  const isLicit=isPlacsp&&isLicitTenderId(record.external_id);
- const sync=isPlacsp&&!isLicit?await syncPlacspFeed(env,{force:true}).catch(err=>({synced:false,error:err?.message||'No se pudo sincronizar PLACSP.'})):null;
- const result=isPlacsp
-  ?await getPlacspDetail(env,record.external_id,{fresh:isLicit})
-  :await api.getProcessDetail(record.external_id,record.source,{fresh:true});
+ const isPortal=isPlacsp&&isPortalTenderId(record.external_id);
+ const isDirect=isLicit||isPortal;
+ const sync=isPlacsp&&!isDirect?await syncPlacspFeed(env,{force:true}).catch(err=>({synced:false,error:err?.message||'No se pudo sincronizar PLACSP.'})):null;
+ const result=isTed
+  ?await getTedDetail(env,record.external_id,{fresh:true,includeDocuments:true})
+  :isPlacsp
+   ?await getPlacspDetail(env,record.external_id,{fresh:isDirect})
+   :await api.getProcessDetail(record.external_id,record.source,{fresh:true});
  const isCurrent=async()=>{const [current,revision]=await Promise.all([lookup(env,owner,project),env.DB.prepare('SELECT revision FROM secop_watch_baselines_web WHERE project_id = ? AND owner_id = ?').bind(project,owner).first()]);return current?.process_json===record.process_json && revision?.revision===previous.revision;};
  if(!await isCurrent())return conflict();
  let process={...oldProcess},docs=oldDocs,issues=[];const changes=[];
  if(result.success&&result.data){
   for(const field of ['status','phase','deadline','value']){const value=result.data[field];if(value===undefined||value===null||value==='')continue;if(oldProcess[field]!==undefined&&oldProcess[field]!==value&&(field!=='deadline'||oldProcess.deadlineVerified===true))changes.push({kind:field,previous:oldProcess[field],current:value});process[field]=value;if(field==='deadline')process.deadlineVerified=result.data.deadlineVerified===true;}
-  if(isPlacsp){
+  if(isPlacsp||isTed){
    docs=diffDocuments(oldDocs,Array.isArray(result.data.documents)?result.data.documents:[],changes);
    if(sync?.synced===false&&sync.error)issues.push(sync.error);
   }
