@@ -13,7 +13,7 @@ function hashOf(buffer) {
 // Normalize registration keys to workspace-relative POSIX paths so resumed tasks identify the same files.
 function toRelative(workspaceDir, file) {
   const relative = path.relative(path.resolve(workspaceDir), path.resolve(workspaceDir, String(file || '')));
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`受保护文件必须位于工作区内：${file}`);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error(`受保护文件必须位于工作区内：${file}`);
   return relative.split(path.sep).join('/');
 }
 

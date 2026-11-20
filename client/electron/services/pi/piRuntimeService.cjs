@@ -85,12 +85,27 @@ function safeTaskSegment(value) {
 
 // Restrict task inputs/outputs to ordinary relative paths and prevent overwriting Pi resource files.
 function safeRelativePath(value) {
-  const relative = String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const raw = String(value || '');
+  const normalized = raw.replace(/\\/g, '/');
+  if (
+    !normalized
+    || normalized.includes('\0')
+    || normalized.startsWith('/')
+    || /^[a-zA-Z]:/.test(normalized)
+  ) {
+    throw new Error(`非法文件路径：${value}`);
+  }
+  const segments = normalized.split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) {
+    throw new Error(`非法文件路径：${value}`);
+  }
+  const relative = segments.join('/');
   const lower = relative.toLowerCase();
-  if (!relative || relative.includes('..')) throw new Error(`非法文件路径：${value}`);
   if (
     lower === 'agents.md'
     || lower === 'claude.md'
+    || lower === '.pi'
+    || lower === '.agents'
     || lower.startsWith('.pi/')
     || lower.startsWith('.agents/')
   ) {
@@ -2006,4 +2021,5 @@ function createPiRuntimeService({ app, configStore, aiService, isMonitorActive, 
 
 module.exports = {
   createPiRuntimeService,
+  safeRelativePath,
 };

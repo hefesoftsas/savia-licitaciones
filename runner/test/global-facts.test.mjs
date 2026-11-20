@@ -69,3 +69,20 @@ test('Pi lee la entrada de conocimiento seleccionada con proveedor simulado', { 
   assert.equal(result.groups[0].title, 'Experiencia'); assert.ok(sawKnowledge); assert.ok(calls >= 3); assert.deepEqual(await readdir(temporaryRoot), []);
  } finally { await rm(temporaryRoot, { recursive: true, force: true }); }
 });
+
+test('Pi procesa documentos cuyo nombre contiene puntos consecutivos como Memòria Just..txt', { timeout: 30000 }, async () => {
+ const temporaryRoot = await mkdtemp(join(tmpdir(), 'savia-facts-dots-')); let calls = 0, sawSource = false;
+ try {
+  const sourceName = '2026-2519 Memòria Just..txt';
+  const createAiService = ({ configStore }) => ({ getConfig: () => configStore.load(), getTextQueueStatus: () => ({ active: 0, queued: 0, limit: 1 }), async runAgentChatCompletion(request) {
+   calls++; const ctx = { config: configStore.load(), requestBody: { ...request.body, stream: false }, requestId: `dots-${calls}` }; request.onRequestStart?.(ctx);
+   sawSource ||= JSON.stringify(request.body.messages).includes('plazo especial con doble punto');
+   const output = JSON.stringify({ groups: [{ id: 'plazo', title: 'Plazo', content: '- Duración: 4 meses.' }] });
+   const message = calls === 1 ? { role: 'assistant', content: null, tool_calls: [{ id: 'read-source', type: 'function', function: { name: 'read', arguments: JSON.stringify({ path: `招标文件/招标文件-01-${sourceName}.md` }) } }] } : calls === 2 ? { role: 'assistant', content: null, tool_calls: [{ id: 'write-facts', type: 'function', function: { name: 'write', arguments: JSON.stringify({ path: 'global-facts.json', content: output }) } }] } : { role: 'assistant', content: 'Hechos preparados.' };
+   return request.consumeResponse(new Response(JSON.stringify({ id: `dots-${calls}`, object: 'chat.completion', model: 'fixture', choices: [{ index: 0, message, finish_reason: calls <= 2 ? 'tool_calls' : 'stop' }] }), { headers: { 'content-type': 'application/json' } }), ctx);
+  } });
+  const handler = createGlobalFactsHandler({ temporaryRoot, createAiService });
+  const result = await handler({ language: 'es', dataProcessingConsent: true, fileIds: ['doc'], mode: 'placeholder' }, { job: { id: 'task-dots' }, signal: new AbortController().signal, getPlanContext: async () => ({ outline: [{ id: 'id', title: 'Método', number: '1' }], analyses: {} }), getCredential: async () => ({ provider: 'opencode-go', model: 'fixture', secret: 'key' }), getFileInfo: async () => ({ name: sourceName, contentType: 'text/plain', bytes: new TextEncoder().encode('El plazo especial con doble punto es de 4 meses.').buffer }), askUser: async () => {} });
+  assert.equal(result.groups[0].title, 'Plazo'); assert.ok(sawSource); assert.ok(calls >= 3); assert.deepEqual(await readdir(temporaryRoot), []);
+ } finally { await rm(temporaryRoot, { recursive: true, force: true }); }
+});
