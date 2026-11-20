@@ -20,10 +20,11 @@ class WordEditorBoundary extends Component<{language:'es'|'en';children:ReactNod
 
 
 /** An editable copy, as on desktop. It never overwrites source files or chapter text. */
-export default function WebWordDocument({ language, url, name = 'propuesta.docx', label, initiallyOpen=false, saveToProject=false, onSaveAndContinue }: { language: 'es' | 'en'; url?: string; name?: string; label?: string; initiallyOpen?:boolean; saveToProject?:boolean; onSaveAndContinue?:()=>void }) {
+export default function WebWordDocument({ language, url, name = 'propuesta.docx', label, initiallyOpen=false, saveToProject=false, allowContinue=true, onSaveAndContinue }: { language: 'es' | 'en'; url?: string; name?: string; label?: string; initiallyOpen?:boolean; saveToProject?:boolean; allowContinue?:boolean; onSaveAndContinue?:()=>void }) {
   const en = language === 'en', { showToast } = useToast();
   const projectId=saveToProject?url?.match(/\/api\/projects\/([^/]+)\/jobs\//)?.[1]:undefined;
   const wordId=saveToProject?url?.match(/\/jobs\/([^/]+)\/artifact$/)?.[1]:undefined;
+  const canContinue=allowContinue&&!!onSaveAndContinue;
   const wordMode=onSaveAndContinue?'draft':'delivery';
   const linked=()=>{const params=new URLSearchParams(window.location.search);return !!wordId&&params.get('word')===wordId&&params.get('wordMode')===wordMode;};
   const updateLink=(opened:boolean)=>{if(!wordId)return;const address=new URL(window.location.href);if(opened){address.searchParams.set('word',wordId);address.searchParams.set('wordMode',wordMode);}else if(address.searchParams.get('word')===wordId&&address.searchParams.get('wordMode')===wordMode){address.searchParams.delete('word');address.searchParams.delete('wordMode');}else return;window.history.pushState(null,'',address);window.dispatchEvent(new Event('savia:route-detail'));};
@@ -62,7 +63,7 @@ export default function WebWordDocument({ language, url, name = 'propuesta.docx'
     if(!url || !saveToProject || (!dirty&&!continueAfter) || busy)return;
     savingRef.current=true;setBusy(true);
     try {
-      if(continueAfter&&pendingCount!==0){setEditing(true);return;}
+      if(continueAfter&&(!canContinue||pendingCount!==0)){setEditing(true);return;}
       if(recoveryFlight.current)await recoveryFlight.current;
       const savedSequence=changeSequence.current;
       const output=editing?await editor.current?.save():bytes; if(!output)throw Error();
@@ -93,7 +94,7 @@ export default function WebWordDocument({ language, url, name = 'propuesta.docx'
     {!url && <input hidden ref={picker} type="file" accept=".docx" onChange={async event => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; try { setBytes(new Uint8Array(await file.arrayBuffer())); setFilename(file.name); setEditing(true); setDirty(false); setFailed(false); setOpen(true); } catch { showToast(en ? 'Could not open the file.' : 'No se pudo abrir el archivo.', 'error'); } }} />}
     <Dialog.Root open={open} onOpenChange={value => { if (!value) close(); }}><Dialog.DialogContent className="web-word-dialog" onInteractOutside={event => event.preventDefault()}>
       <Dialog.Title><span className="web-word-title"><WordIcon/>{saveToProject?(en?'Project Word draft':'Borrador Word del proyecto'):filename}</span></Dialog.Title>
-      <Dialog.Description>{saveToProject?(en?'Edit the document, then save it here. Your saved Word will be available when you reopen the project and in Delivery.':onSaveAndContinue?'Revisa el documento y pulsa «Guardar y continuar» para pasar a Entrega. No necesitas aplicar los borradores por separado.':'Edita el documento y guárdalo aquí. Tu Word estará disponible al volver al proyecto y en Entrega.'):(en?'Review or edit a Word copy.':'Revisa o edita una copia Word.')}</Dialog.Description>
+      <Dialog.Description>{saveToProject?(en?'Edit the document, then save it here. Your saved Word will be available when you reopen the project and in Delivery.':canContinue?'Revisa el documento y pulsa «Guardar y continuar» para pasar a Entrega. No necesitas aplicar los borradores por separado.':'Edita el documento y guárdalo aquí. Tu Word estará disponible al volver al proyecto y en Entrega.'):(en?'Review or edit a Word copy.':'Revisa o edita una copia Word.')}</Dialog.Description>
       <TooltipProvider delayDuration={250}><div className="web-word-actions">
         <div className="web-word-zoom" role="group" aria-label={en?'Document zoom':'Zoom del documento'}>
           <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label={en?'Zoom out':'Alejar'} disabled={zoom==='50'} onClick={()=>setZoom(String(Math.max(50,(zoom==='auto'?100:Number(zoom))-25)))}><ZoomOut size={18}/></Button></TooltipTrigger><TooltipContent>{en?'Zoom out':'Alejar'}</TooltipContent></Tooltip>
@@ -102,7 +103,7 @@ export default function WebWordDocument({ language, url, name = 'propuesta.docx'
           <Tooltip><TooltipTrigger asChild><Button size="icon" variant={zoom==='auto'?'secondary':'ghost'} aria-label={en?'Fit width':'Ajustar al ancho'} aria-pressed={zoom==='auto'} onClick={()=>setZoom('auto')}><MoveHorizontal size={18}/></Button></TooltipTrigger><TooltipContent>{en?'Fit page to width':'Ajustar la página al ancho'}</TooltipContent></Tooltip>
         </div>
         {!editing&&<Tooltip><TooltipTrigger asChild><Button aria-label={en?'Edit document':'Editar documento'} size="icon" variant="outline" disabled={!bytes||busy} onClick={()=>setEditing(true)}><Pencil size={16}/></Button></TooltipTrigger><TooltipContent>{en?'Edit document':'Editar documento'}</TooltipContent></Tooltip>}
-        {saveToProject&&<Button size="sm" disabled={(!dirty&&!(onSaveAndContinue&&pendingCount===0))||!bytes||busy||failed} onClick={()=>void save(!!onSaveAndContinue&&pendingCount===0)}><Save size={16}/>{busy?(en?'Saving…':'Guardando…'):(onSaveAndContinue&&pendingCount===0?(en?'Save and continue':'Guardar y continuar'):(en?'Save draft':'Guardar borrador'))}</Button>}
+        {saveToProject&&<Button size="sm" disabled={(!dirty&&!(canContinue&&pendingCount===0))||!bytes||busy||failed} onClick={()=>void save(canContinue&&pendingCount===0)}><Save size={16}/>{busy?(en?'Saving…':'Guardando…'):(canContinue&&pendingCount===0?(en?'Save and continue':'Guardar y continuar'):(en?'Save draft':'Guardar borrador'))}</Button>}
         <Tooltip><TooltipTrigger asChild><Button size="icon" variant="outline" aria-label={en?'Download Word':'Descargar Word'} disabled={!bytes||busy||failed} onClick={()=>void download()}><Download size={16}/></Button></TooltipTrigger><TooltipContent>{en?'Download a DOCX to open in Microsoft Word.':'Descarga un DOCX para abrirlo en Microsoft Word.'}</TooltipContent></Tooltip>
         {saveToProject&&<Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" aria-label={en?'About saving':'Acerca del guardado'}><CircleHelp size={17}/></Button></TooltipTrigger><TooltipContent>{en?'Saves this formatted Word document. Chapter source text is managed separately.':'Guarda este documento Word con su formato. Los textos de origen por capítulo se gestionan por separado.'}</TooltipContent></Tooltip>}
         <span role="status" className="web-word-save-status">{dirty?(en?'Unsaved changes':'Cambios sin guardar'):saved?<><Check size={15}/>{en?'Saved in project':'Guardado en el proyecto'}</>:null}</span>

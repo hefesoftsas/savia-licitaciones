@@ -1,3 +1,4 @@
+import {loadBatchWordPreview} from './batch-word-preview.js';
 import {technicalWordProtectedMarkup} from '../../runner/technical-word-guard.mjs';
 import {assessTechnicalWordBudget} from '../../runner/technical-word-budget.mjs';
 import {validateTechnicalContentPlans,applyTechnicalPlanningOptions} from '../../runner/technical-content-planning.mjs';
@@ -30,6 +31,10 @@ export async function runnerTechnicalBatch(request,env,runner,jobId,nodeId){
 export async function userTechnicalBatch(request,env,owner,projectId,jobId,action){
  if(request.method!=='GET'&&request.headers.get('origin')!==new URL(env.BETTER_AUTH_URL).origin)return Response.json({error:'invalid_origin'},{status:403});
  const job=await env.DB.prepare("SELECT * FROM jobs WHERE id=? AND project_id=? AND owner_id=? AND kind='technical-plan.generate-batch'").bind(jobId,projectId,owner).first();if(!job)return missing();
+ if(action==='word-preview'&&request.method==='GET'){
+  const preview=await loadBatchWordPreview(env,owner,projectId,jobId,JSON.parse(job.payload_json).planVersion);
+  return preview?Response.json({fingerprint:preview.fingerprint}):missing();
+ }
  if(action==='drafts'&&request.method==='GET'){const rows=await env.DB.prepare('SELECT node_id AS nodeId,content FROM technical_batch_drafts WHERE job_id=? AND project_id=? AND owner_id=? ORDER BY created_at,node_id').bind(jobId,projectId,owner).all();const drafts=rows.results.map(row=>({...row,wordCount:wordCount.countReadableWords(row.content)}));return Response.json({drafts,wordBudget:assessTechnicalWordBudget(JSON.parse(job.payload_json),drafts)});}
  if(action==='adjustments'&&request.method==='GET'){const rows=await env.DB.prepare('SELECT node_id AS nodeId,target_words AS targetWords,content FROM technical_batch_word_adjustments WHERE job_id=? AND project_id=? AND owner_id=? ORDER BY node_id').bind(jobId,projectId,owner).all();return Response.json({adjustments:rows.results});}
  if(action==='plans'&&request.method==='GET'){const row=await env.DB.prepare('SELECT plans_json FROM technical_batch_plans WHERE job_id=? AND project_id=? AND owner_id=?').bind(jobId,projectId,owner).first();return Response.json({plans:row?JSON.parse(row.plans_json):null});}

@@ -11,6 +11,7 @@ const { createWordExportHandler } = await import(process.env.SAVIA_TEST_EXPORT_M
 import { createRequire } from 'node:module';
 import { wordRecovery } from '../src/word-recovery.js';
 import { cleanupDesktopUploads } from '../src/desktop-file-cleanup.js';
+import { preparationProgress } from '../../client/src/features/web/preparation-progress.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('el Word versionado se entrega una sola vez al propietario con concesión vigente', async () => {
@@ -138,6 +139,12 @@ test('el Word versionado se entrega una sola vez al propietario con concesión v
     const previewResponse = await post(jobsPath,previewBody(batchId),{cookie:alice,'idempotency-key':'batch-preview'});
     assert.equal(previewResponse.status,201,await previewResponse.clone().text());
     const previewJob = (await previewResponse.json()).job;
+    const snapshotPath = `/api/projects/${project.id}/technical-batches/${batchId}/word-preview`;
+    const snapshot = () => req(snapshotPath,{headers:{cookie:alice}});
+    assert.equal((await req(snapshotPath,{headers:{cookie:bob}})).status,404);
+    const currentSnapshot = await snapshot();
+    assert.equal(currentSnapshot.status,200);
+    assert.deepEqual(await currentSnapshot.json(),{fingerprint:previewJob.payload.draftBatchFingerprint});
     const previewClaim = await (await post('/api/runner/jobs/claim',{kinds:['technical-plan.export-word']},agent(runner))).json();
     assert.equal(previewClaim.job.id,previewJob.id);
     const previewContext = () => post(`/api/runner/jobs/${previewJob.id}/plan-context`,{lease:previewClaim.lease},agent(runner));
@@ -146,7 +153,29 @@ test('el Word versionado se entrega una sola vez al propietario con concesión v
     assert.deepEqual(await (await req(planPath,{headers:{cookie:alice}})).json(),beforePreview);
     await db.prepare('UPDATE technical_batch_drafts SET content=? WHERE job_id=?').bind('Borrador modificado',batchId).run();
     assert.equal((await previewContext()).status,409);
-    assert.equal((await post(`${jobsPath}/${previewJob.id}/cancel`,{},{cookie:alice})).status,200);
+    const changedSnapshot = await (await snapshot()).json();
+    assert.notEqual(changedSnapshot.fingerprint,previewJob.payload.draftBatchFingerprint);
+    await db.prepare('UPDATE technical_batch_drafts SET content=? WHERE job_id=?').bind('Texto del borrador sin aplicar',batchId).run();
+    const previewUpload = await req(`/api/runner/jobs/${previewJob.id}/artifact`,{method:'POST',headers:{...agent(runner),'x-savia-lease':previewClaim.lease},body:bytes});
+    assert.equal(previewUpload.status,200);
+    const previewArtifact = (await previewUpload.json()).artifact;
+    assert.equal((await post(`/api/runner/jobs/${previewJob.id}/complete`,{lease:previewClaim.lease,status:'succeeded',result:{artifactId:previewArtifact.id,warnings:[]}},agent(runner))).status,200);
+    const savedPreviewPath = `${jobsPath}/${previewJob.id}/artifact`;
+    assert.equal((await req(savedPreviewPath,{method:'PUT',headers:{cookie:alice,origin:'http://localhost','if-match':'"0"','content-type':'application/vnd.openxmlformats-officedocument.wordprocessingml.document'},body:editedBytes})).status,200);
+    const listedPreview = async () => (await (await req(jobsPath,{headers:{cookie:alice}})).json()).jobs.find(item=>item.id===previewJob.id);
+    const progress = job => preparationProgress({plan:{version:plan.version,outline:[{content:''}]},jobs:[job]});
+    const currentPreview = await listedPreview();
+    assert.equal(currentPreview.wordRevision,1);
+    assert.equal(progress(currentPreview).states[4],'complete');
+    await db.prepare('INSERT INTO technical_batch_drafts(job_id,owner_id,project_id,node_id,content,created_at) VALUES(?,?,?,?,?,?)').bind(batchId,owner.owner_id,project.id,'additional-chapter','Contenido añadido al reanudar',new Date().toISOString()).run();
+    const stalePreview = await listedPreview();
+    assert.equal(stalePreview.sourcesStale,true);
+    assert.notEqual(progress(stalePreview).states[4],'complete');
+    assert.equal(previewJob.payload.draftBatchCount,1);
+    await db.prepare("UPDATE jobs SET payload_json=json_remove(payload_json,'$.draftBatchCount') WHERE id=?").bind(previewJob.id).run();
+    assert.equal((await listedPreview()).sourcesStale,true);
+    assert.deepEqual(new Uint8Array(await (await req(savedPreviewPath,{headers:{cookie:alice}})).arrayBuffer()),editedBytes);
+    assert.equal((await req(savedPreviewPath,{method:'DELETE',headers:{cookie:alice,origin:'http://localhost'}})).status,204);
     const second = (await (await create(plan.version, 'export-2')).json()).job;
     const secondClaim = await (await post('/api/runner/jobs/claim', { kinds: ['technical-plan.export-word'] }, agent(runner))).json();
     const secondPath = `/api/runner/jobs/${second.id}/artifact`;

@@ -798,7 +798,7 @@ const apiWorker = {
     if (technicalBatchSection) { const runner=await authenticateRunner(request,env);if(!runner)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await runnerTechnicalBatchSection(request,env,runner,technicalBatchSection[1],decodeURIComponent(technicalBatchSection[2]))); }
     const technicalBatch = /^\/api\/runner\/jobs\/([^/]+)\/technical-batch(?:\/drafts\/([^/]+))?$/.exec(url.pathname);
     if (technicalBatch) { const runner=await authenticateRunner(request,env);if(!runner)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await runnerTechnicalBatch(request,env,runner,technicalBatch[1],technicalBatch[2])); }
-    const technicalBatchDrafts = /^\/api\/projects\/([^/]+)\/technical-batches\/([^/]+)\/(drafts|plans|consistency|adjustments|resume|apply|delete)$/.exec(url.pathname);
+    const technicalBatchDrafts = /^\/api\/projects\/([^/]+)\/technical-batches\/([^/]+)\/(drafts|plans|consistency|adjustments|resume|apply|delete|word-preview)$/.exec(url.pathname);
     if (technicalBatchDrafts) { const session=await getScopedSession();if(!session)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await userTechnicalBatch(request,env,session.workspaceId,technicalBatchDrafts[1],technicalBatchDrafts[2],technicalBatchDrafts[3])); }
     const planContext = /^\/api\/runner\/jobs\/([^/]+)\/plan-context$/.exec(url.pathname);
     if (planContext) {

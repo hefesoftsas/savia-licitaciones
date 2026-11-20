@@ -305,8 +305,8 @@ export async function handleUserJobs(request, env, userId) {
       if(input.payload.draftBatchId!==undefined){
         const preview=await loadBatchWordPreview(env,userId,projectId,input.payload.draftBatchId,planVersion);
         if(!preview)return Response.json({error:'draft_preview_unavailable'},{status:409});
-        canonicalPayload={...canonicalPayload,draftBatchId:input.payload.draftBatchId,draftBatchFingerprint:preview.fingerprint};
-      }else{const {draftBatchFingerprint,...clean}=canonicalPayload;canonicalPayload=clean;}
+        canonicalPayload={...canonicalPayload,draftBatchId:input.payload.draftBatchId,draftBatchFingerprint:preview.fingerprint,draftBatchCount:preview.drafts.length};
+      }else{const {draftBatchFingerprint,draftBatchCount,...clean}=canonicalPayload;canonicalPayload=clean;}
       const assetFingerprint = await planAssetFingerprint(env, projectId);
       canonicalPayload = { ...canonicalPayload, assetFingerprint };
       sourcesGuard = { sql: `${sourcesGuard.sql} AND (${planAssetFingerprintSql}) = ?`, args: [...sourcesGuard.args, projectId, assetFingerprint] };
@@ -329,12 +329,31 @@ export async function handleUserJobs(request, env, userId) {
       : await env.DB.prepare("INSERT INTO jobs (id, project_id, owner_id, kind, client_request_id, payload_json, state, created_at, updated_at, credential_id) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?) ON CONFLICT (owner_id, project_id, client_request_id) DO NOTHING RETURNING *").bind(id, projectId, userId, input.kind, requestId, payload, now, now, credentialId).first();
     if (inserted) return Response.json({ job: view(inserted) }, { status: 201 });
     const existing = await env.DB.prepare('SELECT * FROM jobs WHERE owner_id = ? AND project_id = ? AND client_request_id = ?').bind(userId, projectId, requestId).first();
-    if (!existing || existing.kind !== input.kind || existing.payload_json !== payload || existing.credential_id !== credentialId) return Response.json({ error: 'idempotency_conflict' }, { status: 409 });
+    const legacyPreviewPayload = input.kind==='technical-plan.export-word' && canonicalPayload.draftBatchCount!==undefined
+      ? JSON.stringify({...canonicalPayload,draftBatchCount:undefined})
+      : undefined;
+    if (!existing || existing.kind !== input.kind || (existing.payload_json !== payload && existing.payload_json !== legacyPreviewPayload) || existing.credential_id !== credentialId) return Response.json({ error: 'idempotency_conflict' }, { status: 409 });
     return Response.json({ job: view(existing) });
   }
   if (request.method === 'GET' && !jobId) {
-    const result = await env.DB.prepare('SELECT j.*, a.edit_revision, a.id AS artifact_id, a.deleted_at AS artifact_deleted_at, a.storage_deleted_at AS artifact_storage_deleted_at, (SELECT COUNT(*) FROM technical_batch_drafts d WHERE d.job_id=j.id AND d.owner_id=j.owner_id) AS batch_draft_count, (SELECT applied_version FROM technical_batch_applications b WHERE b.job_id=j.id AND b.owner_id=j.owner_id) AS batch_applied_version FROM jobs j LEFT JOIN job_artifacts a ON a.job_id = j.id WHERE j.owner_id = ? AND j.project_id = ? ORDER BY j.created_at DESC, j.id').bind(userId, projectId).all();
-    const jobs = await Promise.all(result.results.map(async row => { const job = view(row); return ['technical-plan.generate-section','technical-plan.generate-batch'].includes(job.kind) && job.payload.knowledgeSnapshot?.ids?.length ? { ...job, sourcesStale: !await knowledgeSnapshotCurrent(env, userId, job.payload.knowledgeSnapshot) } : job; }));
+    const result = await env.DB.prepare('SELECT j.*, p.version AS current_plan_version, a.edit_revision, a.id AS artifact_id, a.deleted_at AS artifact_deleted_at, a.storage_deleted_at AS artifact_storage_deleted_at, (SELECT COUNT(*) FROM technical_batch_drafts d WHERE d.job_id=j.id AND d.owner_id=j.owner_id) AS batch_draft_count, (SELECT applied_version FROM technical_batch_applications b WHERE b.job_id=j.id AND b.owner_id=j.owner_id) AS batch_applied_version FROM jobs j LEFT JOIN job_artifacts a ON a.job_id = j.id LEFT JOIN project_technical_plans p ON p.project_id=j.project_id WHERE j.owner_id = ? AND j.project_id = ? ORDER BY j.created_at DESC, j.id').bind(userId, projectId).all();
+    const drafts = new Map(result.results.filter(row=>row.kind==='technical-plan.generate-batch').map(row=>[row.id,view(row)]));
+    const legacyPreviews = new Map();
+    const jobs = await Promise.all(result.results.map(async row => {
+      const job = view(row);
+      if (['technical-plan.generate-section','technical-plan.generate-batch'].includes(job.kind) && job.payload.knowledgeSnapshot?.ids?.length) {
+        return {...job,sourcesStale:!await knowledgeSnapshotCurrent(env,userId,job.payload.knowledgeSnapshot)};
+      }
+      if (job.kind!=='technical-plan.export-word' || job.state!=='succeeded' || job.artifactState!=='stored' || !job.wordRevision || !job.payload.draftBatchId) return job;
+      const {draftBatchId,draftBatchCount,draftBatchFingerprint,planVersion} = job.payload;
+      const batch = drafts.get(draftBatchId);
+      if (!batch || row.current_plan_version!==planVersion || batch.payload.planVersion!==planVersion || ['queued','running'].includes(batch.state)) return {...job,sourcesStale:true};
+      // Drafts are immutable and appended until the batch is complete.
+      if (Number.isInteger(draftBatchCount)) return {...job,sourcesStale:batch.draftCount!==draftBatchCount};
+      if (!legacyPreviews.has(draftBatchId)) legacyPreviews.set(draftBatchId,loadBatchWordPreview(env,userId,projectId,draftBatchId,planVersion));
+      const snapshot = await legacyPreviews.get(draftBatchId);
+      return {...job,sourcesStale:!snapshot||snapshot.fingerprint!==draftBatchFingerprint};
+    }));
     return Response.json({ jobs });
   }
   if (request.method === 'POST' && jobId) {

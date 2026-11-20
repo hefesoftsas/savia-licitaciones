@@ -59,7 +59,7 @@ export default function WebTechnicalPlan({ projectId, language, market = 'ALL', 
   const incomplete = incompleteChapters(plan?.outline || []) as {id:string;number:string;title:string}[];
   const current = flat.find(item => item.node.id === selected)?.node;
   const visibleJobs = [...submitted.filter(item => !jobs.some(job => job.id === item.id)), ...jobs];
-  const latestWord = visibleJobs.find(job => job.kind === 'technical-plan.export-word' && (!job.payload.draftBatchId || !!job.wordRevision) && job.state === 'succeeded' && job.artifactState === 'stored' && !clearedExports.includes(job.id));
+  const latestWord = visibleJobs.find(job => job.kind === 'technical-plan.export-word' && !job.sourcesStale && (!job.payload.draftBatchId || !!job.wordRevision) && job.state === 'succeeded' && job.artifactState === 'stored' && !clearedExports.includes(job.id));
   const orderingLocked = visibleJobs.some(job => ['technical-plan.generate-batch','technical-plan.generate-section'].includes(job.kind) && ['queued','running'].includes(job.state));
   const activeDraft = visibleJobs.some(job => job.kind === 'technical-plan.generate-section' && job.payload.nodeId === selected && ['queued', 'running'].includes(job.state));
   const metadataDirty = Boolean(current && (title !== current.title || description !== current.description));
