@@ -1,79 +1,44 @@
-name: Build Savia Connector
+name: Transferir instaladores verificados
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Instaladores a transferir
+        required: true
+        type: choice
+        options:
+          - linux-and-macos
+          - windows
 permissions:
   contents: read
+  actions: read
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            platform: win32
-            arch: x64
-          - os: macos-15-intel
-            platform: darwin
-            arch: x64
-          - os: macos-15
-            platform: darwin
-            arch: arm64
-          - os: ubuntu-latest
-            platform: linux
-            arch: x64
-          - os: ubuntu-24.04-arm
-            platform: linux
-            arch: arm64
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_PLATFORM: ${{ inputs.platform }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.23.2
-          architecture: ${{ matrix.arch }}
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - uses: pnpm/action-setup@v4
-      - name: Install Linux AppImage extract dependency
-        if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zlib1g-dev
-      - name: Install verified dependencies
-        run: node scripts/install-dependencies.mjs
-      - name: Prepare client tools
-        run: pnpm --filter savia-licitaciones run setup:client
-      - name: Prepare OpenXML
-        run: node client/scripts/prepare-openxml-helper.cjs --platform '${{ matrix.platform }}' --arch '${{ matrix.arch }}'
-      - name: Test connection lifecycle
-        run: node --test connector/test/*.test.cjs runner/test/prune-distribution.test.mjs
-      - name: Build native runner and installer
+      - name: Transferir instaladores de la compilación verificada
+        shell: bash
         run: |
-          BUNDLE_DIR="$(node -e 'console.log(require("node:path").resolve("connector-build/bundle"))')"
-          OUTPUT_DIR="$(node -e 'console.log(require("node:path").resolve("connector-build/output"))')"
-          mkdir -p connector-build
-          pnpm run build:runner --output "$BUNDLE_DIR" --prepare-cache
-          pnpm run build:connector --bundle "$BUNDLE_DIR" --output "$OUTPUT_DIR"
-      - name: Speed up Windows NSIS verification
-        if: matrix.platform == 'win32'
-        shell: pwsh
-        run: |
-          Add-MpPreference -ExclusionPath $env:TEMP -ErrorAction SilentlyContinue
-          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP -ErrorAction SilentlyContinue
-      - name: Verify the installer in an isolated directory
-        run: |
-          INSTALLER="$(find connector-build/output/installers -maxdepth 1 \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' \) -type f -print -quit)"
-          test -n "$INSTALLER"
-          node connector/verify-installer.mjs --installer "$INSTALLER"
-      - name: Upload installers for review
-        uses: actions/upload-artifact@v4
-        with:
-          name: savia-connector-${{ matrix.platform }}-${{ matrix.arch }}
-          path: |
-            connector-build/output/installers/*.exe
-            connector-build/output/installers/*.dmg
-            connector-build/output/installers/*.AppImage
-          if-no-files-found: error
-          retention-days: 14
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          case "$RELEASE_PLATFORM" in
+            linux-and-macos) names=(savia-connector-darwin-arm64 savia-connector-darwin-x64 savia-connector-linux-arm64) ;;
+            windows) names=(savia-connector-win32-x64) ;;
+          esac
+          for name in "${names[@]}"; do
+            gh run download 45062019026 --repo "$repo" --name "$name" --dir "$RUNNER_TEMP/$name"
+            file="$(find "$RUNNER_TEMP/$name" -maxdepth 2 -type f -print -quit)"
+            test -n "$file"
+            label="$(basename "$file")"
+            case "$label" in Savia-Conector-0.1.3-*) ;; *) exit 1 ;; esac
+            if ! gh release view connector-v0.1.3 --repo "$repo" --json assets --jq '.assets[] | select(.state=="uploaded") | .name' | grep -Fxq "$label"; then
+              gh release upload connector-v0.1.3 --repo "$repo" "$file"
+            fi
+          done
