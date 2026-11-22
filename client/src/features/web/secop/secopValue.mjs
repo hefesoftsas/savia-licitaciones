@@ -53,6 +53,17 @@ export function formatDateValue(value, language, options = {}) {
   return new Intl.DateTimeFormat(locale, fmtOptions).format(parsed);
 }
 
+export function formatDeadline(process, language) {
+  const value = process.deadline || '';
+  if (process.source !== 'ted') return formatDateValue(value, language, {...process, timeZone:'UTC'});
+  const local = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?(Z|[+-]\d{2}:\d{2})?$/.exec(value);
+  const day = formatDateValue(local?.[1] || value, language, { ...process, timeZone: 'UTC' });
+  if (!local) return day;
+  const offset = local[3] || process.deadlineUtcOffset;
+  const zone = offset === 'Z' ? ' UTC' : offset ? ` UTC${offset}` : '';
+  return `${day} · ${local[2]}${zone}`;
+}
+
 export function officialTenderUrl(process) {
   try {
     const url = new URL(process?.url || '');

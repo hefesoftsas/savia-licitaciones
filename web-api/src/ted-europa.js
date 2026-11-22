@@ -10,6 +10,8 @@ export const TED_FIELDS = [
   'notice-title',
   'title-proc',
   'description-proc',
+  'selection-criterion-description-lot',
+  'award-criterion-description-lot',
   'buyer-name',
   'buyer-country',
   'buyer-city',
@@ -374,6 +376,10 @@ export function buildTedExpertQuery(
     clauses.push(`publication-date >= ${fromDate.replace(/-/g, '')}`);
   }
 
+  if (/^\d{4}$/.test(params.publicationYear || '')) {
+    clauses.push(`publication-date >= ${params.publicationYear}0101`, `publication-date <= ${params.publicationYear}1231`);
+  }
+
   if (!clauses.length) {
     clauses.push('publication-date >= 20200101');
   }
@@ -410,6 +416,12 @@ function pickLocalized(field, preferredLang = 'spa') {
     }
   }
   return '';
+}
+
+function criterionDescriptions(field, language) {
+  const translations = typeof field === 'object' && field !== null && !Array.isArray(field);
+  const values = translations ? field[language] || field.spa || field.eng || Object.values(field)[0] : field;
+  return asArray(values).filter(value => typeof value === 'string').join(' · ').slice(0, 4000);
 }
 
 function firstString(value) {
@@ -455,6 +467,7 @@ function extractDeadline(notice, cutoff) {
     ? asArray(notice['deadline-receipt-tender-time-lot'])
     : asArray(notice['deadline-receipt-request-time-lot']);
 
+  const offsets = new Map();
   const combined = [];
   for (let i = 0; i < dates.length; i++) {
     const dateMatch = /^(\d{4}-\d{2}-\d{2})/.exec(String(dates[i] || ''));
@@ -463,11 +476,14 @@ function extractDeadline(notice, cutoff) {
     const timeMatch = /^(\d{2}:\d{2}:\d{2})/.exec(rawTime);
     const iso = timeMatch ? `${dateMatch[1]}T${timeMatch[1]}` : dateMatch[1];
     if (!combined.includes(iso)) combined.push(iso);
+    const offset = timeMatch && /(Z|[+-]\d{2}:\d{2})$/.exec(rawTime)?.[1];
+    if (offset) offsets.set(iso, offset);
   }
-  if (!combined.length) return '';
+  if (!combined.length) return { deadline: '' };
   combined.sort();
   const future = combined.filter(d => (d.length === 10 ? `${d}T23:59:59` : d) > cutoff);
-  return future.length ? future[future.length - 1] : combined[combined.length - 1];
+  const deadline = (future.length ? future : combined).at(-1);
+  return { deadline, deadlineUtcOffset: offsets.get(deadline) };
 }
 
 function extractPortalUrl(notice) {
@@ -548,7 +564,7 @@ export function mapTedNoticeToProcess(notice, { language = 'es', now = new Date(
   const { value, currency } = extractValueAndCurrency(notice);
   const pubDateMatch = /^(\d{4}-\d{2}-\d{2})/.exec(firstString(notice['publication-date']));
   const publicationDate = pubDateMatch ? pubDateMatch[1] : '';
-  const deadline = extractDeadline(notice, cutoff);
+  const { deadline, deadlineUtcOffset } = extractDeadline(notice, cutoff);
   const noticeType = firstString(notice['notice-type']).toLowerCase();
   const { status, statusCode } = deriveStatus(noticeType, deadline, cutoff, en);
 
@@ -590,6 +606,8 @@ export function mapTedNoticeToProcess(notice, { language = 'es', now = new Date(
   return {
     id: `ted:${pubNum}`,
     reference: internalRef || pubNum,
+    selectionCriteria: criterionDescriptions(notice['selection-criterion-description-lot'], langKey),
+    awardCriteria: criterionDescriptions(notice['award-criterion-description-lot'], langKey),
     classificationCode: cpvCodes[0] || '',
     cpvCodes,
     entity,
@@ -605,6 +623,7 @@ export function mapTedNoticeToProcess(notice, { language = 'es', now = new Date(
     publicationDate,
     deadline,
     deadlineVerified: Boolean(deadline),
+    ...(deadlineUtcOffset ? { deadlineUtcOffset } : {}),
     territory,
     department: territory,
     city,

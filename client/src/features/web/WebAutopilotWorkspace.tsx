@@ -654,9 +654,15 @@ export function WebAutopilotWorkspace({
                 />
                 <a className="web-autopilot-download-link" href={wordArtifactUrl} download>
                   <Download size={15} aria-hidden="true" />
-                  {en ? 'Download DOCX' : 'Descargar DOCX'}
+                  {preparation.economicId ? (en ? 'Download technical proposal' : 'Descargar memoria técnica') : (en ? 'Download DOCX' : 'Descargar DOCX')}
                 </a>
               </>
+            )}
+            {preparation.economicId && (
+              <a className="web-autopilot-download-link" href={`/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(preparation.economicId)}/artifact`} download>
+                <Download size={15} aria-hidden="true" />
+                {en ? 'Download economic offer form' : 'Descargar formulario de oferta económica'}
+              </a>
             )}
             <Button size="sm" variant="outline" onClick={onOpenReviews}>
               <ShieldCheck size={15} aria-hidden="true" />

@@ -5,7 +5,7 @@ export function preparationProgress({selectedFiles=[],analyses=[],outline={},fac
  const analysisDone=['project-overview','technical-score','response-requirements'].every(category=>analyses.some(item=>item.category===category&&item.current));
  const outlineDone=analysisDone&&!!plan.outline?.length;
  const factsDone=outlineDone&&facts.current===true&&facts.revision>0&&!facts.importReviewPending&&!(facts.groups||[]).some(group=>hasPendingFacts(group.title+' '+group.content));
- const currentWords=jobs.filter(job=>job.kind==='technical-plan.export-word'&&job.state==='succeeded'&&job.artifactState==='stored'&&!job.sourcesStale&&job.payload?.planVersion===plan.version&&(!job.payload?.draftBatchId||job.wordRevision>0));
+ const currentWords=jobs.filter(job=>job.kind==='technical-plan.export-word'&&job.payload?.bidDocument!=='economic'&&job.state==='succeeded'&&job.artifactState==='stored'&&!job.sourcesStale&&job.payload?.planVersion===plan.version&&(!job.payload?.draftBatchId||job.wordRevision>0));
  const reviewedWord=currentWords.some(job=>job.wordRevision>0);
  const draftDone=reviewedWord||factsDone&&nodes.length>0&&nodes.every(node=>typeof node.content==='string'&&node.content.trim()&&!hasPendingFacts(node.content));
  const exportDone=draftDone&&currentWords.length>0;

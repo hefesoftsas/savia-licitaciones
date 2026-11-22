@@ -35,7 +35,7 @@ export const AUTOPILOT_MILESTONES = [
   {
     id: 'draft',
     index: 3,
-    stages: ['draft', 'word'],
+    stages: ['draft', 'word', 'economic'],
     label: { es: 'Borrador Word', en: 'Word draft' },
   },
 ];
@@ -48,6 +48,7 @@ export const STAGE_LABELS = {
   outline: { es: 'Índice detallado', en: 'Detailed outline' },
   facts: { es: 'Datos clave de la oferta', en: 'Key proposal facts' },
   draft: { es: 'Redacción de capítulos', en: 'Chapter drafting' },
+  economic: { es: 'Formulario de oferta económica', en: 'Economic offer form' },
   word: { es: 'Generación del borrador Word', en: 'Word draft export' },
 };
 
@@ -385,7 +386,7 @@ export function computeAutopilotProgress(preparation) {
   if (preparation.status === 'ready') {
     return { percent: 100, stageNumber: totalStages, completedStages: totalStages, totalStages, state: 'ready' };
   }
-  const idxRaw = BACKEND_STAGES.indexOf(preparation.stage);
+  const idxRaw = BACKEND_STAGES.indexOf(preparation.stage==='economic'?'word':preparation.stage);
   const idx = idxRaw < 0 ? 0 : idxRaw;
   let sub = 0;
   if (preparation.status === 'running') {
@@ -461,6 +462,16 @@ export function describeBlockedReason(reason, stage, language = 'es') {
         };
   }
 
+  if (code === 'bid_document_rules_incomplete') {
+    return en
+      ? {title:'Tender requirements incomplete',description:'Verify the annex number and the technical proposal format in the response requirements.',actionLabel:'Retry'}
+      : {title:'Requisitos del pliego incompletos',description:'Verifica el número del anexo y el formato de la memoria en los requisitos de respuesta.',actionLabel:'Reintentar'};
+  }
+  if (code === 'technical_chapters_missing') {
+    return en
+      ? {title:'Technical chapters missing',description:'Add technical chapters to the outline and resume.',actionLabel:'Resume'}
+      : {title:'Faltan capítulos técnicos',description:'Añade capítulos técnicos al índice y reanuda la preparación.',actionLabel:'Reanudar'};
+  }
   if (code === 'template_selection_required') {
     return en
       ? {

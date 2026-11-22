@@ -44,6 +44,7 @@ const groups = [
     es: 'Información financiera',
     en: 'Financial information',
     fields: [
+      ['bidBenchmarks', 'Referencias para licitar (facturación por ejercicio, costes por unidad y margen objetivo)', 'Bid benchmarks (turnover by year, unit costs and target margin)'],
       ['taxCertificateDate', 'Fecha del certificado tributario', 'Tax certificate date'],
       ['taxCertificateNote', 'Nota del certificado tributario', 'Tax certificate note'],
       ['auditReportDate', 'Fecha del informe de auditoría', 'Audit report date'],
@@ -71,6 +72,7 @@ export function emptyCompanyProfile(): Profile {
 }
 
 const longFields = new Set<Field>([
+  'bidBenchmarks',
   'businessScope',
   'companyIntro',
   'taxCertificateNote',
@@ -130,16 +132,17 @@ export function CompanyProfileForm({
           <span>{en ? enLabel : esLabel}</span>
           {longFields.has(field) ? (
             <Textarea
-              maxLength={100000}
+              placeholder={field==='bidBenchmarks'?(en?'For opportunity screening, include year, currency and unit.':'Para revisar oportunidades, indica el ejercicio, la moneda y la unidad.'):undefined}
+              maxLength={field==='bidBenchmarks'?4000:100000}
               disabled={busy}
-              value={profile[field]}
+              value={profile[field] ?? ''}
               onChange={event => onChange({ ...profile, [field]: event.target.value })}
             />
           ) : (
             <Input
               maxLength={100000}
               disabled={busy}
-              value={profile[field]}
+              value={profile[field] ?? ''}
               onChange={event => onChange({ ...profile, [field]: event.target.value })}
             />
           )}

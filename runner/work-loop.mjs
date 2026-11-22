@@ -146,7 +146,7 @@ export async function runOnce({ server, token, handlers, outbox, draftOutbox, ar
     fetchRunnerConfigFn,
   });
   const claimStarted = performance.now();
-  const claimed = await request(server, token, '/api/runner/jobs/claim', { kinds: Object.keys(handlers), localModel: !!localCredential, localModelSelection: true, supportsConcurrency:true }, { timeoutMs: requestTimeoutMs });
+  const claimed = await request(server, token, '/api/runner/jobs/claim', { kinds: Object.keys(handlers), localModel: !!localCredential, localModelSelection: true, supportsConcurrency:true, supportsBidDocuments:true }, { timeoutMs: requestTimeoutMs });
   if (!claimed.job) return { state: 'idle', ...(Number.isInteger(claimed.pollAfterMs) && claimed.pollAfterMs >= 10000 && claimed.pollAfterMs <= 300000 ? {pollAfterMs: claimed.pollAfterMs} : {}) };
   const { job, lease } = claimed;
   let usedModel;
@@ -292,6 +292,7 @@ export async function runOnce({ server, token, handlers, outbox, draftOutbox, ar
         saveTechnicalBatchLedger: entry => saveRecoverableTechnicalBatch(`/api/runner/jobs/${job.id}/technical-batch/ledger/${encodeURIComponent(entry.id)}`,{lease,entry},'technical-ledger',{entry}),
         getPlanAsset: assetId => requestWithRetry(`/api/runner/jobs/${job.id}/plan-assets/${encodeURIComponent(assetId)}`, { lease }, { binary: true }),
         getBidTemplate: () => requestWithRetry(`/api/runner/jobs/${job.id}/template`, { lease }, { binary: true }),
+        getOpportunityDocuments: (candidateId, language) => requestWithRetry(`/api/runner/jobs/${job.id}/opportunity-context`, { lease, candidateId, language }),
         getOpportunitySources: () => requestWithRetry(`/api/runner/jobs/${job.id}/opportunity-context`, { lease }),
         assertOpportunitySources: () => requestWithRetry(`/api/runner/jobs/${job.id}/opportunity-context?check=1`, { lease }),
         getRequirementSources: () => requestWithRetry(`/api/runner/jobs/${job.id}/requirements-context`, { lease }),

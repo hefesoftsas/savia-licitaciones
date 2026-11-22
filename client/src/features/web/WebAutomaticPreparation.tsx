@@ -3,12 +3,12 @@ import { request } from './api.mjs';
 import { WizardActionButton as Button } from './WizardActionButton';
 import WebWordDocument from './WebWordDocument';
 
-type Preparation = { status:'running'|'paused'|'blocked'|'ready'; stage:string; reason:string|null; runId:string; wordId:string|null };
+type Preparation = { status:'running'|'paused'|'blocked'|'ready'; stage:string; reason:string|null; runId:string; wordId:string|null; economicId?:string };
 type Props = {projectId:string;language:'es'|'en';fileIds:string[];credentialId:string;consent:boolean;dirty:boolean;enabled:boolean;onStep:(step:number)=>void};
-const steps:Record<string,number> = {'project-overview':1,'technical-score':1,'response-requirements':1,chapters:2,outline:2,facts:3,draft:4,word:4};
+const steps:Record<string,number> = {'project-overview':1,'technical-score':1,'response-requirements':1,chapters:2,outline:2,facts:3,draft:4,word:4,economic:4};
 const stages:Record<string,[string,string]> = {
   'project-overview':['Resumen','Overview'], 'technical-score':['Criterios','Scoring'], 'response-requirements':['Requisitos','Requirements'],
-  chapters:['Capítulos','Chapters'],outline:['Índice','Outline'],facts:['Hechos','Facts'],draft:['Redacción','Drafting'],word:['Borrador Word','Word draft'],
+  chapters:['Capítulos','Chapters'],outline:['Índice','Outline'],facts:['Hechos','Facts'],draft:['Redacción','Drafting'],word:['Memoria técnica','Technical proposal'],economic:['Oferta económica','Economic offer'],
 };
 const reasons:Record<string,[string,string]> = {
   technical_score_unknown:['Indica si el pliego tiene puntuación técnica para seguir preparando la oferta.','Choose whether the tender has technical scoring to continue.'],
@@ -73,7 +73,8 @@ export function WebAutomaticPreparation({projectId,language,fileIds,credentialId
       <Button size="sm" variant="outline" disabled={busy||dirty} onClick={()=>void change('resume','none')}>{en?'No technical scoring':'Sin puntuación técnica'}</Button>
     </>}
     {(state?.status==='paused'||state?.status==='blocked'&&state.reason!=='technical_score_unknown')&&<Button size="sm" disabled={busy||dirty} onClick={()=>void change('resume')}>{en?'Resume':'Reanudar'}</Button>}
-    {state?.status==='ready'&&state.wordId&&<><span role="status">{en?'Draft ready for final review.':'Borrador listo para la revisión final.'}</span><WebWordDocument language={language} saveToProject url={`/api/projects/${projectId}/jobs/${state.wordId}/artifact`} label={en?'Review draft':'Revisar borrador'} onSaveAndContinue={()=>window.dispatchEvent(new CustomEvent('savia:word-reviewed',{detail:{projectId,jobId:state.wordId}}))}/></>}
+    {state?.status==='ready'&&state.wordId&&<><span role="status">{en?'Draft ready for final review.':'Borrador listo para la revisión final.'}</span><WebWordDocument language={language} saveToProject url={`/api/projects/${projectId}/jobs/${state.wordId}/artifact`} label={state.economicId?(en?'Review technical proposal':'Revisar memoria técnica'):(en?'Review draft':'Revisar borrador')} onSaveAndContinue={()=>window.dispatchEvent(new CustomEvent('savia:word-reviewed',{detail:{projectId,jobId:state.wordId}}))}/></>}
+    {state?.status==='ready'&&state.economicId&&<a className="web-autopilot-download-link" href={`/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(state.economicId)}/artifact`} download>{en?'Download economic offer form':'Descargar formulario de oferta económica'}</a>}
     {failed&&<span role="alert">{en?'Could not update automatic preparation.':'No se pudo actualizar la preparación automática.'}</span>}
   </div>;
 }

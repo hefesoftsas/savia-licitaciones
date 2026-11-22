@@ -1254,7 +1254,7 @@ async function getLegacyConversionSuffix(inputPath) {
   return suffix || '.doc';
 }
 
-async function findLibreOfficeCommand() {
+export async function findLibreOfficeCommand() {
   const candidates = [
     process.env.LIBREOFFICE_PATH,
     'soffice',

@@ -1,6 +1,6 @@
 import {opportunitySourceState} from './opportunity-source-state.js';
 import secop from '../../client/electron/services/secopService.cjs';
-import {searchPlacspD1, searchTed} from './secop.js';
+import {officialOpportunityDocuments, searchPlacspD1, searchTed} from './secop.js';
 const clean = (value, max = 500) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 const normalize = value => clean(value, 100).toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 export function isOpenOpportunity(item, now = Date.now()) {
@@ -88,7 +88,13 @@ export async function searchOpportunityCandidates({ profile, terms, searchProces
       if (!item.id || !item.source) continue;
       if (!isOpenOpportunity(item, now)) continue;
       const key = `${item.source}:${item.id}`;
-      if (candidates.has(key)) continue;
+      if (candidates.has(key)) {
+        // PLACSP can also return TED notices, but its cached rows omit the official criteria.
+        if (dataset === 'ted' && item.source === 'ted') {
+          candidates.set(key, {...candidates.get(key), ...item});
+        }
+        continue;
+      }
       const pubKey = candidatePublicationKey(item.portalUrl || item.url);
       if (pubKey && seenPubs.has(pubKey)) continue;
       const normRef = normDedupKey(item.reference);
@@ -102,7 +108,7 @@ export async function searchOpportunityCandidates({ profile, terms, searchProces
   }
   const classSet = new Set(classes.flatMap(code => code.length > 6 ? [code, code.slice(0, 6)] : [code]));
   const ranked = [...candidates.entries()].sort((a,b) => Number(classSet.has(String(b[1].classificationCode || '').replace(/^V1\./i,'').slice(0,6))) - Number(classSet.has(String(a[1].classificationCode || '').replace(/^V1\./i,'').slice(0,6)))).slice(0,60);
-  const shortlist = ranked.map(([id,item]) => ({id, title:clean(item.title,500), entity:clean(item.entity,160), classificationCode:clean(item.classificationCode,20), department:clean(item.department,100), status:clean(item.status,100), value:item.value ?? null, currency:item.currencyVerified === true ? item.currency || null : null, deadline:(item.source === 'secop-ii' || item.source === 'placsp' || item.source === 'ted') && item.deadlineVerified === true ? item.deadline : undefined}));
+  const shortlist = ranked.map(([id,item]) => ({id, ...(item.source==='ted' ? {selectionCriteria:clean(item.selectionCriteria,4000),awardCriteria:clean(item.awardCriteria,4000),reference:item.reference} : {}), title:clean(item.title,500), entity:clean(item.entity,160), classificationCode:clean(item.classificationCode,20), department:clean(item.department,100), status:clean(item.status,100), value:item.value ?? null, currency:item.currencyVerified === true ? item.currency || null : null, deadline:(item.source === 'secop-ii' || item.source === 'placsp' || item.source === 'ted') && item.deadlineVerified === true ? item.deadline : undefined}));
   return {candidates:ranked.map(([id,process]) => ({id,process})), shortlist};
 }
 
@@ -179,6 +185,13 @@ export async function runnerOpportunityContext(request,env,runner,jobId){
  const row=await active();if(!row)return Response.json({error:'sources_changed'},{status:409});
  const {suggestionSources}=await import('./opportunity-suggestion-settings.js');const current=await suggestionSources(env,runner.ownerId,row.keywords,!!row.include_rup);
  if(current.sourceFingerprint!==row.source_fingerprint||!await active())return Response.json({error:'sources_changed'},{status:409});
+ if (input.candidateId !== undefined) {
+   const candidate = JSON.parse(row.shortlist_json).find(item => item.id === input.candidateId);
+   if (!candidate || !/^(ted|placsp):/.test(candidate.id)) return Response.json({error:'not_found'}, {status:404});
+   const separator = candidate.id.indexOf(':');
+   const documents = await officialOpportunityDocuments(env, candidate.id.slice(0, separator), candidate.id.slice(separator+1), input.language==='en'?'en':'es');
+   return Response.json({documents});
+ }
  return new URL(request.url).searchParams.get('check')==='1'?Response.json({ok:true}):Response.json({profile:JSON.parse(row.profile_json),shortlist:JSON.parse(row.shortlist_json)});
 }
 
