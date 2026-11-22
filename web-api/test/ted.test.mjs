@@ -30,6 +30,7 @@ test('buildTedExpertQuery construye consultas TED v3 y ordenación válidas', ()
       minValue: 50000,
       maxValue: 900000,
       fromDate: '2026-01-01',
+      publicationYear: '2026',
       sortBy: 'value',
       sortDirection: 'asc',
     },
@@ -48,6 +49,7 @@ test('buildTedExpertQuery construye consultas TED v3 y ordenación válidas', ()
   assert.match(spainQuery, /estimated-value-proc >= 50000/);
   assert.match(spainQuery, /estimated-value-proc <= 900000/);
   assert.match(spainQuery, /publication-date >= 20260101/);
+  assert.match(spainQuery, /publication-date <= 20261231/);
   assert.ok(spainQuery.endsWith('SORT BY estimated-value-proc'));
   assert.doesNotMatch(spainQuery, /\bASC\b/);
 
@@ -115,6 +117,7 @@ test('mapTedNoticeToProcess normaliza territorios NUTS, importes por lotes, plaz
   assert.equal(esNotice.publicationDate, '2026-01-30');
   assert.equal(esNotice.deadline, '2099-05-15T14:00:00');
   assert.equal(esNotice.deadlineVerified, true);
+  assert.equal(esNotice.deadlineUtcOffset, '+02:00');
   assert.equal(esNotice.status, 'Publicado');
   assert.equal(esNotice.statusCode, 'PUB');
   assert.equal(esNotice.modality, 'Abierto · Servicios');

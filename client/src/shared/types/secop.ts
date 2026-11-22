@@ -6,6 +6,8 @@ export type ProcurementMarket = 'CO' | 'ES' | 'ALL';
 export interface SecopProcess {
   id: string;
   portfolioId?: string;
+  portalUrl?: string;
+  deadlineUtcOffset?: string;
   reference?: string;
   classificationCode?: string;
   cpvCodes?: string[];
@@ -62,6 +64,7 @@ export interface SecopSearchParams {
   minValue?: number;
   maxValue?: number;
   fromDate?: string;
+  publicationYear?: string;
   limit?: number;
   offset?: number;
   dataset?: SecopSource | 'contratos';

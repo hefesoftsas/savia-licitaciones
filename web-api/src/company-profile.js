@@ -2,8 +2,17 @@ const fields = ['companyName','unifiedSocialCreditCode','phone','email','legalRe
 const empty = () => ({ ...Object.fromEntries(fields.map(field => [field, ''])), watermarkEnabled: false });
 const bad = () => Response.json({error:'invalid_profile'},{status:400});
 export function normalizeCompanyProfile(profile) {
- if(!profile||typeof profile!=='object'||Array.isArray(profile)||Object.keys(profile).length!==fields.length+1||fields.some(field=>typeof profile[field]!=='string'||profile[field].length>100000)||typeof profile.watermarkEnabled!=='boolean'||JSON.stringify(profile).length>512000)return null;
- return {...Object.fromEntries(fields.map(field=>[field,profile[field]])),watermarkEnabled:profile.watermarkEnabled};
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
+  const hasBenchmarks = Object.hasOwn(profile, 'bidBenchmarks');
+  if (hasBenchmarks && (typeof profile.bidBenchmarks !== 'string' || profile.bidBenchmarks.length > 4000)) return null;
+  if (Object.keys(profile).length !== fields.length + 1 + Number(hasBenchmarks) ||
+      fields.some(field => typeof profile[field] !== 'string' || profile[field].length > 100000) ||
+      typeof profile.watermarkEnabled !== 'boolean' || JSON.stringify(profile).length > 512000) return null;
+  return {
+    ...Object.fromEntries(fields.map(field => [field, profile[field]])),
+    watermarkEnabled: profile.watermarkEnabled,
+    ...(hasBenchmarks ? {bidBenchmarks: profile.bidBenchmarks} : {}),
+  };
 }
 export async function companyProfile(request, env, owner) {
  if(request.method==='GET'){
@@ -18,6 +27,6 @@ export async function companyProfile(request, env, owner) {
  const json=JSON.stringify(normalized),now=new Date().toISOString();
  const row=input.version===0
   ?await env.DB.prepare('INSERT INTO company_profiles(owner_id,profile_json,version,updated_at) VALUES(?,?,1,?) ON CONFLICT(owner_id) DO NOTHING RETURNING version,updated_at').bind(owner,json,now).first()
-  :await env.DB.prepare('UPDATE company_profiles SET profile_json=?,version=version+1,updated_at=? WHERE owner_id=? AND version=? RETURNING version,updated_at').bind(json,now,owner,input.version).first();
- return row?Response.json({profile:normalized,version:row.version,updatedAt:row.updated_at}):Response.json({error:'version_conflict'},{status:409});
+  :await env.DB.prepare(`UPDATE company_profiles SET profile_json=json_patch(profile_json,?),version=version+1,updated_at=? WHERE owner_id=? AND version=? RETURNING version,updated_at,profile_json`).bind(json,now,owner,input.version).first();
+ return row?Response.json({profile:row.profile_json?JSON.parse(row.profile_json):normalized,version:row.version,updatedAt:row.updated_at}):Response.json({error:'version_conflict'},{status:409});
 }

@@ -8,7 +8,17 @@ const categories=['officeEnvironment','businessLicense','legalRepresentativeIdEm
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const invalid=()=>{throw new Error('Captura del perfil de empresa inválida.');};
 function imageType(b){const starts=a=>a.every((v,i)=>b[i]===v);if(starts([137,80,78,71,13,10,26,10]))return 'image/png';if(starts([255,216,255]))return 'image/jpeg';if(starts([71,73,70,56])&&(b[4]===55||b[4]===57)&&b[5]===97)return 'image/gif';if(starts([66,77]))return 'image/bmp';if(starts([82,73,70,70])&&b[8]===87&&b[9]===69&&b[10]===66&&b[11]===80)return 'image/webp';return '';}
-function validProfile(value){if(value===null)return true;const p=value?.profile;return !!(p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===fields.length+1&&fields.every(f=>typeof p[f]==='string'&&p[f].length<=100000)&&typeof p.watermarkEnabled==='boolean'&&JSON.stringify(p).length<=512000&&typeof value.updatedAt==='string'&&value.updatedAt.length>0&&value.updatedAt.length<=100);}
+function validProfile(value) {
+  if (value === null) return true;
+  const profile = value?.profile;
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return false;
+  const hasBenchmarks = Object.hasOwn(profile, 'bidBenchmarks');
+  return Object.keys(profile).length === fields.length + 1 + Number(hasBenchmarks)
+    && (!hasBenchmarks || (typeof profile.bidBenchmarks === 'string' && profile.bidBenchmarks.length <= 4000))
+    && fields.every(field => typeof profile[field] === 'string' && profile[field].length <= 100000)
+    && typeof profile.watermarkEnabled === 'boolean' && JSON.stringify(profile).length <= 512000
+    && typeof value.updatedAt === 'string' && value.updatedAt.length > 0 && value.updatedAt.length <= 100;
+}
 export async function captureAccountCompanyProfile({server,token,directory,fetchImpl=fetch}){
  const capture=await prepareAccountCompanyProfileCapture({server,token,fetchImpl});
  return createComponentSnapshot(directory,{metadata:{kind:'account-company-profile',profile:capture.profile,images:capture.images},included:['account-company-profile'],omitted:['other-account-data','credentials'],objects:capture.objects,beforeCommit:capture.assertUnchanged});

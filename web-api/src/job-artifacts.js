@@ -9,17 +9,21 @@ const maxSize = 25 * 1024 * 1024;
 const conflict = () => Response.json({ error: 'lease_conflict' }, { status: 409 });
 
 async function active(env, runner, jobId, leaseHash) {
-  return env.DB.prepare("SELECT id,kind FROM jobs WHERE id = ? AND owner_id = ? AND runner_id = ? AND lease_hash = ? AND state = 'running' AND lease_expires_at > ? AND kind IN ('technical-plan.export-word', 'technical-plan.extract-template', 'duplicate-check.analyze', 'rejection-check.analyze', 'blind-check.inspect', 'blind-check.fix', 'blind-check.fix-report', 'blind-check.fix-ai', 'bid-evaluation.analyze')").bind(jobId, runner.ownerId, runner.id, leaseHash, Date.now()).first();
+  return env.DB.prepare("SELECT id,kind,json_extract(payload_json,'$.bidDocument') AS bid_document FROM jobs WHERE id = ? AND owner_id = ? AND runner_id = ? AND lease_hash = ? AND state = 'running' AND lease_expires_at > ? AND kind IN ('technical-plan.export-word', 'technical-plan.extract-template', 'duplicate-check.analyze', 'rejection-check.analyze', 'blind-check.inspect', 'blind-check.fix', 'blind-check.fix-report', 'blind-check.fix-ai', 'bid-evaluation.analyze')").bind(jobId, runner.ownerId, runner.id, leaseHash, Date.now()).first();
 }
 export async function uploadJobArtifact(request, env, runner, jobId) {
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
   const lease = request.headers.get('x-savia-lease') || '';
   if (!/^[a-f0-9]{64}$/.test(lease)) return Response.json({ error: 'invalid_lease' }, { status: 400 });
   const leaseHash = await digest(lease);
-  if (!await active(env, runner, jobId, leaseHash)) return conflict();
+  const job = await active(env,runner,jobId,leaseHash);
+  if (!job) return conflict();
   if (Number(request.headers.get('content-length')) > maxSize) return Response.json({ error: 'artifact_too_large' }, { status: 413 });
   const bytes = await request.arrayBuffer();
   if (!bytes.byteLength || bytes.byteLength > maxSize) return Response.json({ error: 'artifact_too_large' }, { status: 413 });
+  if (job.bid_document==='economic' && (request.headers.get('content-type')!=='application/pdf' || new TextDecoder().decode(bytes.slice(0,5))!=='%PDF-')) {
+    return Response.json({error:'invalid_artifact'},{status:400});
+  }
   const hashBytes = await crypto.subtle.digest('SHA-256', bytes);
   const sha = Array.from(new Uint8Array(hashBytes), byte => byte.toString(16).padStart(2, '0')).join('');
   const id = crypto.randomUUID(), key = `job-artifacts/${jobId}/${id}`, created = new Date().toISOString();
@@ -55,7 +59,7 @@ export async function downloadJobArtifact(request, env, ownerId, projectId, jobI
     return new Response(null, { status: 204 });
   }
   if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
-  const row = await env.DB.prepare("SELECT a.object_key,a.edit_revision,j.kind FROM job_artifacts a JOIN jobs j ON j.id = a.job_id WHERE j.id = ? AND j.project_id = ? AND j.owner_id = ? AND j.kind IN ('technical-plan.export-word', 'technical-plan.extract-template', 'duplicate-check.analyze', 'rejection-check.analyze', 'blind-check.inspect', 'blind-check.fix', 'blind-check.fix-report', 'blind-check.fix-ai', 'bid-evaluation.analyze') AND j.state = 'succeeded' AND a.deleted_at IS NULL").bind(jobId, projectId, ownerId).first();
+  const row = await env.DB.prepare("SELECT a.object_key,a.edit_revision,j.kind,json_extract(j.payload_json,'$.bidDocument') AS bid_document FROM job_artifacts a JOIN jobs j ON j.id = a.job_id WHERE j.id = ? AND j.project_id = ? AND j.owner_id = ? AND j.kind IN ('technical-plan.export-word', 'technical-plan.extract-template', 'duplicate-check.analyze', 'rejection-check.analyze', 'blind-check.inspect', 'blind-check.fix', 'blind-check.fix-report', 'blind-check.fix-ai', 'bid-evaluation.analyze') AND j.state = 'succeeded' AND a.deleted_at IS NULL").bind(jobId, projectId, ownerId).first();
   if (!row) return Response.json({ error: 'not_found' }, { status: 404 });
   const object = await env.FILES.get(row.object_key);
   if (!object) return Response.json({ error: 'not_found' }, { status: 404 });
@@ -63,12 +67,13 @@ export async function downloadJobArtifact(request, env, ownerId, projectId, jobI
     let report;try{report=await object.json();}catch{return Response.json({error:'stored_data_invalid'},{status:503});}
     return Response.json(await filterRejectionReport(env,ownerId,jobId,report),{headers:{'content-disposition':'attachment; filename="revision.json"','x-content-type-options':'nosniff'}});
   }
-  return new Response(object.body, { headers: { 'content-type': ['duplicate-check.analyze','rejection-check.analyze','blind-check.inspect','bid-evaluation.analyze'].includes(row.kind)?'application/json':mime, 'content-disposition': ['duplicate-check.analyze','rejection-check.analyze','blind-check.inspect','bid-evaluation.analyze'].includes(row.kind)?'attachment; filename="revision.json"':'attachment; filename="documento.docx"', 'x-content-type-options': 'nosniff', 'etag': `"${row.edit_revision || 0}"` } });
+  if (row.bid_document==='economic') return new Response(object.body,{headers:{'content-type':'application/pdf','content-disposition':'attachment; filename="oferta-economica.pdf"','x-content-type-options':'nosniff'}});
+  return new Response(object.body, { headers: { 'content-type': ['duplicate-check.analyze','rejection-check.analyze','blind-check.inspect','bid-evaluation.analyze'].includes(row.kind)?'application/json':mime, 'content-disposition': ['duplicate-check.analyze','rejection-check.analyze','blind-check.inspect','bid-evaluation.analyze'].includes(row.kind)?'attachment; filename="revision.json"':(row.bid_document==='technical'?'attachment; filename="memoria-tecnica.docx"':'attachment; filename="documento.docx"'), 'x-content-type-options': 'nosniff', 'etag': `"${row.edit_revision || 0}"` } });
 }
 
 async function saveWordEdits(request,env,ownerId,projectId,jobId){
  if(request.headers.get('origin')!==new URL(env.BETTER_AUTH_URL).origin)return Response.json({error:'invalid_origin'},{status:403});
- const row=await env.DB.prepare("SELECT a.object_key,a.edit_revision FROM job_artifacts a JOIN jobs j ON j.id=a.job_id WHERE j.id=? AND j.project_id=? AND j.owner_id=? AND j.kind='technical-plan.export-word' AND j.state='succeeded' AND a.deleted_at IS NULL").bind(jobId,projectId,ownerId).first();
+ const row=await env.DB.prepare("SELECT a.object_key,a.edit_revision FROM job_artifacts a JOIN jobs j ON j.id=a.job_id WHERE j.id=? AND j.project_id=? AND j.owner_id=? AND j.kind='technical-plan.export-word' AND json_extract(j.payload_json,'$.bidDocument') IS NOT 'economic' AND j.state='succeeded' AND a.deleted_at IS NULL").bind(jobId,projectId,ownerId).first();
  if(!row)return Response.json({error:'not_found'},{status:404});
  if(request.headers.get('if-match')!==`"${row.edit_revision}"`)return Response.json({error:'document_changed'},{status:409});
  if(Number(request.headers.get('content-length'))>maxSize)return Response.json({error:'artifact_too_large'},{status:413});

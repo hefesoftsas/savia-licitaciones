@@ -7,8 +7,10 @@ export async function suggestionSources(env,owner,keywords,includeRup=false){
   env.DB.prepare('SELECT f.label,f.value,f.page FROM rup_current c JOIN rup_reviewed_facts f ON f.certificate_id=c.certificate_id WHERE c.owner_id=? ORDER BY f.created_at,f.id').bind(owner).all(),
   env.DB.prepare('SELECT details_json FROM company_experience_projects WHERE owner_id=? AND deleting=0 ORDER BY updated_at DESC,created_at DESC,id LIMIT 12').bind(owner).all(),
  ]);
- const fullProfile=suggestions.profileData({profile:company?JSON.parse(company.profile_json):{},projects:experience.results.map(row=>JSON.parse(row.details_json))},facts.results);
+ const companyProfile=company?JSON.parse(company.profile_json):{};
+ const fullProfile=suggestions.profileData({profile:companyProfile,projects:experience.results.map(row=>JSON.parse(row.details_json))},facts.results);
  const cpvCodes=[...new Set(facts.results.filter(fact=>/\bCPV\b/i.test(fact.label)&&/^\d{8}$/.test(fact.value)).map(fact=>fact.value))].slice(0,50);
+ if (companyProfile.bidBenchmarks) fullProfile.bidBenchmarks=companyProfile.bidBenchmarks;
  const profile=includeRup?{...fullProfile,...(cpvCodes.length?{cpvCodes}:{})}:{...fullProfile,reviewedRup:[]};
  return {profile,terms:suggestions.getTerms(profile,keywords),hasRup:fullProfile.reviewedRup.length>0||cpvCodes.length>0,sourceFingerprint:await digest(JSON.stringify({profile,keywords,includeRup}))};
 }

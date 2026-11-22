@@ -87,3 +87,16 @@ test('actualiza el estado antes de mostrar recomendaciones y oculta las que no p
  assert.deepEqual(result.items.map(item=>item.id),['secop-ii:open']);
  assert.equal(result.verificationUnavailable,true);
 });
+
+test('conserva los criterios oficiales cuando PLACSP ya devolvió el mismo anuncio TED', async () => {
+ const notice = {source:'ted',id:'ted:762248-2026',status:'Publicado',reference:'FP.499.080/0611'};
+ const official = {...notice,selectionCriteria:'Cifra anual de negocio',awardCriteria:'Experiencia adicional'};
+ const result = await searchOpportunityCandidates({
+  profile:{},terms:['Casella-Barxeta'],market:'ES',
+  searchProcesses:async ({dataset}) => ({success:true,data:{items:[dataset==='ted' ? official : notice]}}),
+ });
+ assert.equal(result.shortlist.length,1);
+ assert.equal(result.shortlist[0].selectionCriteria,official.selectionCriteria);
+ assert.equal(result.shortlist[0].awardCriteria,official.awardCriteria);
+ assert.equal(result.candidates[0].process.selectionCriteria,official.selectionCriteria);
+});

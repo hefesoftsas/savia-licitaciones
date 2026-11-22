@@ -40,7 +40,7 @@ async function createEnv() {
   const state = async () => (await (await req(url, { headers: { cookie: alice } })).json()).preparation;
   const kinds = ['analyze', 'generate-roots', 'expand-outline', 'generate-facts', 'generate-batch'].map(kind => 'technical-plan.' + kind);
   const claim = async (extra = {}) => {
-    const r = await post('/api/runner/jobs/claim', { kinds, ...extra }, agent);
+    const r = await post('/api/runner/jobs/claim', { kinds, supportsBidDocuments:true, ...extra }, agent);
     assert.equal(r.status, 200, await r.clone().text());
     return r.json();
   };
@@ -61,7 +61,7 @@ async function createEnv() {
   return { worker, req, post, alice, bob, project, path, file, runner, agent, url, command, state, claim, claimNext, complete };
 }
 
-for (const ambiguousScore of [false,true]) test(ambiguousScore ? 'pide solo la decisión de puntuación cuando el análisis es inconcluso' : 'prepara hasta Word sin revisiones intermedias y respeta pausa y reanudación', async () => {
+for (const [ambiguousScore,separate] of [[false,false],[true,false],[false,true]]) test(separate ? 'publica la memoria y la oferta en dos artefactos' : ambiguousScore ? 'pide solo la decisión de puntuación cuando el análisis es inconcluso' : 'prepara hasta Word sin revisiones intermedias y respeta pausa y reanudación', async () => {
  const ctx = await createEnv();
  const { worker, req, post, alice, bob, path, file, runner, agent, url, command, state, claim, claimNext, complete } = ctx;
  try {
@@ -78,7 +78,7 @@ for (const ambiguousScore of [false,true]) test(ambiguousScore ? 'pide solo la d
   const analyses=async () => (await (await req(`${path}/technical-analyses`,{headers:{cookie:alice}})).json()).analyses;
   assert.equal((await analyses()).length,0);
   assert.equal((await (await command('resume')).json()).preparation.status,'running');
-  for(const [category,content] of [['technical-score',ambiguousScore?'El informe no es concluyente.':'No hay puntuación técnica.'],['response-requirements','Requisitos de la oferta']]){
+  for(const [category,content] of [['technical-score',ambiguousScore?'El informe no es concluyente.':'No hay puntuación técnica.'],['response-requirements',separate ? 'Requisitos de la oferta\n\n```json\n{"bidDocuments":{"separate":true,"economicAnnex":5,"pageLimit":25}}\n```' : 'Requisitos de la oferta']]){
    active=await claimNext('analyze');
    assert.equal(active.job.payload.category,category);
    await complete(active,{content});
@@ -86,7 +86,9 @@ for (const ambiguousScore of [false,true]) test(ambiguousScore ? 'pide solo la d
   active=await claimNext('generate-roots');
   const leafId=crypto.randomUUID();
   const chapter={id:leafId,title:'Metodología',description:'Alcance técnico',attr:'技术',content_mode:'ai-generate'};
-  await complete(active,{outline:[chapter]});
+  const price={id:crypto.randomUUID(),title:'Oferta económica',description:'Formulario',attr:'报价',content_mode:'template-fill'};
+  const outline=separate?[chapter,price]:[chapter];
+  await complete(active,{outline});
   if(ambiguousScore){
    assert.equal((await claim()).job,null);
    assert.equal((await claim()).job,null);
@@ -95,17 +97,35 @@ for (const ambiguousScore of [false,true]) test(ambiguousScore ? 'pide solo la d
   }
   active=await claimNext('expand-outline');
   assert.equal(active.job.payload.noTechnicalScore,true);
-  await complete(active,{outline:[chapter],warnings:[]});
+  await complete(active,{outline,warnings:[]});
   active=await claimNext('generate-facts');
   await complete(active,{groups:[{id:'plazo',title:'Plazo',content:'Dos meses'}]});
   active=await claimNext('generate-batch');
+  assert.deepEqual(active.job.payload.targets,[leafId]);
+  if(separate) assert.match(active.job.payload.instructions,/máximo/);
   const draft=await post(`/api/runner/jobs/${active.job.id}/technical-batch/drafts/${leafId}`,{lease:active.lease,content:'Ejecutaremos un diagnóstico del sistema.'},agent);
   assert.equal(draft.status,201,await draft.clone().text());
   await complete(active,{generatedCount:1});
   assert.equal((await claim()).job,null);
-  const outcome=await runOnce({server:(await worker.ready).origin,token:runner.token,handlers:{'technical-plan.export-word':createWordExportHandler()}});
+  const outcome=await runOnce({server:(await worker.ready).origin,token:runner.token,handlers:{'technical-plan.export-word':createWordExportHandler(separate?{measurePages:async()=>25}:{})}});
   assert.equal(outcome.state,'succeeded',JSON.stringify(outcome));
   assert.equal((await claim()).job,null);
+  if(separate){
+    assert.equal((await state()).stage,'economic');
+    assert.equal((await claim({kinds:['technical-plan.export-word'],supportsBidDocuments:false})).job,null);
+    active=await claimNext('export-word',{kinds:['technical-plan.export-word']});
+    assert.equal(active.job.payload.economicAnnex,5);
+    assert.deepEqual(active.job.payload.fileIds,[file.id]);
+    const uploaded=await req(`/api/runner/jobs/${active.job.id}/artifact`,{method:'POST',headers:{...agent,'x-savia-lease':active.lease,'content-type':'application/pdf'},body:'%PDF-test'});
+    assert.equal(uploaded.status,200,await uploaded.clone().text());
+    await complete(active,{artifactId:(await uploaded.json()).artifact.id,bidDocument:'economic'});
+    await claim();
+    const ready=await state();
+    assert.equal(ready.economicId,active.job.id);
+    assert.notEqual(ready.wordId,ready.economicId);
+    const economic=await req(`${path}/jobs/${ready.economicId}/artifact`,{headers:{cookie:alice}});
+    assert.equal(economic.headers.get('content-type'),'application/pdf');
+  }
   const done=await state();
   assert.equal(done.status,'ready',JSON.stringify(done));
   assert.equal(done.wordId,outcome.jobId);

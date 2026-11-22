@@ -1,3 +1,4 @@
+import {validTechnicalFormat} from './bid-document-rules.js';
 import {projectFeasibilityAnalysisSourcesGuard} from './project-feasibility-analysis.js';
 import {loadBatchWordPreview} from './batch-word-preview.js';
 import {validActivity} from '../../runner/job-activity.mjs';
@@ -182,7 +183,7 @@ export async function handleUserJobs(request, env, userId) {
       const files = await env.DB.prepare(`SELECT COUNT(*) AS count FROM project_files WHERE project_id = ? AND id IN (${placeholders})`).bind(projectId, ...fileIds).first();
       if (files.count !== fileIds.length) return Response.json({ error: 'not_found' }, { status: 404 });
       const { facts, ...sourceSnapshot } = await captureRequirementSources(env, userId, projectId, false);
-      canonicalPayload = { category, fileIds, language, dataProcessingConsent: true, sourceSnapshot };
+      canonicalPayload = { category, fileIds, language, dataProcessingConsent: true, sourceSnapshot, ...(category === "response-requirements" && input.payload.bidDocumentRules === true ? {bidDocumentRules:true} : {}) };
       sourcesGuard = sourceGuard(sourceSnapshot, projectId, userId);
     }
     if (input.kind === 'technical-plan.generate-roots') {
@@ -256,8 +257,9 @@ export async function handleUserJobs(request, env, userId) {
       if(batch&&((input.payload.consistencyLedger!==undefined&&typeof input.payload.consistencyLedger!=='boolean')||(input.payload.consistencyLedger===true&&(input.payload.consistency!==true||input.payload.ledgerConsent!==true))))return Response.json({error:'invalid_job'},{status:400});
       const plan = await env.DB.prepare('SELECT version FROM project_technical_plans WHERE project_id = ?').bind(projectId).first();
       if (!plan || plan.version !== planVersion) return Response.json({ error: 'version_conflict' }, { status: 409 });
+      const technicalOnly = batch && input.payload.technicalOnly === true;
       let targets;
-      if (batch) { const rows = await env.DB.prepare("WITH RECURSIVE tree(node_id,project_id,content,sort_path) AS (SELECT node_id,project_id,content,printf('%010d:%s',sort_order,node_id) FROM project_technical_plan_nodes WHERE project_id=? AND parent_node_id IS NULL UNION ALL SELECT n.node_id,n.project_id,n.content,tree.sort_path||'/'||printf('%010d:%s',n.sort_order,n.node_id) FROM project_technical_plan_nodes n JOIN tree ON n.project_id=tree.project_id AND n.parent_node_id=tree.node_id) SELECT tree.node_id FROM tree WHERE NOT EXISTS (SELECT 1 FROM project_technical_plan_nodes c WHERE c.project_id=tree.project_id AND c.parent_node_id=tree.node_id) AND (?='all' OR length(trim(tree.content))=0) ORDER BY tree.sort_path").bind(projectId,input.payload.mode).all(); targets=rows.results.map(row=>row.node_id); if (!targets.length || targets.length>500) return Response.json({error:'invalid_node'}, {status:400}); }
+      if (batch) { const rows = await env.DB.prepare("WITH RECURSIVE tree(node_id,project_id,content,sort_path) AS (SELECT node_id,project_id,content,printf('%010d:%s',sort_order,node_id) FROM project_technical_plan_nodes WHERE project_id=? AND parent_node_id IS NULL AND (?=0 OR attr='技术') UNION ALL SELECT n.node_id,n.project_id,n.content,tree.sort_path||'/'||printf('%010d:%s',n.sort_order,n.node_id) FROM project_technical_plan_nodes n JOIN tree ON n.project_id=tree.project_id AND n.parent_node_id=tree.node_id) SELECT tree.node_id FROM tree WHERE NOT EXISTS (SELECT 1 FROM project_technical_plan_nodes c WHERE c.project_id=tree.project_id AND c.parent_node_id=tree.node_id) AND (?='all' OR length(trim(tree.content))=0) ORDER BY tree.sort_path").bind(projectId,Number(technicalOnly),input.payload.mode).all(); targets=rows.results.map(row=>row.node_id); if (!targets.length || targets.length>500) return Response.json({error:'invalid_node'}, {status:400}); }
       else { const node = await env.DB.prepare('SELECT node_id FROM project_technical_plan_nodes WHERE project_id = ? AND node_id = ? AND NOT EXISTS (SELECT 1 FROM project_technical_plan_nodes c WHERE c.project_id = ? AND c.parent_node_id = ?)').bind(projectId, nodeId, projectId, nodeId).first(); if (!node) return Response.json({ error: 'invalid_node' }, { status: 400 }); }
       let totalSections,existingWords; if (batch && planningOptions && (planningOptions.minimumWords || planningOptions.maximumWords)) { const count=await env.DB.prepare('SELECT COUNT(*) AS count FROM project_technical_plan_nodes n WHERE n.project_id=? AND NOT EXISTS (SELECT 1 FROM project_technical_plan_nodes c WHERE c.project_id=n.project_id AND c.parent_node_id=n.node_id)').bind(projectId).first(); totalSections=count.count; if(input.payload.mode==='missing'){existingWords=0;let after='';while(true){const page=await env.DB.prepare("SELECT n.node_id,n.content FROM project_technical_plan_nodes n WHERE n.project_id=? AND n.node_id>? AND length(trim(n.content))>0 AND NOT EXISTS (SELECT 1 FROM project_technical_plan_nodes c WHERE c.project_id=n.project_id AND c.parent_node_id=n.node_id) ORDER BY n.node_id LIMIT 10").bind(projectId,after).all();for(const row of page.results)existingWords+=wordCount.countReadableWords(row.content);if(page.results.length<10)break;after=page.results.at(-1).node_id;}} const min=planningOptions.minimumWords||0,max=planningOptions.maximumWords||0,total=min&&max?Math.round((min+max)/2):Math.round(min?min*1.2:max*.8),budget=existingWords===undefined?Math.round(total*targets.length/totalSections):Math.max(targets.length,total-existingWords); if(existingWords!==undefined&&max&&budget>max-existingWords) return Response.json({error:'word_budget_exhausted'},{status:400}); if(budget<targets.length||budget>100000) return Response.json({error:'invalid_job'},{status:400}); }
       const placeholders = fileIds.map(() => '?').join(',');
@@ -276,12 +278,24 @@ export async function handleUserJobs(request, env, userId) {
       if (!await globalFactSourcesCurrent(env, userId, projectId, factsSnapshot)) return Response.json({ error: 'facts_or_sources_conflict' }, { status: 409 });
       if (facts && factsSnapshot.sources.includeRup === true && input.payload.rupConsent !== true) return Response.json({ error: 'rup_consent_required' }, { status: 400 });
       const factsRevision = facts?.revision || 0, guard = globalFactGuard(factsSnapshot, projectId, userId), knowledgeGuard = knowledgeSnapshotGuard(knowledgeSnapshot, userId);
-      canonicalPayload = { ...(batch ? { mode: input.payload.mode, targets, ...(input.payload.planning === true ? {planning:true} : {}), ...(input.payload.wordAdjustment === true ? {wordAdjustment:true,wordAdjustmentConsent:true} : {}), ...(input.payload.consistency === true ? {consistency:true,consistencyConsent:true} : {}), ...(input.payload.consistencyLedger === true ? {consistencyLedger:true,ledgerConsent:true} : {}), ...(planningOptions ? {planningOptions} : {}), ...(totalSections ? {totalSections} : {}), ...(existingWords !== undefined ? {existingWords} : {}) } : { nodeId }), planVersion, fileIds, ...(language !== undefined ? { language } : {}), ...(instructions !== undefined ? { instructions } : {}), dataProcessingConsent: true, ...(allowPendingFacts ? { allowPendingFacts: true } : {}), ...(facts && factsSnapshot.sources.includeRup === true ? { rupConsent: true } : {}), ...(knowledgeSnapshot ? { knowledgeConsent: true, knowledgeSnapshot } : {}), ...(includeKnowledgeDocuments ? { includeKnowledgeDocuments: true, knowledgeDocumentConsent: true } : {}), factsRevision, factsSnapshot };
+      canonicalPayload = { ...(batch ? { mode: input.payload.mode, targets, ...(technicalOnly ? {technicalOnly:true} : {}), ...(input.payload.planning === true ? {planning:true} : {}), ...(input.payload.wordAdjustment === true ? {wordAdjustment:true,wordAdjustmentConsent:true} : {}), ...(input.payload.consistency === true ? {consistency:true,consistencyConsent:true} : {}), ...(input.payload.consistencyLedger === true ? {consistencyLedger:true,ledgerConsent:true} : {}), ...(planningOptions ? {planningOptions} : {}), ...(totalSections ? {totalSections} : {}), ...(existingWords !== undefined ? {existingWords} : {}) } : { nodeId }), planVersion, fileIds, ...(language !== undefined ? { language } : {}), ...(instructions !== undefined ? { instructions } : {}), dataProcessingConsent: true, ...(allowPendingFacts ? { allowPendingFacts: true } : {}), ...(facts && factsSnapshot.sources.includeRup === true ? { rupConsent: true } : {}), ...(knowledgeSnapshot ? { knowledgeConsent: true, knowledgeSnapshot } : {}), ...(includeKnowledgeDocuments ? { includeKnowledgeDocuments: true, knowledgeDocumentConsent: true } : {}), factsRevision, factsSnapshot };
       sourcesGuard = { sql: `${guard.sql} AND ${knowledgeGuard.sql} AND EXISTS (SELECT 1 FROM project_technical_plans WHERE project_id = ? AND version = ?) AND COALESCE((SELECT revision FROM project_global_facts WHERE project_id = ?), 0) = ?`, args: [...guard.args, ...knowledgeGuard.args, projectId, planVersion, projectId, factsRevision] };
       if (batch) sourcesGuard = {sql: `${sourcesGuard.sql} AND NOT EXISTS (SELECT 1 FROM jobs active WHERE active.owner_id=? AND active.project_id=? AND active.kind='technical-plan.generate-batch' AND active.state IN ('queued','running') AND json_extract(active.payload_json,'$.planVersion')=?)`,args:[...sourcesGuard.args,userId,projectId,planVersion]};
     }
     if (input.kind === 'technical-plan.export-word') {
-      const { planVersion, language } = input.payload;
+      const {planVersion,language,bidDocument,pageLimit,format,economicAnnex,fileIds} = input.payload;
+      if (bidDocument!==undefined && !['technical','economic'].includes(bidDocument)) return Response.json({error:'invalid_job'},{status:400});
+      if (bidDocument==='technical') {
+        if (pageLimit!==undefined && (!Number.isSafeInteger(pageLimit) || pageLimit<1 || pageLimit>500) || format!==undefined && !validTechnicalFormat(format)) return Response.json({error:'invalid_job'},{status:400});
+        canonicalPayload={planVersion,language,bidDocument,...(pageLimit ? {pageLimit} : {}),...(format ? {format} : {})};
+      }
+      if (bidDocument==='economic') {
+        if (!Number.isSafeInteger(economicAnnex) || economicAnnex<1 || economicAnnex>999 || !Array.isArray(fileIds) || !fileIds.length || fileIds.length>50 || new Set(fileIds).size!==fileIds.length || fileIds.some(id=>typeof id!=='string'||!id)) return Response.json({error:'invalid_job'},{status:400});
+        const files=await env.DB.prepare('SELECT COUNT(*) AS count FROM project_files WHERE project_id=? AND id IN (SELECT value FROM json_each(?))').bind(projectId,JSON.stringify(fileIds)).first();
+        if (files.count!==fileIds.length) return Response.json({error:'not_found'},{status:404});
+        canonicalPayload={planVersion,language,bidDocument,economicAnnex,fileIds};
+      }
+      if (bidDocument && (input.payload.templateJobId!==undefined || (bidDocument==='economic' && input.payload.draftBatchId!==undefined))) return Response.json({error:'invalid_job'},{status:400});
       if (!Number.isSafeInteger(planVersion) || planVersion < 0 || !['es', 'en'].includes(language) || input.credentialId != null) return Response.json({ error: 'invalid_job' }, { status: 400 });
       if (input.payload.exportFormat !== undefined && (!input.payload.exportFormat || typeof input.payload.exportFormat !== 'object' || Array.isArray(input.payload.exportFormat) || JSON.stringify(input.payload.exportFormat).length > 100000)) return Response.json({ error: 'invalid_job' }, { status: 400 });
       if (input.payload.exportFormat !== undefined) canonicalPayload = { ...canonicalPayload, exportFormat: exportDefaults.normalizeExportFormat(input.payload.exportFormat) };
@@ -298,6 +312,8 @@ export async function handleUserJobs(request, env, userId) {
         if (!await env.DB.prepare(`SELECT 1 AS ok WHERE ${guard.sql}`).bind(...guard.args).first()) return Response.json({ error: 'template_conflict' }, { status: 409 });
         canonicalPayload = { planVersion, language, ...(canonicalPayload.exportFormat ? { exportFormat: canonicalPayload.exportFormat } : {}), templateJobId: selected.job_id, templateRevision: selected.revision, templateValuesRevision: valuesRevision, templateSourceSnapshot: snapshot, templateFingerprint: selected.chapter_fingerprint };
         sourcesGuard = { sql: `${guard.sql} AND EXISTS (SELECT 1 FROM project_technical_plans WHERE project_id = ? AND version = ?)`, args: [...guard.args, projectId, planVersion] };
+      } else if (bidDocument) {
+        sourcesGuard = {sql:'EXISTS (SELECT 1 FROM project_technical_plans WHERE project_id = ? AND version = ?)',args:[projectId,planVersion]};
       } else {
         if (await env.DB.prepare('SELECT 1 AS found FROM project_selected_templates WHERE project_id = ?').bind(projectId).first()) return Response.json({ error: 'template_selection_required' }, { status: 409 });
         sourcesGuard = { sql: 'NOT EXISTS (SELECT 1 FROM project_selected_templates WHERE project_id = ?) AND EXISTS (SELECT 1 FROM project_technical_plans WHERE project_id = ? AND version = ?)', args: [projectId, projectId, planVersion] };
@@ -377,18 +393,20 @@ export async function handleAgentJobs(request, env, runner) {
     const now = Date.now();
     const selectedLocalModel = (await env.DB.prepare('SELECT model FROM local_model_selection WHERE owner_id=? AND active=1').bind(runner.ownerId).first())?.model || null;
     const localReady = input.localModel===true && (!selectedLocalModel || input.localModelSelection===true);
+    const bidDocumentsReady = input.supportsBidDocuments === true ? 1 : 0;
+    const requiresBidDocuments = "COALESCE(json_extract(payload_json,'$.bidDocumentRules'),0)=1 OR COALESCE(json_extract(payload_json,'$.technicalOnly'),0)=1 OR json_extract(payload_json,'$.bidDocument') IS NOT NULL";
     if (input.kinds.some(kind => ['word-format.preview', 'opportunity.analyze', 'rup.analyze', 'knowledge.analyze', 'feasibility.export-word', 'feasibility.extract-sources', 'feasibility.analyze', 'feasibility.generate-outline', 'feasibility.generate-parameters', 'feasibility.generate-content'].includes(kind))) {
       await expireAccountJobs(env, runner.ownerId);
       const account = await env.DB.prepare(`UPDATE account_jobs SET state = 'running', runner_id = ?, lease_hash = ?, lease_expires_at = ?, updated_at = ?
         WHERE id = (SELECT a.id FROM account_jobs a WHERE a.owner_id = ? AND a.state = 'queued' AND a.kind IN (SELECT value FROM json_each(?))
           AND ((a.kind!='opportunity.analyze' OR a.credential_id IS NOT NULL) AND COALESCE(json_extract(a.payload_json,'$.localRunner'),0)!=1 OR ?=1)
-          AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.owner_id = a.owner_id AND j.state = 'queued' AND j.kind IN (SELECT value FROM json_each(?)) AND (COALESCE(json_extract(j.payload_json,'$.localRunner'),0)!=1 OR ?=1) AND (j.created_at < a.created_at OR (j.created_at = a.created_at AND j.id < a.id)))
+          AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.owner_id = a.owner_id AND j.state = 'queued' AND j.kind IN (SELECT value FROM json_each(?)) AND (COALESCE(json_extract(j.payload_json,'$.localRunner'),0)!=1 OR ?=1) AND (?=1 OR NOT (${requiresBidDocuments.replaceAll('payload_json','j.payload_json')})) AND (j.created_at < a.created_at OR (j.created_at = a.created_at AND j.id < a.id)))
           ORDER BY a.created_at, a.id LIMIT 1) AND state = 'queued' RETURNING *`)
-        .bind(runner.id, await digest(lease), now + leaseDurationMs, new Date(now).toISOString(), runner.ownerId, JSON.stringify(input.kinds), localReady?1:0, JSON.stringify(input.kinds), localReady?1:0).first();
+        .bind(runner.id, await digest(lease), now + leaseDurationMs, new Date(now).toISOString(), runner.ownerId, JSON.stringify(input.kinds), localReady?1:0, JSON.stringify(input.kinds), localReady?1:0, bidDocumentsReady).first();
       if (account) return Response.json({ job: accountView(account), lease, leaseDurationMs, localModel: selectedLocalModel });
     }
-    const row = await env.DB.prepare("UPDATE jobs SET state = 'running', runner_id = ?, lease_hash = ?, lease_expires_at = ?, updated_at = ? WHERE id = (SELECT id FROM jobs WHERE owner_id = ? AND state = 'queued' AND kind IN (SELECT value FROM json_each(?)) AND (COALESCE(json_extract(payload_json,'$.localRunner'),0)!=1 OR ?=1) ORDER BY created_at, id LIMIT 1) AND state = 'queued' RETURNING *")
-      .bind(runner.id, await digest(lease), now + leaseDurationMs, new Date(now).toISOString(), runner.ownerId, JSON.stringify(input.kinds),localReady?1:0).first();
+    const row = await env.DB.prepare(`UPDATE jobs SET state = 'running', runner_id = ?, lease_hash = ?, lease_expires_at = ?, updated_at = ? WHERE id = (SELECT id FROM jobs WHERE owner_id = ? AND state = 'queued' AND kind IN (SELECT value FROM json_each(?)) AND (COALESCE(json_extract(payload_json,'$.localRunner'),0)!=1 OR ?=1) AND (?=1 OR NOT (${requiresBidDocuments})) ORDER BY created_at, id LIMIT 1) AND state = 'queued' RETURNING *`)
+      .bind(runner.id, await digest(lease), now + leaseDurationMs, new Date(now).toISOString(), runner.ownerId, JSON.stringify(input.kinds),localReady?1:0,bidDocumentsReady).first();
     if (!row) {
       const preference = await env.DB.prepare('SELECT interval_seconds FROM runner_poll_preferences WHERE owner_id=?').bind(runner.ownerId).first();
       const pollAfterMs = (preference?.interval_seconds ?? 10) * 1000;
@@ -440,6 +458,9 @@ export async function handleAgentJobs(request, env, runner) {
     }
     if (['technical-plan.export-word', 'technical-plan.extract-template', 'duplicate-check.analyze', 'rejection-check.analyze', 'blind-check.inspect', 'blind-check.fix', 'blind-check.fix-report', 'blind-check.fix-ai', 'bid-evaluation.analyze'].includes(job?.kind)) {
       const artifact = await env.DB.prepare('SELECT id FROM job_artifacts WHERE job_id = ?').bind(match[1]).first();
+      const payload=JSON.parse(job.payload_json);
+      if (payload.bidDocument && input.result?.bidDocument!==payload.bidDocument) return Response.json({error:'invalid_result'},{status:400});
+      if (payload.bidDocument==='technical' && payload.pageLimit && (!Number.isSafeInteger(input.result?.pageCount) || input.result.pageCount<1 || input.result.pageCount>payload.pageLimit)) return Response.json({error:'invalid_result'},{status:400});
       if (!artifact || input.result?.artifactId !== artifact.id) return Response.json({ error: 'invalid_artifact' }, { status: 400 });
       if(['blind-check.fix-report','blind-check.fix-ai'].includes(job?.kind) && JSON.parse(job.payload_json).reportVersion===1){const report=await env.DB.prepare('SELECT id FROM job_repair_reports WHERE job_id=? AND deleted_at IS NULL').bind(match[1]).first();if(!report||input.result?.reportId!==report.id)return Response.json({error:'invalid_artifact'},{status:400});}
 

@@ -1,3 +1,4 @@
+import {readBidDocumentRules,technicalLeaves} from './bid-document-rules.js';
 import { technicalAnalysis } from './technical-analysis.js';
 import { technicalOutline } from './technical-outline.js';
 import { technicalPlan } from './technical-plan.js';
@@ -7,8 +8,8 @@ import { detectTechnicalScore } from '../../client/src/features/web/technical-sc
 import { hasPendingFacts } from '../../client/src/features/web/preparation-readiness.mjs';
 
 const categories = ['project-overview', 'technical-score', 'response-requirements'];
-const stages = [...categories, 'chapters', 'outline', 'facts', 'draft', 'word'];
-const publicState = (row, activeJob = null) => row ? { status:row.status, stage:stages[row.stage] || 'word', reason:row.reason, runId:row.run_id, wordId:row.word_id, activeJob } : null;
+const stages = [...categories, 'chapters', 'outline', 'facts', 'draft', 'word', 'economic'];
+const publicState = (row, activeJob = null) => row ? { status:row.status, stage:row.status==='ready'?'word':stages[row.stage] || 'word', reason:row.reason, runId:row.run_id, wordId:row.word_id, ...(row.economic_word_id ? {economicId:row.economic_word_id} : {}), activeJob } : null;
 const error = (code, status) => Response.json({error:code},{status});
 const readState = (env, owner, project) => env.DB.prepare('SELECT * FROM project_automatic_preparation WHERE owner_id=? AND project_id=?').bind(owner,project).first();
 
@@ -16,7 +17,7 @@ async function readPublicState(env, owner, project) {
   const row = await readState(env, owner, project);
   if (!row) return null;
   const key = `prepare:${row.run_id}:${row.stage}:${row.attempt}`;
-  const job = row.stage < stages.length
+  const job = row.status!=='ready' && row.stage < stages.length
     ? await env.DB.prepare('SELECT id,kind,state,progress FROM jobs WHERE owner_id=? AND project_id=? AND client_request_id=?').bind(owner, project, key).first()
     : null;
   const activeJob = job ? { id: job.id, kind: job.kind, state: job.state, progress: job.state === 'running' ? job.progress ?? null : null } : null;
@@ -64,7 +65,7 @@ export async function automaticPreparation(request, env, owner, project) {
       settingsExpr = `json_set(${settingsExpr},'$.skipExistingDraft',json(?))`;
       binds.push(input.skipExistingDraft ? 'true' : 'false');
     }
-    await env.DB.prepare(`UPDATE project_automatic_preparation SET status=CASE WHEN stage>=8 THEN 'ready' ELSE 'running' END,
+    await env.DB.prepare(`UPDATE project_automatic_preparation SET status='running',
       attempt=attempt+CASE WHEN status='blocked' THEN 1 ELSE 0 END,
       settings_json=${settingsExpr},
       reason=NULL,updated_at=? WHERE project_id=? AND owner_id=? AND status IN ('paused','blocked')`)
@@ -104,8 +105,8 @@ async function advancePreparation(env, owner, project) {
   const queue = async (kind,payload,credential=credentialId) => await stillRunning() && run('POST','jobs',{kind,credentialId:credential,payload},handleUserJobs);
   const get = (path,handler) => run('GET',path,null,handler,project);
   const post = async (path,handler,data,...args) => await stillRunning() && run('POST',path,data,handler,project,...args);
-  const next = async (batchId=null,wordId=null) => env.DB.prepare(`UPDATE project_automatic_preparation SET stage=stage+1,attempt=0,batch_id=COALESCE(?,batch_id),word_id=COALESCE(?,word_id),
-    status=CASE WHEN stage=7 AND status='running' THEN 'ready' ELSE status END WHERE project_id=? AND lock_id=? AND status='running'`).bind(batchId,wordId,project,lock).run();
+  const next = async ({batchId=null,wordId=null,economicId=null,ready=false}={}) => env.DB.prepare(`UPDATE project_automatic_preparation SET stage=stage+1,attempt=0,batch_id=COALESCE(?,batch_id),word_id=COALESCE(?,word_id),
+    economic_word_id=COALESCE(?,economic_word_id), status=CASE WHEN ? THEN 'ready' ELSE status END WHERE project_id=? AND lock_id=? AND status='running'`).bind(batchId,wordId,economicId,Number(ready),project,lock).run();
   const block = async reason => env.DB.prepare("UPDATE project_automatic_preparation SET status='blocked',reason=? WHERE project_id=? AND lock_id=? AND status='running'").bind(reason,project,lock).run();
   try {
     const job = await env.DB.prepare('SELECT id,state FROM jobs WHERE owner_id=? AND project_id=? AND client_request_id=?').bind(owner,project,key).first();
@@ -115,7 +116,7 @@ async function advancePreparation(env, owner, project) {
       const category=categories[stage], data=await get('technical-analyses',technicalAnalysis);
       const saved=data.analyses.find(item=>item.category===category);
       if (saved?.current) return await next();
-      if (!job) return await queue('technical-plan.analyze',{...common,category});
+      if (!job) return await queue('technical-plan.analyze',{...common,category,...(category==='response-requirements'?{bidDocumentRules:true}:{})});
       if (job.state!=='succeeded') return await block('task_failed');
       await post('technical-analyses',technicalAnalysis,{jobId:job.id,revision:saved?.revision||0},category);
       return await next();
@@ -156,20 +157,32 @@ async function advancePreparation(env, owner, project) {
       await post('technical-facts',globalFacts,{jobId:job.id,revision:facts.revision},'apply');
       return;
     }
+    const {analyses}=await get('technical-analyses',technicalAnalysis);
+    const rules=readBidDocumentRules(analyses.find(item=>item.category==='response-requirements'&&item.current)?.content);
+    if (rules?.incomplete || (stage===8 && !rules)) return await block('bid_document_rules_incomplete');
     if (stage===6) {
       if (!job) {
         const hasEmptyLeaf=nodes=>nodes.some(node=>node.children?.length?hasEmptyLeaf(node.children):!node.content?.trim());
-        if (!hasEmptyLeaf(plan.outline)) return await next();
-        return await queue('technical-plan.generate-batch',{...common,planVersion:plan.version,mode:'missing',...(allowPendingFacts?{allowPendingFacts:true}:{})});
+        const leaves=rules ? technicalLeaves(plan.outline) : null;
+        if (leaves && !leaves.length) return await block('technical_chapters_missing');
+        if (leaves ? !leaves.some(node=>!node.content?.trim()) : !hasEmptyLeaf(plan.outline)) return await next();
+        const budget=rules?.pageLimit ? Math.max(80,Math.floor(rules.pageLimit*210/leaves.length)) : null;
+        const instructions=rules && (language==='en'
+          ? `Write only the technical response. Exclude offer prices, budgets, and details that reveal automatic scoring in other envelopes. ${budget ? `Use at most ${budget} words, including tables. Prioritize required details and avoid repeating material across sections.` : ''}`
+          : `Redacta solo la respuesta técnica. Excluye precios ofertados, presupuestos y datos que revelen criterios automáticos de otros sobres. ${budget ? `Usa como máximo ${budget} palabras, incluidas las tablas. Prioriza los detalles exigidos y evita repetir contenido entre apartados.` : ''}`);
+        return await queue('technical-plan.generate-batch',{...common,planVersion:plan.version,mode:'missing',...(rules?{technicalOnly:true,instructions}:{}),...(allowPendingFacts?{allowPendingFacts:true}:{})});
       }
       if (job.state!=='succeeded') return await block('task_failed');
-      return await next(job.id);
+      return await next({batchId:job.id});
     }
-    if (!job) return await queue('technical-plan.export-word',{planVersion:plan.version,language,...(row.batch_id?{draftBatchId:row.batch_id}:{})},null);
+    if (!job && stage===8 && rules) return await queue('technical-plan.export-word',{planVersion:plan.version,language,bidDocument:'economic',economicAnnex:rules.economicAnnex,fileIds},null);
+    if (!job) return await queue('technical-plan.export-word',{planVersion:plan.version,language,
+      ...(rules ? {bidDocument:'technical',pageLimit:rules.pageLimit,format:rules.format} : {}),
+      ...(row.batch_id ? {draftBatchId:row.batch_id} : {})},null);
     if (job.state!=='succeeded') return await block('task_failed');
     const artifact=await env.DB.prepare('SELECT id FROM job_artifacts WHERE job_id=? AND deleted_at IS NULL').bind(job.id).first();
     if (!artifact) return await block('draft_unavailable');
-    await next(null,job.id);
+    await next(stage===8 ? {economicId:job.id,ready:true} : {wordId:job.id,ready:!rules});
   } catch (cause) {
     if (cause?.workflowReason) {
       await block(cause.workflowReason);

@@ -17,6 +17,7 @@ export interface AutopilotPreparation {
   reason: string | null;
   runId: string;
   wordId: string | null;
+  economicId?: string;
   activeJob?: AutopilotActiveJob | null;
 }
 

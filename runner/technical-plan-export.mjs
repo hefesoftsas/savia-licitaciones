@@ -6,12 +6,14 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { fillTemplateValues } from './template-values.mjs';
+import { extractEconomicAnnex, measureWordPages } from './bid-document-export.mjs';
 import { imageReferences } from './desktop-assets.mjs';
 
 const require = createRequire(import.meta.url);
 const requireClient = createRequire(new URL('../client/package.json', import.meta.url));
 const { createTechnicalPlanExport, templateChapterIds } = require('../client/electron/services/technicalPlanExport.cjs');
 const { createOpenXmlHelperService } = require('../client/electron/services/openXmlHelperService.cjs');
+const { numberOutline } = require('../client/electron/services/technicalPlanOutline.cjs');
 const { normalizeExportFormat } = require('../client/electron/services/exportFormatDefaults.cjs');
 
 export function resolvePackagedHelper(root, platform = process.platform, arch = process.arch) {
@@ -67,10 +69,33 @@ export async function exportTechnicalPlan(snapshot, { language = 'es', tempRoot 
   }
 }
 
-export function createWordExportHandler({ convert = exportTechnicalPlan } = {}) {
+export function createWordExportHandler({ convert = exportTechnicalPlan, measurePages = measureWordPages } = {}) {
   return async (payload, context) => {
     context.signal?.throwIfAborted();
     let snapshot = await context.getPlanContext();
+    if (payload.bidDocument === 'economic') {
+      const result = await extractEconomicAnnex(payload, context);
+      await context.getPlanContext();
+      const artifact = await context.uploadArtifact(result.bytes,'application/pdf');
+      return {artifactId:artifact.id,bidDocument:'economic',pageCount:result.pageCount,warnings:result.warnings};
+    }
+    if (payload.bidDocument === 'technical') {
+      snapshot = {...snapshot,outline:numberOutline(snapshot.outline.filter(node=>node.attr==='技术')),hasTemplate:false};
+      const {format} = payload;
+      if (format) {
+        const base = normalizeExportFormat();
+        const sizes = {6.5:'小六',7.5:'六号',9:'小五',10.5:'五号',12:'小四',14:'四号',15:'小三',16:'三号',18:'小二',22:'二号',24:'小一',26:'一号',36:'小初',42:'初号'};
+        const font = {...(format.font ? {font:format.font} : {}),...(format.fontSize ? {size:sizes[format.fontSize]} : {})};
+        const margin = format.margin;
+        snapshot.exportFormat = {
+          ...base,
+          page:{...base.page,...(margin ? {margin_top_cm:margin,margin_bottom_cm:margin,margin_left_cm:margin,margin_right_cm:margin} : {})},
+          body_text:{...base.body_text,...font,...(format.lineSpacing ? {line_spacing_value:format.lineSpacing} : {})},
+          headings:base.headings.map(heading=>({...heading,...font,...(format.lineSpacing ? {line_spacing:format.lineSpacing} : {})})),
+          table:{...base.table,header_row:{...base.table.header_row,...font},first_column:{...base.table.first_column,...font},body_cell:{...base.table.body_cell,...font}},
+        };
+      }
+    }
     const references = referencedAssets(snapshot.outline || []), assets = (snapshot.assets || []).filter(asset => references.has(JSON.stringify([asset.kind, asset.reference])));
     if (assets.length) {
       const planAssets = [];
@@ -79,9 +104,15 @@ export function createWordExportHandler({ convert = exportTechnicalPlan } = {}) 
     }
     if (snapshot.hasTemplate) snapshot.bidTemplate = Buffer.from(await context.getBidTemplate());
     const result = await convert(snapshot, { language: payload.language, signal: context.signal });
+    const pageCount = payload.pageLimit ? await measurePages(result.bytes, context.signal) : undefined;
+    if (pageCount > payload.pageLimit) {
+      throw new Error(payload.language==='en'
+        ? `The technical proposal has ${pageCount} pages and the tender allows ${payload.pageLimit}.`
+        : `La memoria técnica tiene ${pageCount} páginas y el pliego permite ${payload.pageLimit}.`);
+    }
     await context.getPlanContext();
     context.signal?.throwIfAborted();
     const artifact = await context.uploadArtifact(result.bytes);
-    return { artifactId: artifact.id, warnings: result.warnings };
+    return { artifactId: artifact.id, warnings: result.warnings, ...(payload.bidDocument==='technical' ? {bidDocument:'technical'} : {}), ...(pageCount ? {pageCount} : {}) };
   };
 }

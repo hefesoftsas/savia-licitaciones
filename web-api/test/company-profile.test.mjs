@@ -27,5 +27,11 @@ test('el perfil empresarial se aísla por cuenta y protege ediciones simultánea
   assert.equal((await write('PUT',{version:1,profile:{...saved.profile,watermarkEnabled:'true'}},alice)).status,400);
   assert.equal((await write('PUT',{version:1,profile:{...saved.profile,businessScope:'Nuevo alcance'}},alice)).status,200);
   assert.equal((await(await req('/api/company-profile',{headers:{cookie:alice}})).json()).profile.businessScope,'Nuevo alcance');
+  const bidBenchmarks='2025: 400000 EUR; medición: 110 EUR/km';
+  const updated=await write('PUT',{version:2,profile:{...profile,bidBenchmarks}},alice);
+  assert.equal((await updated.json()).profile.bidBenchmarks,bidBenchmarks);
+  const legacy=await write('PUT',{version:3,profile},alice);
+  assert.equal((await legacy.json()).profile.bidBenchmarks,bidBenchmarks);
+  assert.equal((await write('PUT',{version:4,profile:{...profile,bidBenchmarks:42}},alice)).status,400);
  }finally{await worker?.dispose();await rm(build,{recursive:true,force:true});}
 });

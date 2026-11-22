@@ -86,6 +86,12 @@ async function resolveTedDocuments(env, id, { process = {}, row = null, fresh = 
       portalDocs = await fetchPlacspDocuments(id, { url: portalUrl, reference }).catch(() => []);
     }
     const rowSaved = JSON.parse(row?.documents_json || '[]');
+    // Keep previously resolved attachments when the portal is temporarily unavailable.
+    if (portalUrl && !portalDocs.length) {
+      const saved = await env.DB.prepare('SELECT documents_json FROM placsp_tenders WHERE url = ? AND id <> ? AND documents_json <> ? ORDER BY synced_at DESC LIMIT 1')
+        .bind(portalUrl, id, '[]').first();
+      portalDocs = [...JSON.parse(saved?.documents_json || '[]'), ...rowSaved.filter(doc => doc.docType !== 'TED')];
+    }
     const baseDocs = notice?.documents?.length
       ? notice.documents
       : rowSaved.length
@@ -840,7 +846,7 @@ export async function getTedDetail(env, id, { fresh = false, includeDocuments = 
   }
   const withDocs = { ...item, documents: docs };
   if (row || item.country === 'ES') {
-    await upsertPlacspEntries(env, [withDocs]).catch(() => {});
+    await upsertPlacspEntries(env, [{...withDocs, documents:includeDocuments ? docs : []}]).catch(() => {});
   }
   const data = includeDocuments
     ? { ...stripInternalTedFields(withDocs), documents: docs }
@@ -905,6 +911,10 @@ export async function searchSecop(request, env, ownerId) {
   if (!sameOrigin(request, env)) return Response.json({ error: 'invalid_origin' }, { status: 403 });
   const input = await body(request);
   const badCategory = key => input[key] !== undefined && !(typeof input[key] === 'string' && input[key].length <= 300) && !(Array.isArray(input[key]) && input[key].length <= 100 && input[key].every(x => typeof x === 'string' && x.length <= 300));
+  if (input?.publicationYear !== undefined && input.publicationYear !== '' &&
+      (input.dataset !== 'ted' || typeof input.publicationYear !== 'string' || !/^\d{4}$/.test(input.publicationYear))) {
+    return Response.json({error:'invalid_search'}, {status:400});
+  }
   if (!input || (input.openOnly !== undefined && typeof input.openOnly !== 'boolean') || !sources.includes(input.dataset) || categoryNames.some(badCategory) || badCategory('territory') || ['keyword','fromDate','classificationClass','cpvCode','entity','reference'].some(key => input[key] !== undefined && (typeof input[key] !== 'string' || input[key].length > 300)) || (input.contractType !== undefined && (typeof input.contractType !== 'string' || (input.contractType !== '' && !PLACSP_CONTRACT_TYPE_CODES.includes(input.contractType)))) || (input.euFunded !== undefined && (typeof input.euFunded !== 'string' || !['', 'EU', 'NO-EU'].includes(input.euFunded))) || (input.fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.fromDate)) || ['minValue','maxValue'].some(key => input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0)) || !Number.isInteger(input.offset ?? 0) || (input.offset ?? 0) < 0 || (input.offset ?? 0) > 100000 || (input.sortBy && !columnNames.includes(input.sortBy)) || (input.sortDirection && !['asc','desc'].includes(input.sortDirection)) || (input.columnFilters && (typeof input.columnFilters !== 'object' || Array.isArray(input.columnFilters) || Object.entries(input.columnFilters).some(([k,v]) => !columnNames.includes(k) || typeof v !== 'string' || v.length > 300)))) return Response.json({ error: 'invalid_search' }, { status: 400 });
   const params = { dataset: input.dataset, limit: 20, offset: input.offset ?? 0 };
   for (const key of ['keyword', ...categoryNames, 'fromDate', 'minValue', 'maxValue', 'sortBy', 'sortDirection', 'columnFilters', 'classificationClass', 'entity', 'reference', 'contractType', 'euFunded']) if (input[key] !== undefined) params[key] = input[key];
@@ -915,7 +925,7 @@ export async function searchSecop(request, env, ownerId) {
     return Response.json(result, { status: result.success ? 200 : 502 });
   }
   if (input.dataset === 'ted') {
-    const result = await searchTed(env, { ...params, openOnly: input.openOnly === true, fresh: input.fresh === true, language: input.language === 'en' ? 'en' : 'es' }, ownerId);
+    const result = await searchTed(env, { ...params, publicationYear: input.publicationYear, openOnly: input.openOnly === true, fresh: input.fresh === true, language: input.language === 'en' ? 'en' : 'es' }, ownerId);
     return Response.json(result, { status: result.success ? 200 : 502 });
   }
   const key = 'search:' + await searchCacheHash([ownerId,params]);
@@ -966,15 +976,19 @@ async function secopDocumentPage(env, api, portfolioId, offset) {
   return {...result,data:{...result.data,items:result.data.items.slice(offset,offset+100),truncated:result.data.items.length>offset+100}};
 }
 
+export async function officialOpportunityDocuments(env, source, id, language) {
+  const row = await env.DB.prepare('SELECT documents_json, reference, url FROM placsp_tenders WHERE id = ?').bind(id).first();
+  return source === 'ted'
+    ? resolveTedDocuments(env, id, { row, language })
+    : resolvePlacspDocuments(env, id, row);
+}
+
 export async function secopDocumentCatalog(request, env) {
   if (request.method !== 'GET') return new Response('Method not allowed',{status:405});
   const url = new URL(request.url), source = url.searchParams.get('source'), id = url.searchParams.get('id') || '';
   if (source === 'placsp' || source === 'ted') {
     if (!id.trim() || id.length > 200) return Response.json({ error: 'invalid_process' }, { status: 400 });
-    const row = await env.DB.prepare('SELECT documents_json, reference, url FROM placsp_tenders WHERE id = ?').bind(id).first();
-    const docs = source === 'ted'
-      ? await resolveTedDocuments(env, id, { row, language: url.searchParams.get('language') === 'en' ? 'en' : 'es' })
-      : await resolvePlacspDocuments(env, id, row);
+    const docs = await officialOpportunityDocuments(env, source, id, url.searchParams.get('language') === 'en' ? 'en' : 'es');
     const items = docs.map(({ url: _url, ...item }) => item);
     return Response.json({ success: true, data: { items, truncated: false, partial: false }, message: 'ok' });
   }
