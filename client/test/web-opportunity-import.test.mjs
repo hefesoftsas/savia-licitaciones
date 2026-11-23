@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {prepareOpportunity,selectableDocument,selectLoadedDocuments} from '../src/features/web/opportunity-import.mjs';
+import {createOpportunityProject,prepareOpportunity,selectableDocument,selectLoadedDocuments} from '../src/features/web/opportunity-import.mjs';
 test('prepara el proyecto e informa documentos importados, en cola y fallidos',async()=>{
  const calls=[];const send=async(path,options)=>{calls.push([path,options]);if(path==='/api/projects/from-secop')return {project:{id:'p'}};if(path.endsWith('/2'))return {job:{id:'zip'}};if(path.endsWith('/3'))throw new Error('offline');return {file:{id:'f'}};};
  const result=await prepareOpportunity(send,{id:'op'},['1','2','3']);assert.equal(result.project.id,'p');assert.deepEqual(calls[0][1].json.documentIds,['1','2','3']);assert.deepEqual(result.imported,['1']);assert.deepEqual(result.queued,['2']);assert.deepEqual(result.failed,['3']);assert.deepEqual(calls.map(call=>call[0]),['/api/projects/from-secop','/api/projects/p/secop/imports/1','/api/projects/p/secop/imports/2','/api/projects/p/secop/imports/3']);
@@ -32,4 +32,23 @@ test('abre el proyecto existente al repetir el guardado de una oportunidad', asy
 test('permite seleccionar adjuntos oficiales de PLACSP con identificador estable', () => {
  const official = {id:'PLACSP-68a65fb7e812d42cb64155162ed8cc2a', extension:'pdf'};
  assert.deepEqual(selectLoadedDocuments([official]), [official.id]);
+});
+
+test('createOpportunityProject crea el proyecto sin bloquear esperando descargas y maneja proyectos existentes', async () => {
+ const calls = [];
+ const send = async (path, options) => {
+  calls.push([path, options]);
+  return { project: { id: 'proj-1' } };
+ };
+ const created = await createOpportunityProject(send, { id: 'op-1' }, ['d1', 'd1', 'd2']);
+ assert.deepEqual(created, { project: { id: 'proj-1' }, existing: false });
+ assert.deepEqual(calls, [['/api/projects/from-secop', { method: 'POST', json: { process: { id: 'op-1' }, documentIds: ['d1', 'd2'] } }]]);
+
+ const { request } = await import('../src/features/web/api.mjs');
+ const existing = await createOpportunityProject(
+  (path, options) => request(path, options, async () => Response.json({ error: 'already_saved', projectId: 'proj-existing' }, { status: 409 })),
+  { id: 'op-2' },
+  ['d1'],
+ );
+ assert.deepEqual(existing, { project: { id: 'proj-existing' }, existing: true });
 });

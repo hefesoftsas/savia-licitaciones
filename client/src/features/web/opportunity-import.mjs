@@ -6,16 +6,22 @@ export function selectableDocument(doc) {
 export function selectLoadedDocuments(documents) {
   return [...new Set(documents.filter(selectableDocument).map(doc=>doc.id))].slice(0,MAX_OPPORTUNITY_DOCUMENTS);
 }
-export async function prepareOpportunity(request,process,ids) {
+export async function createOpportunityProject(request,process,ids) {
   const documentIds=[...new Set(ids)];
-  let project;
   try {
-    ({project} = await request('/api/projects/from-secop',{method:'POST',json:{process,documentIds}}));
+    const {project} = await request('/api/projects/from-secop',{method:'POST',json:{process,documentIds}});
+    return {project,existing:false};
   } catch (error) {
     const projectId = error?.details?.projectId;
     if (error?.status !== 409 || error.details?.error !== 'already_saved' || typeof projectId !== 'string' || !projectId) throw error;
-    return {project:{id:projectId},existing:true,imported:[],queued:[],failed:[]};
+    return {project:{id:projectId},existing:true};
   }
+}
+export async function prepareOpportunity(request,process,ids) {
+  const documentIds=[...new Set(ids)];
+  const created = await createOpportunityProject(request,process,documentIds);
+  if (created.existing) return {...created,imported:[],queued:[],failed:[]};
+  const {project} = created;
   const imported=[],queued=[],failed=[];
   for (const id of documentIds) {
     try {

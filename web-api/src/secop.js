@@ -563,7 +563,7 @@ export async function searchPlacspD1(env, params = {}, ownerId) {
         excludePublications,
         fromDate: params.fromDate || '',
         deadlineCutoff,
-        maxDetails: licit ? 8 : 12,
+        maxDetails: limit <= 10 ? (licit ? 4 : 8) : (licit ? 8 : 12),
         fetchTender: async hit => cachedPortalDetail(hit.url, hit.id, hit.publicationDate),
       });
       portal = { items: enrichedItems, truncated: portalRes.truncated };
@@ -915,8 +915,8 @@ export async function searchSecop(request, env, ownerId) {
       (input.dataset !== 'ted' || typeof input.publicationYear !== 'string' || !/^\d{4}$/.test(input.publicationYear))) {
     return Response.json({error:'invalid_search'}, {status:400});
   }
-  if (!input || (input.openOnly !== undefined && typeof input.openOnly !== 'boolean') || !sources.includes(input.dataset) || categoryNames.some(badCategory) || badCategory('territory') || ['keyword','fromDate','classificationClass','cpvCode','entity','reference'].some(key => input[key] !== undefined && (typeof input[key] !== 'string' || input[key].length > 300)) || (input.contractType !== undefined && (typeof input.contractType !== 'string' || (input.contractType !== '' && !PLACSP_CONTRACT_TYPE_CODES.includes(input.contractType)))) || (input.euFunded !== undefined && (typeof input.euFunded !== 'string' || !['', 'EU', 'NO-EU'].includes(input.euFunded))) || (input.fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.fromDate)) || ['minValue','maxValue'].some(key => input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0)) || !Number.isInteger(input.offset ?? 0) || (input.offset ?? 0) < 0 || (input.offset ?? 0) > 100000 || (input.sortBy && !columnNames.includes(input.sortBy)) || (input.sortDirection && !['asc','desc'].includes(input.sortDirection)) || (input.columnFilters && (typeof input.columnFilters !== 'object' || Array.isArray(input.columnFilters) || Object.entries(input.columnFilters).some(([k,v]) => !columnNames.includes(k) || typeof v !== 'string' || v.length > 300)))) return Response.json({ error: 'invalid_search' }, { status: 400 });
-  const params = { dataset: input.dataset, limit: 20, offset: input.offset ?? 0 };
+  if (!input || (input.openOnly !== undefined && typeof input.openOnly !== 'boolean') || (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 50)) || !sources.includes(input.dataset) || categoryNames.some(badCategory) || badCategory('territory') || ['keyword','fromDate','classificationClass','cpvCode','entity','reference'].some(key => input[key] !== undefined && (typeof input[key] !== 'string' || input[key].length > 300)) || (input.contractType !== undefined && (typeof input.contractType !== 'string' || (input.contractType !== '' && !PLACSP_CONTRACT_TYPE_CODES.includes(input.contractType)))) || (input.euFunded !== undefined && (typeof input.euFunded !== 'string' || !['', 'EU', 'NO-EU'].includes(input.euFunded))) || (input.fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.fromDate)) || ['minValue','maxValue'].some(key => input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0)) || !Number.isInteger(input.offset ?? 0) || (input.offset ?? 0) < 0 || (input.offset ?? 0) > 100000 || (input.sortBy && !columnNames.includes(input.sortBy)) || (input.sortDirection && !['asc','desc'].includes(input.sortDirection)) || (input.columnFilters && (typeof input.columnFilters !== 'object' || Array.isArray(input.columnFilters) || Object.entries(input.columnFilters).some(([k,v]) => !columnNames.includes(k) || typeof v !== 'string' || v.length > 300)))) return Response.json({ error: 'invalid_search' }, { status: 400 });
+  const params = { dataset: input.dataset, limit: input.limit ?? 20, offset: input.offset ?? 0 };
   for (const key of ['keyword', ...categoryNames, 'fromDate', 'minValue', 'maxValue', 'sortBy', 'sortDirection', 'columnFilters', 'classificationClass', 'entity', 'reference', 'contractType', 'euFunded']) if (input[key] !== undefined) params[key] = input[key];
   if (input.cpvCode !== undefined && params.classificationClass === undefined) params.classificationClass = input.cpvCode;
   if (input.territory !== undefined && params.department === undefined) params.department = input.territory;
@@ -1056,11 +1056,21 @@ export async function createSecopProject(request, env, ownerId) {
   return Response.json({ project }, { status: 201 });
 }
 export async function secopSelectedImports(request,env,ownerId,projectId,documentId) {
-  const owned=await env.DB.prepare('SELECT 1 FROM project_secop WHERE project_id=? AND owner_id=?').bind(projectId,ownerId).first();
+  const owned=await env.DB.prepare('SELECT source, external_id, process_json FROM project_secop WHERE project_id=? AND owner_id=?').bind(projectId,ownerId).first();
   if (!owned) return Response.json({error:'not_found'},{status:404});
   if (!documentId && request.method==='GET') {
-    const rows=await env.DB.prepare("SELECT s.document_id AS id,s.state, (SELECT j.state FROM jobs j WHERE j.project_id=s.project_id AND j.owner_id=? AND j.kind='secop.import-zip' AND json_extract(j.payload_json,'$.documentId')=s.document_id ORDER BY j.created_at DESC,j.rowid DESC LIMIT 1) AS job_state, EXISTS(SELECT 1 FROM secop_zip_files f WHERE f.project_id=s.project_id AND f.document_id=s.document_id) AS imported_zip FROM secop_import_selection s WHERE s.project_id=? ORDER BY s.sort_order").bind(ownerId,projectId).all();
-    return Response.json({items:rows.results.map(row=>({id:row.id,state:row.state!=='queued'?row.state:row.imported_zip || row.job_state==='succeeded'?'imported':['queued','running'].includes(row.job_state)?'queued':'failed'}))});
+    const [rows,savedFiles,tenderRow]=await Promise.all([
+      env.DB.prepare("SELECT s.document_id AS id,s.state, (SELECT j.state FROM jobs j WHERE j.project_id=s.project_id AND j.owner_id=? AND j.kind='secop.import-zip' AND json_extract(j.payload_json,'$.documentId')=s.document_id ORDER BY j.created_at DESC,j.rowid DESC LIMIT 1) AS job_state, EXISTS(SELECT 1 FROM secop_zip_files f WHERE f.project_id=s.project_id AND f.document_id=s.document_id) AS imported_zip FROM secop_import_selection s WHERE s.project_id=? ORDER BY s.sort_order").bind(ownerId,projectId).all(),
+      env.DB.prepare('SELECT psf.document_id, pf.name FROM project_secop_files psf JOIN project_files pf ON pf.id = psf.file_id WHERE psf.project_id = ?').bind(projectId).all(),
+      (owned.source==='placsp'||owned.source==='ted') ? env.DB.prepare('SELECT documents_json FROM placsp_tenders WHERE id = ?').bind(owned.external_id).first() : Promise.resolve(null),
+    ]);
+    const nameById=new Map();
+    const processDocs=(() => { try { return JSON.parse(owned.process_json || '{}').documents; } catch { return null; } })();
+    for (const doc of Array.isArray(processDocs) ? processDocs : []) { if (doc?.id && doc?.name) nameById.set(doc.id, doc.name); }
+    const tenderDocs=(() => { try { return JSON.parse(tenderRow?.documents_json || '[]'); } catch { return null; } })();
+    for (const doc of Array.isArray(tenderDocs) ? tenderDocs : []) { if (doc?.id && doc?.name) nameById.set(doc.id, doc.name); }
+    for (const saved of savedFiles.results) { if (saved?.document_id && saved?.name) nameById.set(saved.document_id, saved.name); }
+    return Response.json({items:rows.results.map(row=>({id:row.id,name:nameById.get(row.id)||null,state:row.state!=='queued'?row.state:row.imported_zip || row.job_state==='succeeded'?'imported':['queued','running'].includes(row.job_state)?'queued':'failed'}))});
   }
   if (!documentId || request.method!=='POST') return new Response('Method not allowed',{status:405});
   if (!sameOrigin(request,env)) return Response.json({error:'invalid_origin'},{status:403});

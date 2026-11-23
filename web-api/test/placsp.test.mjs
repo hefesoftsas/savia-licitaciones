@@ -1037,6 +1037,46 @@ test('web-api integra el buscador oficial PLACSP (estructurado y texto libre hí
     assert.equal(p2.items[0].reference, 'EXP-PORTAL-20');
     assert.equal(p2.truncated, false);
 
+    const p10Res = await post('/api/secop/search', {
+      dataset: 'placsp',
+      classificationClass: '722000',
+      entity: 'Industria',
+      reference: 'EXP-PORTAL',
+      contractType: '2',
+      euFunded: 'EU',
+      fromDate: '2026-11-01',
+      openOnly: true,
+      limit: 10,
+      offset: 0,
+    }, cookie);
+    assert.equal(p10Res.status, 200);
+    const p10 = (await p10Res.json()).data;
+    assert.equal(p10.items.length, 10);
+    assert.equal(p10.truncated, true);
+
+    const p10NextRes = await post('/api/secop/search', {
+      dataset: 'placsp',
+      classificationClass: '722000',
+      entity: 'Industria',
+      reference: 'EXP-PORTAL',
+      contractType: '2',
+      euFunded: 'EU',
+      fromDate: '2026-11-01',
+      openOnly: true,
+      limit: 10,
+      offset: 10,
+    }, cookie);
+    assert.equal(p10NextRes.status, 200);
+    const p10Next = (await p10NextRes.json()).data;
+    assert.equal(p10Next.items.length, 10);
+    assert.equal(p10Next.truncated, true);
+    assert.ok(!p10Next.items.some(item => p10.items.some(first => first.id === item.id)));
+
+    for (const badLimit of [0, 51, -1, 1.5]) {
+      const invalidLimit = await post('/api/secop/search', { dataset: 'placsp', limit: badLimit }, cookie);
+      assert.equal(invalidLimit.status, 400);
+    }
+
     const detail = (await (await req(`/api/secop/detail?source=placsp&id=${encodeURIComponent(p1.items[0].id)}`, { headers: { cookie } })).json()).data;
     assert.equal(detail.territory, 'Comunidad de Madrid');
     assert.equal(detail.deadline, '2099-12-31T14:00:00');
@@ -1046,8 +1086,15 @@ test('web-api integra el buscador oficial PLACSP (estructurado y texto libre hí
     assert.match(catalog.items[0].id, /^PLACSP-/);
 
     const created = await (await post('/api/projects/from-secop', { process: detail, documentIds: [catalog.items[0].id] }, cookie)).json();
+    const beforeImports = await (await req(`/api/projects/${created.project.id}/secop/imports`, { headers: { cookie } })).json();
+    assert.equal(beforeImports.items[0].id, catalog.items[0].id);
+    assert.equal(beforeImports.items[0].name, catalog.items[0].name);
+    assert.equal(beforeImports.items[0].state, 'pending');
     const imp = await post(`/api/projects/${created.project.id}/secop/imports/${catalog.items[0].id}`, {}, cookie);
     assert.equal(imp.status, 201);
+    const afterImports = await (await req(`/api/projects/${created.project.id}/secop/imports`, { headers: { cookie } })).json();
+    assert.equal(afterImports.items[0].name, catalog.items[0].name);
+    assert.equal(afterImports.items[0].state, 'imported');
 
     // 2. Keyword hybrid search merges licit.es + Buscador de Documentos and deduplicates SHARED1
     const hybrid = (await (await post('/api/secop/search', { dataset: 'placsp', keyword: 'defensa', openOnly: true }, cookie)).json()).data;

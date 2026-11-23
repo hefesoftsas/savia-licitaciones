@@ -580,7 +580,15 @@
 .web-opportunity-selection { align-items:center; flex-wrap:wrap; margin-top:.75rem; }
 .web-selected-imports { margin:1rem 0; padding:1rem; border:1px solid var(--web-border); border-radius:.5rem; }
 .web-selected-imports p { font-size:.8rem; }
-.web-selected-import { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.4rem 0; border-top:1px solid var(--web-border); }
+.web-selected-imports-actions { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-top:.65rem; flex-wrap:wrap; }
+.web-selected-imports-actions p { margin:0; color:var(--web-muted); }
+.web-selected-imports-done { margin:.65rem 0 0; color:var(--web-success, #166534); font-weight:500; }
+.web-selected-import { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.5rem 0; border-top:1px solid var(--web-border); }
+.web-selected-import-name { min-width:0; flex:1; font-size:.85rem; overflow-wrap:anywhere; }
+.web-selected-import-status { flex:none; font-size:.75rem; font-weight:500; padding:.15rem .5rem; border-radius:999px; border:1px solid var(--web-border); color:var(--web-muted); }
+.web-selected-import-status[data-state="imported"] { color:#166534; border-color:#bbf7d0; background:#f0fdf4; }
+.web-selected-import-status[data-state="importing"], .web-selected-import-status[data-state="queued"] { color:var(--web-link); border-color:var(--web-input-border); }
+.web-selected-import-status[data-state="failed"] { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }
 .web-addendum-history { margin:1.5rem 0; padding:1rem; border:1px solid var(--web-border); border-radius:.5rem; }
 .web-addendum-history h3 { font-size:1rem; font-weight:650; margin:0; }
 .web-addendum-history p { font-size:.85rem; line-height:1.5; }
