@@ -209,6 +209,14 @@ test('resolveAutopilotDecision prioritizes live agent questions and maps all blo
     'existing_draft',
   );
   assert.equal(
+    resolveAutopilotDecision({ status: 'blocked', stage: 'draft', reason: 'bid_document_rules_incomplete', runId: 'r1', wordId: null })?.kind,
+    'bid_document_rules_incomplete',
+  );
+  assert.equal(
+    resolveAutopilotDecision({ status: 'blocked', stage: 'word', reason: 'word_page_limit_exceeded', runId: 'r1', wordId: null })?.kind,
+    'word_page_limit_exceeded',
+  );
+  assert.equal(
     resolveAutopilotDecision({ status: 'blocked', stage: 'draft', reason: 'task_failed', runId: 'r1', wordId: null })?.kind,
     'task_failed',
   );

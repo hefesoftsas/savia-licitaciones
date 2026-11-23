@@ -51,6 +51,22 @@ export async function automaticPreparation(request, env, owner, project) {
     if (input.technicalScore!==undefined && !['present','none'].includes(input.technicalScore)) return error('invalid_input',400);
     if (input.allowPendingFacts!==undefined && typeof input.allowPendingFacts!=='boolean') return error('invalid_input',400);
     if (input.skipExistingDraft!==undefined && typeof input.skipExistingDraft!=='boolean') return error('invalid_input',400);
+    if (input.pageLimit !== undefined && input.pageLimit !== null && (!Number.isSafeInteger(input.pageLimit) || input.pageLimit < 1 || input.pageLimit > 500)) return error('invalid_input',400);
+    let bidDocumentRules;
+    if (input.bidDocumentRules !== undefined) {
+      const rules = input.bidDocumentRules;
+      if (!rules || typeof rules !== 'object' || Array.isArray(rules)) return error('invalid_input',400);
+      if (rules.separate === false) {
+        bidDocumentRules = { separate: false };
+      } else if (rules.separate === true) {
+        const { economicAnnex, pageLimit } = rules;
+        if (!Number.isSafeInteger(economicAnnex) || economicAnnex < 1 || economicAnnex > 999) return error('invalid_input',400);
+        if (pageLimit !== undefined && pageLimit !== null && (!Number.isSafeInteger(pageLimit) || pageLimit < 1 || pageLimit > 500)) return error('invalid_input',400);
+        bidDocumentRules = { separate: true, economicAnnex, ...(pageLimit ? { pageLimit } : {}) };
+      } else {
+        return error('invalid_input',400);
+      }
+    }
     let settingsExpr = 'settings_json';
     const binds = [];
     if (input.technicalScore !== undefined) {
@@ -64,6 +80,14 @@ export async function automaticPreparation(request, env, owner, project) {
     if (typeof input.skipExistingDraft === 'boolean') {
       settingsExpr = `json_set(${settingsExpr},'$.skipExistingDraft',json(?))`;
       binds.push(input.skipExistingDraft ? 'true' : 'false');
+    }
+    if (bidDocumentRules !== undefined) {
+      settingsExpr = `json_set(${settingsExpr},'$.bidDocumentRules',json(?))`;
+      binds.push(JSON.stringify(bidDocumentRules));
+    }
+    if (input.pageLimit !== undefined) {
+      settingsExpr = `json_set(${settingsExpr},'$.pageLimitOverride',json(?))`;
+      binds.push(input.pageLimit === null ? 'null' : String(input.pageLimit));
     }
     await env.DB.prepare(`UPDATE project_automatic_preparation SET status='running',
       attempt=attempt+CASE WHEN status='blocked' THEN 1 ELSE 0 END,
@@ -99,7 +123,9 @@ async function advancePreparation(env, owner, project) {
     return value;
   };
   const key = `prepare:${row.run_id}:${row.stage}:${row.attempt}`;
-  const {fileIds,credentialId,language,technicalScore,allowPendingFacts=false,skipExistingDraft=false} = JSON.parse(row.settings_json);
+  const settings = JSON.parse(row.settings_json);
+  const {fileIds,credentialId,language,technicalScore,allowPendingFacts=false,skipExistingDraft=false,bidDocumentRules} = settings;
+  const hasPageLimitOverride = Object.prototype.hasOwnProperty.call(settings, 'pageLimitOverride');
   const common = {fileIds,language,dataProcessingConsent:true};
   const stillRunning = async () => Boolean(await env.DB.prepare("SELECT 1 FROM project_automatic_preparation WHERE project_id=? AND lock_id=? AND status='running'").bind(project,lock).first());
   const queue = async (kind,payload,credential=credentialId) => await stillRunning() && run('POST','jobs',{kind,credentialId:credential,payload},handleUserJobs);
@@ -109,7 +135,7 @@ async function advancePreparation(env, owner, project) {
     economic_word_id=COALESCE(?,economic_word_id), status=CASE WHEN ? THEN 'ready' ELSE status END WHERE project_id=? AND lock_id=? AND status='running'`).bind(batchId,wordId,economicId,Number(ready),project,lock).run();
   const block = async reason => env.DB.prepare("UPDATE project_automatic_preparation SET status='blocked',reason=? WHERE project_id=? AND lock_id=? AND status='running'").bind(reason,project,lock).run();
   try {
-    const job = await env.DB.prepare('SELECT id,state FROM jobs WHERE owner_id=? AND project_id=? AND client_request_id=?').bind(owner,project,key).first();
+    const job = await env.DB.prepare('SELECT id,state,result_json FROM jobs WHERE owner_id=? AND project_id=? AND client_request_id=?').bind(owner,project,key).first();
     if (job && ['running','queued'].includes(job.state)) return;
     const stage = row.stage;
     if (stage<3) {
@@ -158,7 +184,27 @@ async function advancePreparation(env, owner, project) {
       return;
     }
     const {analyses}=await get('technical-analyses',technicalAnalysis);
-    const rules=readBidDocumentRules(analyses.find(item=>item.category==='response-requirements'&&item.current)?.content);
+    const parsedRules=readBidDocumentRules(analyses.find(item=>item.category==='response-requirements'&&item.current)?.content);
+    let rules = parsedRules;
+    if (bidDocumentRules?.separate === false) {
+      rules = null;
+    } else if (bidDocumentRules?.separate === true || (parsedRules && !parsedRules.incomplete)) {
+      const effectivePageLimit = hasPageLimitOverride
+        ? settings.pageLimitOverride
+        : bidDocumentRules?.separate === true
+          ? (bidDocumentRules.pageLimit ?? parsedRules?.pageLimit ?? null)
+          : (parsedRules?.pageLimit ?? null);
+      const economicAnnex = bidDocumentRules?.separate === true ? bidDocumentRules.economicAnnex : parsedRules.economicAnnex;
+      rules = {
+        economicAnnex,
+        ...(Number.isSafeInteger(effectivePageLimit) && effectivePageLimit > 0 ? { pageLimit: effectivePageLimit } : {}),
+        ...(parsedRules?.format ? { format: parsedRules.format } : {}),
+      };
+    }
+    if (stage === 8 && bidDocumentRules?.separate === false && row.word_id) {
+      await next({ ready: true });
+      return;
+    }
     if (rules?.incomplete || (stage===8 && !rules)) return await block('bid_document_rules_incomplete');
     if (stage===6) {
       if (!job) {
@@ -179,7 +225,16 @@ async function advancePreparation(env, owner, project) {
     if (!job) return await queue('technical-plan.export-word',{planVersion:plan.version,language,
       ...(rules ? {bidDocument:'technical',pageLimit:rules.pageLimit,format:rules.format} : {}),
       ...(row.batch_id ? {draftBatchId:row.batch_id} : {})},null);
-    if (job.state!=='succeeded') return await block('task_failed');
+    if (job.state!=='succeeded') {
+      if (stage === 7) {
+        let message = '';
+        try { message = JSON.parse(job.result_json || '{}').message || ''; } catch {}
+        if (/tiene \d+ páginas y el pliego permite \d+|has \d+ pages and the tender allows \d+/i.test(message)) {
+          return await block('word_page_limit_exceeded');
+        }
+      }
+      return await block('task_failed');
+    }
     const artifact=await env.DB.prepare('SELECT id FROM job_artifacts WHERE job_id=? AND deleted_at IS NULL').bind(job.id).first();
     if (!artifact) return await block('draft_unavailable');
     await next(stage===8 ? {economicId:job.id,ready:true} : {wordId:job.id,ready:!rules});

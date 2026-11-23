@@ -299,6 +299,8 @@ export function WebAutopilotWorkspace({
                 ...(options?.technicalScore ? { technicalScore: options.technicalScore } : {}),
                 ...(options?.allowPendingFacts ? { allowPendingFacts: true } : {}),
                 ...(options?.skipExistingDraft ? { skipExistingDraft: true } : {}),
+                ...(options?.bidDocumentRules ? { bidDocumentRules: options.bidDocumentRules } : {}),
+                ...(options?.pageLimit !== undefined ? { pageLimit: options.pageLimit } : {}),
               }
             : { action };
 
@@ -558,6 +560,7 @@ export function WebAutopilotWorkspace({
           <WebAutopilotRunnerFeed
             projectId={projectId}
             activeJobId={feedJobId}
+            activeJobKind={preparation?.activeJob?.kind ?? null}
             activeJobState={feedJobState}
             language={language}
             runnerSummary={runnerSummary}
@@ -611,6 +614,7 @@ export function WebAutopilotWorkspace({
               <WebAutopilotRunnerFeed
                 projectId={projectId}
                 activeJobId={feedJobId}
+                activeJobKind={preparation?.activeJob?.kind ?? null}
                 activeJobState={feedJobState}
                 language={language}
                 runnerSummary={runnerSummary}

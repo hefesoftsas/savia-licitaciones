@@ -42,6 +42,8 @@ export type AutopilotDecision =
   | { kind: 'facts_need_input'; reason: string }
   | { kind: 'rup_consent_required'; reason: string }
   | { kind: 'existing_draft'; reason: string }
+  | { kind: 'bid_document_rules_incomplete'; reason: string }
+  | { kind: 'word_page_limit_exceeded'; reason: string }
   | { kind: 'task_failed'; reason: string }
   | { kind: 'generic_blocked'; reason: string };
 

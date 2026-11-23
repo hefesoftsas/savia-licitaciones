@@ -304,6 +304,12 @@ export function resolveAutopilotDecision(preparation, questions = []) {
   if (reason === 'existing_draft') {
     return { kind: 'existing_draft', reason };
   }
+  if (reason === 'bid_document_rules_incomplete') {
+    return { kind: 'bid_document_rules_incomplete', reason };
+  }
+  if (reason === 'word_page_limit_exceeded') {
+    return { kind: 'word_page_limit_exceeded', reason };
+  }
   if (reason === 'task_failed') {
     return { kind: 'task_failed', reason };
   }

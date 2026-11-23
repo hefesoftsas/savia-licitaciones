@@ -21,6 +21,7 @@ interface ActivitySnapshot {
 export interface WebAutopilotRunnerFeedProps {
   projectId: string;
   activeJobId: string | null;
+  activeJobKind?: string | null;
   activeJobState?: string | null;
   language: 'es' | 'en';
   runnerSummary: RunnerConnectionSummary;
@@ -31,6 +32,7 @@ export interface WebAutopilotRunnerFeedProps {
 export function WebAutopilotRunnerFeed({
   projectId,
   activeJobId,
+  activeJobKind,
   activeJobState,
   language,
   runnerSummary,
@@ -107,6 +109,12 @@ export function WebAutopilotRunnerFeed({
 
   const recentEvents = activity?.events?.slice(-40) || [];
   const effectiveState = activity?.state || activeJobState || '';
+  const createdMs = activity?.createdAt ? Date.parse(activity.createdAt) : NaN;
+  const queuedTooLong =
+    effectiveState === 'queued' &&
+    runnerSummary.state === 'online' &&
+    Number.isFinite(createdMs) &&
+    Date.now() - createdMs > 30_000;
   const formatTime = (iso: string) => {
     try {
       return new Date(iso).toLocaleTimeString(en ? 'en-US' : 'es-CO');
@@ -167,7 +175,7 @@ export function WebAutopilotRunnerFeed({
             </p>
           )}
 
-          {activity && recentEvents.length === 0 && (
+          {activity && recentEvents.length === 0 && !queuedTooLong && (
             <p className="web-autopilot-hint" role="status">
               {effectiveState === 'queued'
                 ? (en
@@ -175,6 +183,20 @@ export function WebAutopilotRunnerFeed({
                     : 'Tarea en cola, esperando a que el runner la recoja.')
                 : (en ? 'Waiting for runner events…' : 'En espera de eventos del runner…')}
             </p>
+          )}
+
+          {queuedTooLong && (
+            <div className="web-autopilot-inline-alert" role="status">
+              <p>
+                {activeJobKind === 'technical-plan.export-word'
+                  ? (en
+                      ? 'The connected runner has been online for over 30 s without picking up Word export. Check that OpenXML / Word export support is available on the runner.'
+                      : 'El runner conectado lleva más de 30 s en espera sin recoger la exportación a Word. Verifica que tenga disponible el componente OpenXML / Word.')
+                  : (en
+                      ? 'The connected runner is idle and has not picked up this queued task yet. Check Conexión e IA if it does not start.'
+                      : 'El runner conectado está inactivo y aún no recoge esta tarea en cola. Revisa Conexión e IA si sigue sin avanzar.')}
+              </p>
+            </div>
           )}
 
           {recentEvents.length > 0 && (

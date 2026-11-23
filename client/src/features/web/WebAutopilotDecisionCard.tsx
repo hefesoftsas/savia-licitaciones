@@ -19,6 +19,8 @@ export interface ResumePreparationOptions {
   technicalScore?: 'present' | 'none';
   allowPendingFacts?: boolean;
   skipExistingDraft?: boolean;
+  bidDocumentRules?: { separate: false } | { separate: true; economicAnnex: number; pageLimit?: number };
+  pageLimit?: number | null;
 }
 
 export interface WebAutopilotDecisionCardProps {
@@ -56,6 +58,8 @@ export function WebAutopilotDecisionCard({
   const [factsLoading, setFactsLoading] = useState(false);
   const [factsError, setFactsError] = useState(false);
   const [savingFacts, setSavingFacts] = useState(false);
+  const [annexInput, setAnnexInput] = useState('');
+  const [pageLimitInput, setPageLimitInput] = useState('');
 
   const loadFacts = useCallback(async (onlyPending: boolean) => {
     setFactsLoading(true);
@@ -77,6 +81,8 @@ export function WebAutopilotDecisionCard({
   }, [projectId]);
 
   useEffect(() => {
+    setAnnexInput('');
+    setPageLimitInput('');
     if (decision.kind === 'facts_need_input') {
       void loadFacts(true);
     } else if (decision.kind === 'rup_consent_required') {
@@ -365,6 +371,165 @@ export function WebAutopilotDecisionCard({
     );
   }
 
+  if (decision.kind === 'bid_document_rules_incomplete') {
+    const annexTrimmed = annexInput.trim();
+    const pageLimitTrimmed = pageLimitInput.trim();
+    const parsedAnnex = /^\d+$/.test(annexTrimmed) ? Number(annexTrimmed) : NaN;
+    const validAnnex = Number.isSafeInteger(parsedAnnex) && parsedAnnex >= 1 && parsedAnnex <= 999;
+    const parsedPageLimit = /^\d+$/.test(pageLimitTrimmed) ? Number(pageLimitTrimmed) : NaN;
+    const validPageLimit =
+      pageLimitTrimmed === '' ||
+      (Number.isSafeInteger(parsedPageLimit) && parsedPageLimit >= 1 && parsedPageLimit <= 500);
+    const canSaveAnnex = validAnnex && validPageLimit;
+
+    return (
+      <section
+        className="web-autopilot-card web-autopilot-decision"
+        aria-label={en ? 'Tender submission rules' : 'Requisitos de sobres y formato'}
+      >
+        <header className="web-autopilot-decision-header">
+          <HelpCircle size={20} aria-hidden="true" />
+          <div>
+            <h3>{en ? 'Confirm economic annex or standard draft' : 'Indica el anexo económico o continúa con borrador estándar'}</h3>
+            <p>
+              {en
+                ? 'The tender mentions separate submission envelopes, but did not specify the economic annex number. Enter it to generate separated technical and economic files, or continue with a standard draft.'
+                : 'Los pliegos mencionan sobres separados, pero no indican el número de anexo de la oferta económica. Indícalo para generar memoria técnica y anexo económico por separado, o continúa con un borrador estándar.'}
+            </p>
+          </div>
+        </header>
+
+        <div className="web-autopilot-decision-body">
+          <div className="web-autopilot-fact-group">
+            <div className="web-autopilot-fact-group-head">
+              <label className="web-autopilot-field">
+                <span>{en ? 'Economic annex number (1–999)' : 'Número de anexo económico (1–999)'}</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={999}
+                  step={1}
+                  inputMode="numeric"
+                  placeholder={en ? 'E.g. 3' : 'Ej. 3'}
+                  value={annexInput}
+                  disabled={busy}
+                  onChange={event => setAnnexInput(event.target.value)}
+                />
+              </label>
+              <label className="web-autopilot-field">
+                <span>{en ? 'Technical page limit (optional, 1–500)' : 'Límite de páginas de la memoria (opcional, 1–500)'}</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={500}
+                  step={1}
+                  inputMode="numeric"
+                  placeholder={en ? 'No limit' : 'Sin límite'}
+                  value={pageLimitInput}
+                  disabled={busy}
+                  onChange={event => setPageLimitInput(event.target.value)}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="web-autopilot-decision-actions">
+          <Button
+            size="sm"
+            variant={canSaveAnnex ? undefined : 'outline'}
+            disabled={busy || !canSaveAnnex}
+            onClick={() =>
+              void onResume({
+                bidDocumentRules: {
+                  separate: true,
+                  economicAnnex: parsedAnnex,
+                  ...(pageLimitTrimmed ? { pageLimit: parsedPageLimit } : {}),
+                },
+              })
+            }
+          >
+            <Check size={15} aria-hidden="true" />
+            {en ? 'Save annex and continue' : 'Guardar anexo y continuar'}
+          </Button>
+          <Button
+            size="sm"
+            variant={canSaveAnnex ? 'outline' : undefined}
+            disabled={busy}
+            onClick={() => void onResume({ bidDocumentRules: { separate: false } })}
+          >
+            {en ? 'Continue with standard draft' : 'Continuar con borrador estándar'}
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
+  if (decision.kind === 'word_page_limit_exceeded') {
+    const pageLimitTrimmed = pageLimitInput.trim();
+    const parsedPageLimit = /^\d+$/.test(pageLimitTrimmed) ? Number(pageLimitTrimmed) : NaN;
+    const validPageLimit =
+      Number.isSafeInteger(parsedPageLimit) && parsedPageLimit >= 1 && parsedPageLimit <= 500;
+
+    return (
+      <section
+        className="web-autopilot-card web-autopilot-decision"
+        aria-label={en ? 'Page limit exceeded' : 'Límite de páginas superado'}
+      >
+        <header className="web-autopilot-decision-header">
+          <AlertCircle size={20} aria-hidden="true" />
+          <div>
+            <h3>{en ? 'Technical draft exceeded page limit' : 'La memoria superó el límite de páginas'}</h3>
+            <p>
+              {en
+                ? 'Set a higher page limit or continue generating the Word draft without a page limit.'
+                : 'Indica un nuevo límite de páginas o continúa generando el documento Word sin límite de páginas.'}
+            </p>
+          </div>
+        </header>
+
+        <div className="web-autopilot-decision-body">
+          <div className="web-autopilot-fact-group">
+            <label className="web-autopilot-field">
+              <span>{en ? 'New page limit (1–500)' : 'Límite de páginas (1–500)'}</span>
+              <Input
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                inputMode="numeric"
+                placeholder={en ? 'E.g. 20' : 'Ej. 20'}
+                value={pageLimitInput}
+                disabled={busy}
+                onChange={event => setPageLimitInput(event.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="web-autopilot-decision-actions">
+          <Button
+            size="sm"
+            variant={validPageLimit ? undefined : 'outline'}
+            disabled={busy || !validPageLimit}
+            onClick={() => void onResume({ pageLimit: parsedPageLimit })}
+          >
+            <Check size={15} aria-hidden="true" />
+            {en ? 'Save limit and retry' : 'Guardar límite y reintentar'}
+          </Button>
+          <Button
+            size="sm"
+            variant={validPageLimit ? 'outline' : undefined}
+            disabled={busy}
+            onClick={() => void onResume({ pageLimit: null })}
+          >
+            {en ? 'Continue without page limit' : 'Continuar sin límite de páginas'}
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
   if (decision.kind === 'task_failed') {
     return (
       <section className="web-autopilot-card web-autopilot-decision" aria-label={en ? 'Task failed' : 'Tarea fallida'}>
@@ -384,6 +549,16 @@ export function WebAutopilotDecisionCard({
             <RefreshCw size={14} aria-hidden="true" />
             {en ? 'Retry this step' : 'Reintentar este paso'}
           </Button>
+          {stage === 'word' && (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void onResume({ pageLimit: null })}>
+              {en ? 'Retry without page limit' : 'Reintentar sin límite de páginas'}
+            </Button>
+          )}
+          {stage === 'economic' && (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void onResume({ bidDocumentRules: { separate: false } })}>
+              {en ? 'Finish with technical draft only' : 'Finalizar solo con la memoria técnica'}
+            </Button>
+          )}
         </div>
       </section>
     );
