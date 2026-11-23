@@ -543,7 +543,7 @@ const apiWorker = {
     if (secopWatchProject || secopWatchAlert || url.pathname === '/api/secop-watch/check-due' || url.pathname === '/api/secop-watch') {
       const session = await getScopedSession();
       if (!session) return privateResponse(Response.json({error:'unauthorized'},{status:401}));
-      return privateResponse(await secopWatch(request,env,session.workspaceId,secopWatchProject?'project':secopWatchAlert?'review':url.pathname === '/api/secop-watch'?'overview':'due',secopWatchProject?.[1] || secopWatchAlert?.[1]));
+      return privateResponse(await secopWatch(request,env,session.workspaceId,secopWatchProject?'project':secopWatchAlert?'review':url.pathname === '/api/secop-watch'?'overview':'due',secopWatchProject?.[1] || secopWatchAlert?.[1],session.tenant?.country));
     }
     const paaRoute = /^\/api\/paa-watches(?:\/([^/]+)(?:\/(check))?)?$/.exec(url.pathname);
     const paaAlert = /^\/api\/paa-alerts\/([^/]+)\/review$/.exec(url.pathname);
@@ -878,7 +878,7 @@ const apiWorker = {
     if(url.pathname==='/api/runner/opportunity-suggestions/due'){const runner=await authenticateRunner(request,env);if(!runner)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await runnerOpportunityDue(request,env,runner));}
     if(url.pathname==='/api/opportunity-suggestions/due'){const session=await getScopedSession();if(!session)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(Response.json({started:false}));}
     const opportunityResult=/^\/api\/opportunity-suggestions\/results(?:\/(review|save))?$/.exec(url.pathname);
-    if(opportunityResult){const session=await getScopedSession();if(!session)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await opportunityResults(request,env,session.workspaceId,opportunityResult[1]));}
+    if(opportunityResult){const session=await getScopedSession();if(!session)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await opportunityResults(request,env,session.workspaceId,opportunityResult[1],{userId:session.user.id,tenantCountry:session.tenant?.country}));}
     const opportunityJob=/^\/api\/opportunity-suggestions\/jobs(?:\/([^/]+)\/(cancel))?$/.exec(url.pathname);
     if (opportunityJob) {
       const session=await getScopedSession();
@@ -888,7 +888,7 @@ const apiWorker = {
     if (url.pathname === '/api/opportunity-suggestions/search') {
       const session=await getScopedSession();
       if(!session)return privateResponse(Response.json({error:'unauthorized'},{status:401}));
-      return privateResponse(await opportunitySearch(request,env,session.workspaceId));
+      return privateResponse(await opportunitySearch(request,env,session.workspaceId,undefined,{userId:session.user.id,tenantCountry:session.tenant?.country}));
     }
     if (url.pathname === '/api/opportunity-suggestions/settings') {
       const session=await getScopedSession();

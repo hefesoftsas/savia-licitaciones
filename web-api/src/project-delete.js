@@ -29,6 +29,9 @@ export async function deleteProject(request,env,owner,projectId){
    ...candidates.map(([sql,args])=>env.DB.prepare(`INSERT OR IGNORE INTO project_deletion_objects(owner_id,project_id,object_key) SELECT ?,?,object_key FROM (${sql}) WHERE ${own}`).bind(owner,projectId,...args,owner,projectId,mutation)),
    env.DB.prepare(`UPDATE desktop_saved_tender_imports SET record_json='{}' WHERE project_id=? AND owner_id=? AND ${own}`).bind(projectId,owner,owner,projectId,mutation),
    env.DB.prepare(`UPDATE desktop_plan_file_imports SET name='',object_key='' WHERE project_id=? AND owner_id=? AND ${own}`).bind(projectId,owner,owner,projectId,mutation),
+   env.DB.prepare(`DELETE FROM secop_watch_alerts_web WHERE project_id=? AND owner_id=? AND ${own}`).bind(projectId,owner,owner,projectId,mutation),
+   env.DB.prepare(`DELETE FROM secop_watch_baselines_web WHERE project_id=? AND owner_id=? AND ${own}`).bind(projectId,owner,owner,projectId,mutation),
+   env.DB.prepare(`DELETE FROM project_secop WHERE project_id=? AND owner_id=? AND ${own}`).bind(projectId,owner,owner,projectId,mutation),
    env.DB.prepare(`DELETE FROM projects WHERE id=? AND owner_id=? AND ${own}`).bind(projectId,owner,owner,projectId,mutation),
   ]);receipt=await lookup();if(!receipt){const exists=await env.DB.prepare('SELECT id FROM projects WHERE id=? AND owner_id=?').bind(projectId,owner).first();return exists?conflict():missing();}if(batch[0].meta.changes&&!batch[batch.length-1].meta.changes)throw new Error('Project deletion transaction did not remove the project.');
  }

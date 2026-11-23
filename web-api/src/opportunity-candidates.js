@@ -44,6 +44,27 @@ export async function refreshOpportunityStatuses(items, getDetail) {
 }
 
 const normDedupKey = value => normalize(value).replace(/[^a-z0-9]+/g, '');
+const VALID_MARKETS = ['CO', 'ES', 'ALL'];
+
+export function matchesOpportunityMarket(source, market = 'ALL') {
+  if (market === 'ES') return source === 'placsp' || source === 'ted';
+  if (market === 'CO') return source === 'secop-i' || source === 'secop-ii';
+  return true;
+}
+
+async function resolveOpportunityMarket(env, owner, requestedMarket, options = {}) {
+  let tenantCountry = VALID_MARKETS.includes(options.tenantCountry) ? options.tenantCountry : null;
+  if (!tenantCountry) {
+    const tenantRow = await env.DB.prepare('SELECT country FROM tenants WHERE owner_user_id = ?').bind(owner).first();
+    tenantCountry = VALID_MARKETS.includes(tenantRow?.country) ? tenantRow.country : 'ALL';
+  }
+  if (tenantCountry === 'CO' || tenantCountry === 'ES') return tenantCountry;
+  if (VALID_MARKETS.includes(requestedMarket)) return requestedMarket;
+  const userRow = await env.DB.prepare('SELECT savia_market AS market FROM "user" WHERE id = ?').bind(options.userId || owner).first();
+  if (VALID_MARKETS.includes(userRow?.market)) return userRow.market;
+  return options.fallback ?? 'CO';
+}
+
 function candidatePublicationKey(url) {
   try {
     const parsed = new URL(url || '');
@@ -86,6 +107,7 @@ export async function searchOpportunityCandidates({ profile, terms, searchProces
     if (!response?.success || !Array.isArray(response.data?.items) || response.data.partial) throw new Error(language === 'en' ? 'The SECOP search did not finish.' : 'No se completó la consulta SECOP.');
     for (const item of response.data.items) {
       if (!item.id || !item.source) continue;
+      if (!matchesOpportunityMarket(item.source, market)) continue;
       if (!isOpenOpportunity(item, now)) continue;
       const key = `${item.source}:${item.id}`;
       if (candidates.has(key)) {
@@ -113,21 +135,19 @@ export async function searchOpportunityCandidates({ profile, terms, searchProces
 }
 
 // The caller is authenticated by the router; source data always comes from its account.
-export async function opportunitySearch(request, env, owner, searchProcesses) {
+export async function opportunitySearch(request, env, owner, searchProcesses, options = {}) {
   if (request.method !== 'POST') return new Response('Method not allowed', {status:405});
   if (request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({error:'invalid_origin'},{status:403});
   let input; try { input = await request.json(); } catch { return Response.json({error:'invalid_search'},{status:400}); }
   if (!input || !['es','en'].includes(input.language)) return Response.json({error:'invalid_search'},{status:400});
+  if (input.market !== undefined && !VALID_MARKETS.includes(input.market)) return Response.json({error:'invalid_search'},{status:400});
   const settings = async () => env.DB.prepare("SELECT s.version,s.keywords,s.include_rup,s.credential_id FROM opportunity_suggestion_settings s LEFT JOIN provider_credentials c ON c.id=s.credential_id AND c.owner_id=s.owner_id WHERE s.owner_id=? AND s.enabled=1 AND s.consented_at IS NOT NULL AND (s.local_runner=1 OR (c.provider IN ('opencode-go','openai-api','anthropic-api','google-api','google-vertex-api','groq-api','xai-api','deepseek-api','mistral-api','cerebras-api','together-api','nvidia-api','fireworks-api','huggingface-api','minimax-api','minimax-cn-api','moonshot-api','moonshot-cn-api','xiaomi-api','azure-openai-api','zai-api','ant-ling-api','opencode-zen') AND c.revoked_at IS NULL))").bind(owner).first();
   const before = await settings();
   if (!before) return Response.json({error:'settings_unavailable'},{status:409});
   const {suggestionSources} = await import('./opportunity-suggestion-settings.js');
   const sources = await suggestionSources(env,owner,before.keywords,!!before.include_rup);
   if (!sources.terms.length && !sources.profile.reviewedRup.length && !(sources.profile.cpvCodes?.length)) return Response.json({error:'sources_unavailable'},{status:409});
-  const tenantRow = await env.DB.prepare('SELECT country FROM tenants WHERE owner_user_id = ?').bind(owner).first();
-  const tenantCountry = ['CO', 'ES', 'ALL'].includes(tenantRow?.country) ? tenantRow.country : 'ALL';
-  const userRow = await env.DB.prepare('SELECT savia_market AS market FROM "user" WHERE id = ?').bind(owner).first();
-  const market = tenantCountry !== 'ALL' ? tenantCountry : (['CO', 'ES', 'ALL'].includes(userRow?.market) ? userRow.market : 'CO');
+  const market = await resolveOpportunityMarket(env, owner, input.market, { userId: options.userId, tenantCountry: options.tenantCountry, fallback: 'CO' });
   if (!searchProcesses) {
     const secopApi = secop.createSecopService({configStore:{load:()=>({ui_language:input.language})}});
     searchProcesses = params => params.dataset === 'placsp'
@@ -195,34 +215,42 @@ export async function runnerOpportunityContext(request,env,runner,jobId){
  return new URL(request.url).searchParams.get('check')==='1'?Response.json({ok:true}):Response.json({profile:JSON.parse(row.profile_json),shortlist:JSON.parse(row.shortlist_json)});
 }
 
-export async function opportunityResults(request,env,owner,action){
+export async function opportunityResults(request,env,owner,action,options={}){
  const missing=()=>Response.json({error:'not_found'},{status:404});
  if(request.method!=='GET'&&request.headers.get('origin')!==new URL(env.BETTER_AUTH_URL).origin)return Response.json({error:'invalid_origin'},{status:403});
  const findJob=async id=>env.DB.prepare(`SELECT j.id,j.result_json,p.candidates_json,p.source_fingerprint,p.settings_version FROM account_jobs j JOIN opportunity_search_snapshots p ON p.id=json_extract(j.payload_json,'$.snapshotId') AND p.owner_id=j.owner_id WHERE j.owner_id=? AND j.kind='opportunity.analyze' AND j.state='succeeded' ${id?'AND j.id=?':'ORDER BY j.updated_at DESC,j.id DESC LIMIT 1'}`).bind(...(id?[owner,id]:[owner])).first();
  const itemsOf=row=>{const candidates=new Map(JSON.parse(row.candidates_json).map(item=>[item.id,item.process]));return JSON.parse(row.result_json).recommendations.map(item=>({...item,process:candidates.get(item.id)})).filter(item=>item.process&&item.id===`${item.process.source}:${item.process.id}`);};
- if(request.method==='GET'&&!action&&new URL(request.url).searchParams.get('archive')==='1'){
-  const [reviews,jobs,saved]=await Promise.all([
-   env.DB.prepare('SELECT source,process_id,reviewed_at FROM opportunity_suggestion_reviews_web WHERE owner_id=? ORDER BY reviewed_at DESC').bind(owner).all(),
-   env.DB.prepare("SELECT j.id,j.result_json,p.candidates_json FROM account_jobs j JOIN opportunity_search_snapshots p ON p.id=json_extract(j.payload_json,'$.snapshotId') AND p.owner_id=j.owner_id WHERE j.owner_id=? AND j.kind='opportunity.analyze' AND j.state='succeeded' ORDER BY j.updated_at DESC,j.id DESC").bind(owner).all(),
-   env.DB.prepare('SELECT source,external_id,project_id FROM project_secop WHERE owner_id=?').bind(owner).all(),
-  ]);
-  const reviewed=new Map(reviews.results.map(item=>[JSON.stringify([item.source,item.process_id]),item.reviewed_at]));
-  const projects=new Map(saved.results.map(item=>[JSON.stringify([item.source,item.external_id]),item.project_id]));
-  const archived=new Map();
-  for(const job of jobs.results)for(const item of itemsOf(job)){const key=JSON.stringify([item.process.source,item.process.id]);if(reviewed.has(key)&&!archived.has(key)){const projectId=projects.get(key)||null;archived.set(key,{...item,jobId:job.id,reviewed:true,reviewedAt:reviewed.get(key),saved:!!projectId,projectId});}}
-  return Response.json({items:[...archived.values()].sort((a,b)=>b.reviewedAt.localeCompare(a.reviewedAt))});
- }
  if(request.method==='GET'&&!action){
+  const url=new URL(request.url);
+  const requestedMarket=url.searchParams.get('market');
+  if(requestedMarket!==null&&!VALID_MARKETS.includes(requestedMarket))return Response.json({error:'invalid_market'},{status:400});
+  const market=await resolveOpportunityMarket(env,owner,requestedMarket,{userId:options.userId,tenantCountry:options.tenantCountry,fallback:'ALL'});
+  if(url.searchParams.get('archive')==='1'){
+   const [reviews,jobs,saved]=await Promise.all([
+    env.DB.prepare('SELECT source,process_id,reviewed_at FROM opportunity_suggestion_reviews_web WHERE owner_id=? ORDER BY reviewed_at DESC').bind(owner).all(),
+    env.DB.prepare("SELECT j.id,j.result_json,p.candidates_json FROM account_jobs j JOIN opportunity_search_snapshots p ON p.id=json_extract(j.payload_json,'$.snapshotId') AND p.owner_id=j.owner_id WHERE j.owner_id=? AND j.kind='opportunity.analyze' AND j.state='succeeded' ORDER BY j.updated_at DESC,j.id DESC").bind(owner).all(),
+    env.DB.prepare('SELECT source,external_id,project_id FROM project_secop WHERE owner_id=?').bind(owner).all(),
+   ]);
+   const reviewed=new Map(reviews.results.map(item=>[JSON.stringify([item.source,item.process_id]),item.reviewed_at]));
+   const projects=new Map(saved.results.map(item=>[JSON.stringify([item.source,item.external_id]),item.project_id]));
+   const archived=new Map();
+   for(const job of jobs.results)for(const item of itemsOf(job)){if(!matchesOpportunityMarket(item.process.source,market))continue;const key=JSON.stringify([item.process.source,item.process.id]);if(reviewed.has(key)&&!archived.has(key)){const projectId=projects.get(key)||null;archived.set(key,{...item,jobId:job.id,reviewed:true,reviewedAt:reviewed.get(key),saved:!!projectId,projectId});}}
+   return Response.json({items:[...archived.values()].sort((a,b)=>b.reviewedAt.localeCompare(a.reviewedAt))});
+  }
   const row=await findJob();if(!row)return Response.json({jobId:null,items:[],unreadCount:0,stale:false});
+  const candidates=JSON.parse(row.candidates_json);
+  if(market!=='ALL'&&candidates.length>0&&!candidates.some(c=>matchesOpportunityMarket(c.process?.source,market))){
+   return Response.json({jobId:null,items:[],unreadCount:0,stale:false});
+  }
   const [reviews,saved,settings]=await Promise.all([env.DB.prepare('SELECT source,process_id FROM opportunity_suggestion_reviews_web WHERE owner_id=?').bind(owner).all(),env.DB.prepare('SELECT source,external_id,project_id FROM project_secop WHERE owner_id=?').bind(owner).all(),env.DB.prepare('SELECT keywords,include_rup,version FROM opportunity_suggestion_settings WHERE owner_id=?').bind(owner).first()]);
   const reviewed=new Set(reviews.results.map(item=>JSON.stringify([item.source,item.process_id]))),projects=new Map(saved.results.map(item=>[JSON.stringify([item.source,item.external_id]),item.project_id]));
-  let items=itemsOf(row).filter(item=>isOpenOpportunity(item.process)).map(item=>{const key=JSON.stringify([item.process.source,item.process.id]),projectId=projects.get(key)||null;return {...item,reviewed:reviewed.has(key),saved:!!projectId,projectId};});
+  let items=itemsOf(row).filter(item=>isOpenOpportunity(item.process)&&matchesOpportunityMarket(item.process.source,market)).map(item=>{const key=JSON.stringify([item.process.source,item.process.id]),projectId=projects.get(key)||null;return {...item,reviewed:reviewed.has(key),saved:!!projectId,projectId};});
   let verificationUnavailable=false;
-  if(new URL(request.url).searchParams.get('verify')==='1'){
+  if(url.searchParams.get('verify')==='1'){
    const {secopDetail}=await import('./secop.js');
    const checked=await refreshOpportunityStatuses(items,async process=>{
-    const url=new URL('/api/secop/detail',request.url);url.searchParams.set('id',process.id);url.searchParams.set('source',process.source);url.searchParams.set('fresh','1');
-    const response=await secopDetail(new Request(url),env);return response.ok?response.json():null;
+    const detailUrl=new URL('/api/secop/detail',request.url);detailUrl.searchParams.set('id',process.id);detailUrl.searchParams.set('source',process.source);detailUrl.searchParams.set('fresh','1');
+    const response=await secopDetail(new Request(detailUrl),env);return response.ok?response.json():null;
    });
    items=checked.items;verificationUnavailable=checked.verificationUnavailable;
   }

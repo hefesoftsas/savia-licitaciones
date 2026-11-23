@@ -5,7 +5,7 @@ import { getPlacspDetail, getTedDetail, syncPlacspFeed } from './secop.js';
 const missing=()=>Response.json({error:'not_found'},{status:404});
 const conflict=()=>Response.json({error:'version_conflict'},{status:409});
 const service=()=>secop.createSecopService({configStore:{load:()=>({ui_language:'es'})}});
-const lookup=(env,owner,id)=>env.DB.prepare('SELECT project_id,process_json,source,external_id FROM project_secop WHERE project_id = ? AND owner_id = ?').bind(id,owner).first();
+const lookup=(env,owner,id)=>env.DB.prepare('SELECT s.project_id,s.process_json,s.source,s.external_id FROM project_secop s JOIN projects p ON p.id = s.project_id AND p.owner_id = s.owner_id WHERE s.project_id = ? AND s.owner_id = ? AND NOT EXISTS (SELECT 1 FROM project_deletion_receipts r WHERE r.project_id = s.project_id AND r.owner_id = s.owner_id)').bind(id,owner).first();
 function diffDocuments(oldDocs,collected,changes){
  const next=[...new Map(collected.map(({id,name})=>[id,{id,name}])).values()];
  if(oldDocs){const known=new Set(oldDocs.map(doc=>doc.id));for(const doc of next)if(!known.has(doc.id))changes.push({kind:'document',previous:null,current:doc});}
@@ -51,15 +51,26 @@ async function check(env,owner,record){
  ]);
  return results[0].meta.changes?Response.json({checked:true}):conflict();
 }
-export async function secopWatch(request,env,owner,kind,id){
+export async function secopWatch(request,env,owner,kind,id,tenantCountry){
  if(request.method!=='GET'&&request.headers.get('origin')!==new URL(env.BETTER_AUTH_URL).origin)return Response.json({error:'invalid_origin'},{status:403});
  if(kind==='overview'&&request.method==='GET'){
-  const result=await env.DB.prepare('SELECT a.* FROM secop_watch_alerts_web a JOIN project_secop s ON s.project_id = a.project_id AND s.owner_id = a.owner_id WHERE a.owner_id = ? ORDER BY a.created_at DESC,a.id DESC').bind(owner).all();
+  const market=new URL(request.url).searchParams.get('market')??'ALL';
+  if(!['CO','ES','ALL'].includes(market))return Response.json({error:'invalid_market'},{status:400});
+  const fixedCountry=tenantCountry==='ES'||tenantCountry==='CO'?tenantCountry:null;
+  const country=fixedCountry??(market==='ALL'?null:market);
+  const countryFilter=country?`AND CASE
+   WHEN s.source IN ('placsp', 'ted') THEN 'ES'
+   WHEN s.source IN ('secop-i', 'secop-ii', 'contratos') THEN 'CO'
+   WHEN json_extract(s.process_json, '$.country') IN ('CO', 'ES')
+     THEN json_extract(s.process_json, '$.country')
+   ELSE COALESCE(p.country, ?)
+  END = ?`:'';
+  const result=await env.DB.prepare(`SELECT a.* FROM secop_watch_alerts_web a JOIN project_secop s ON s.project_id = a.project_id AND s.owner_id = a.owner_id JOIN projects p ON p.id = a.project_id AND p.owner_id = a.owner_id WHERE a.owner_id = ? AND NOT EXISTS (SELECT 1 FROM project_deletion_receipts r WHERE r.project_id = a.project_id AND r.owner_id = a.owner_id) ${countryFilter} ORDER BY a.created_at DESC,a.id DESC`).bind(owner,...(country?[fixedCountry??'CO',country]:[])).all();
   const alerts=result.results.map(row=>({id:row.id,projectId:row.project_id,title:row.title,kind:row.kind,previous:JSON.parse(row.previous_json||'null'),current:JSON.parse(row.current_json||'null'),createdAt:row.created_at,reviewed:!!row.reviewed}));return Response.json({alerts,unreadCount:alerts.filter(row=>!row.reviewed).length});
  }
- if(kind==='review'&&request.method==='POST'){const row=await env.DB.prepare('UPDATE secop_watch_alerts_web SET reviewed = 1 WHERE id = ? AND owner_id = ? RETURNING id').bind(id,owner).first();return row?Response.json({reviewed:true}):missing();}
+ if(kind==='review'&&request.method==='POST'){const row=await env.DB.prepare('UPDATE secop_watch_alerts_web SET reviewed = 1 WHERE id = ? AND owner_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = secop_watch_alerts_web.project_id AND p.owner_id = secop_watch_alerts_web.owner_id) AND NOT EXISTS (SELECT 1 FROM project_deletion_receipts r WHERE r.project_id = secop_watch_alerts_web.project_id AND r.owner_id = secop_watch_alerts_web.owner_id) RETURNING id').bind(id,owner).first();return row?Response.json({reviewed:true}):missing();}
  if(kind==='due'&&request.method==='POST'){
-  const now=Date.now(),normal=new Date(now-6*60*60*1000).toISOString(),failed=new Date(now-15*60*1000).toISOString();const rows=await env.DB.prepare("SELECT s.project_id,s.process_json,s.source,s.external_id FROM project_secop s LEFT JOIN secop_watch_baselines_web b ON b.project_id = s.project_id AND b.owner_id = s.owner_id WHERE s.owner_id = ? AND (b.project_id IS NULL OR b.checked_at = '' OR (b.error = '' AND b.checked_at <= ?) OR (b.error <> '' AND b.checked_at <= ?)) ORDER BY COALESCE(b.checked_at,''),s.project_id LIMIT 1").bind(owner,normal,failed).all();for(const row of rows.results)await check(env,owner,row);return Response.json({checked:rows.results.length});
+  const now=Date.now(),normal=new Date(now-6*60*60*1000).toISOString(),failed=new Date(now-15*60*1000).toISOString();const rows=await env.DB.prepare("SELECT s.project_id,s.process_json,s.source,s.external_id FROM project_secop s JOIN projects p ON p.id = s.project_id AND p.owner_id = s.owner_id LEFT JOIN secop_watch_baselines_web b ON b.project_id = s.project_id AND b.owner_id = s.owner_id WHERE s.owner_id = ? AND NOT EXISTS (SELECT 1 FROM project_deletion_receipts r WHERE r.project_id = s.project_id AND r.owner_id = s.owner_id) AND (b.project_id IS NULL OR b.checked_at = '' OR (b.error = '' AND b.checked_at <= ?) OR (b.error <> '' AND b.checked_at <= ?)) ORDER BY COALESCE(b.checked_at,''),s.project_id LIMIT 1").bind(owner,normal,failed).all();for(const row of rows.results)await check(env,owner,row);return Response.json({checked:rows.results.length});
  }
  if(kind==='project'){
   const record=await lookup(env,owner,id);if(!record)return missing();

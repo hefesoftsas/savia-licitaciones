@@ -162,3 +162,55 @@ test('seguimiento PLACSP detecta cambios de estado, plazo y documentos',async()=
   assert.equal(atomCalls,atomBeforePortal);
  }finally{await worker?.dispose();await rm(dir,{recursive:true,force:true});}
 });
+
+test('secop-watch filtra por país, elimina alertas al borrar proyecto e ignora huérfanos', async () => {
+ const dir = await mkdtemp(join(tmpdir(),'savia-secop-watch-cleanup-'));
+ let worker, dueCalls = 0;
+ try {
+  execFileSync('pnpm',['exec','wrangler','deploy','--dry-run','--outdir',dir],{cwd:root,stdio:'pipe',env:{...process.env,CLOUDFLARE_SEND_METRICS:'false'}});
+  const outboundService = async () => {
+   dueCalls++;
+   return Response.json([{id_del_proceso:'CO1.PRO.1',id_del_portafolio:'CO1.BDOS.1',entidad:'Entidad',nombre_del_procedimiento:'Compra CO',estado_del_procedimiento:'Abierto',fecha_de_recepcion_de:'2026-12-01'}]);
+  };
+  worker = new Miniflare(convertV4MiniflareOptions({modules:true,script:await readFile(join(dir,'index.js'),'utf8'),compatibilityDate:'2026-10-30',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'secop-watch-cleanup'},r2Buckets:['FILES'],bindings:{AUTH_ALLOW_REGISTRATION:'true',BETTER_AUTH_SECRET:'test-secret-0123456789-abcdefghijklmnopqrstuvwxyz',BETTER_AUTH_URL:'http://localhost'},outboundService}));
+  const db = await worker.getD1Database('DB');
+  for (const file of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort()) {
+   for (const sql of (await readFile(join(root,'migrations',file),'utf8')).split(';').map(x=>x.trim()).filter(Boolean)) await db.prepare(sql).run();
+  }
+  const req = (path,options={}) => worker.dispatchFetch(`http://localhost${path}`,options);
+  const send = (path,method,body,cookie) => req(path,{method,headers:{origin:'http://localhost','content-type':'application/json',...(cookie?{cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+  const signup = await send('/api/auth/sign-up/email','POST',{name:'alice',email:'alice@example.com',password:'password-123456'});
+  const cookie = signup.headers.get('set-cookie').split(';')[0];
+  const owner = (await db.prepare("SELECT id FROM user WHERE email='alice@example.com'").first()).id;
+
+  const coProj = (await (await send('/api/projects/from-secop','POST',{process:{source:'secop-ii',id:'CO1.PRO.1',title:'Licitación CO',portfolioId:'CO1.BDOS.1'}},cookie)).json()).project;
+  const esProj = (await (await send('/api/projects/from-secop','POST',{process:{source:'placsp',id:'PLACSP-1',title:'Licitación ES'}},cookie)).json()).project;
+  await db.prepare("INSERT INTO secop_watch_alerts_web(id,project_id,owner_id,title,kind,previous_json,current_json,created_at,reviewed) VALUES('a-co',?,?,'Licitación CO','status','\"Abierto\"','\"Cerrado\"','2026-01-01T00:00:00Z',0),('a-es',?,?,'Licitación ES','status','\"Publicado\"','\"Adjudicado\"','2026-01-02T00:00:00Z',0)")
+   .bind(coProj.id,owner,esProj.id,owner).run();
+
+  const all = await (await req('/api/secop-watch?market=ALL',{headers:{cookie}})).json();
+  assert.deepEqual(all.alerts.map(a=>a.id),['a-es','a-co']);
+  const onlyCo = await (await req('/api/secop-watch?market=CO',{headers:{cookie}})).json();
+  assert.deepEqual(onlyCo.alerts.map(a=>a.id),['a-co']);
+  const onlyEs = await (await req('/api/secop-watch?market=ES',{headers:{cookie}})).json();
+  assert.deepEqual(onlyEs.alerts.map(a=>a.id),['a-es']);
+
+  // Deleting a project clears its alerts, baseline, and project_secop record.
+  assert.equal((await send(`/api/projects/${coProj.id}`,'DELETE',undefined,cookie)).status,204);
+  const afterDelete = await (await req('/api/secop-watch?market=ALL',{headers:{cookie}})).json();
+  assert.deepEqual(afterDelete.alerts.map(a=>a.id),['a-es']);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM secop_watch_alerts_web WHERE project_id=?').bind(coProj.id).first()).n,0);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM secop_watch_baselines_web WHERE project_id=?').bind(coProj.id).first()).n,0);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM project_secop WHERE project_id=?').bind(coProj.id).first()).n,0);
+
+  // Orphaned alerts/receipts (e.g. if project row missing or receipt exists) are ignored by overview, review, and check-due.
+  await db.prepare('PRAGMA ignore_check_constraints = OFF').run();
+  await db.prepare("INSERT INTO project_deletion_receipts(owner_id,project_id,mutation_id,created_at,title) VALUES(?,?,'m','2026','Licitación ES')").bind(owner,esProj.id).run();
+  const afterReceipt = await (await req('/api/secop-watch?market=ALL',{headers:{cookie}})).json();
+  assert.deepEqual(afterReceipt.alerts,[]);
+  assert.equal((await send('/api/secop-alerts/a-es/review','POST',{},cookie)).status,404);
+  const dueRes = await (await send('/api/secop-watch/check-due','POST',{},cookie)).json();
+  assert.equal(dueRes.checked,0);
+  assert.equal(dueCalls,0);
+ } finally { await worker?.dispose(); await rm(dir,{recursive:true,force:true}); }
+});

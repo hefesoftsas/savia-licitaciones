@@ -90,3 +90,93 @@ test('consulta las fuentes de la cuenta con consentimiento vigente y detecta cam
 
  }finally{await worker?.dispose();await rm(dir,{recursive:true,force:true});}
 });
+
+test('filtra recomendaciones activas y archivadas por país y respeta tenant/miembro', async () => {
+ const worker = new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-10-30',d1Databases:{DB:'search-market'}}));
+ try {
+  const db = await worker.getD1Database('DB');
+  for (const file of (await readdir(join(root,'migrations'))).filter(x=>x.endsWith('.sql')).sort()) {
+   for (const sql of (await readFile(join(root,'migrations',file),'utf8')).split(';').map(x=>x.trim()).filter(Boolean)) await db.prepare(sql).run();
+  }
+  const env = {DB:db,BETTER_AUTH_URL:'http://localhost'};
+  await db.prepare('INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt,savia_market) VALUES (?,?,?,?,?,?,?)').bind('owner','Owner','owner@example.com',1,0,0,'ALL').run();
+  await db.prepare('INSERT INTO "user" (id,name,email,emailVerified,createdAt,updatedAt,savia_market) VALUES (?,?,?,?,?,?,?)').bind('member','Member','member@example.com',1,0,0,'ES').run();
+  await db.prepare('INSERT INTO tenants (id,name,owner_user_id,country,created_at) VALUES (?,?,?,?,?)').bind('tenant-1','Org','owner','ALL','2026').run();
+  await db.prepare("INSERT INTO provider_credentials(id,owner_id,provider,model,key_id,iv,ciphertext,created_at) VALUES('key','owner','opencode-go','model','k','iv','encrypted','2026')").run();
+  await db.prepare("INSERT INTO opportunity_suggestion_settings(owner_id,enabled,keywords,version,updated_at,credential_id,include_rup,consented_at) VALUES('owner',1,'software',1,'2026','key',0,'2026')").run();
+
+  const seenDatasets = [];
+  const lookup = async ({dataset}) => {
+   seenDatasets.push(dataset);
+   if (dataset === 'secop-ii') return {success:true,data:{items:[{id:'co-1',source:'secop-ii',title:'Software CO',status:'Publicado'}]}};
+   if (dataset === 'placsp') return {success:true,data:{items:[{id:'es-1',source:'placsp',title:'Software ES',status:'Publicado',statusCode:'PUB'}]}};
+   return {success:true,data:{items:[]}};
+  };
+
+  // Explicit input.market overrides owner's ALL market.
+  seenDatasets.length = 0;
+  const esSearch = await search.opportunitySearch(
+   new Request('http://localhost/api/opportunity-suggestions/search',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({language:'es',market:'ES'})}),
+   env,'owner',lookup,{userId:'owner',tenantCountry:'ALL'},
+  );
+  assert.equal(esSearch.status,200);
+  assert.deepEqual([...new Set(seenDatasets)].sort(),['placsp','ted']);
+
+  // Acting tenant member without explicit input.market uses member's savia_market ('ES').
+  seenDatasets.length = 0;
+  const memberSearch = await search.opportunitySearch(
+   new Request('http://localhost/api/opportunity-suggestions/search',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({language:'es'})}),
+   env,'owner',lookup,{userId:'member',tenantCountry:'ALL'},
+  );
+  assert.equal(memberSearch.status,200);
+  assert.deepEqual([...new Set(seenDatasets)].sort(),['placsp','ted']);
+
+  // Tenant fixed country overrides both input.market and member preference.
+  seenDatasets.length = 0;
+  const tenantOverride = await search.opportunitySearch(
+   new Request('http://localhost/api/opportunity-suggestions/search',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({language:'es',market:'ES'})}),
+   env,'owner',lookup,{userId:'member',tenantCountry:'CO'},
+  );
+  assert.equal(tenantOverride.status,200);
+  assert.deepEqual([...new Set(seenDatasets)].sort(),['secop-i','secop-ii']);
+
+  // Seed archived CO job and mixed ALL job.
+  const coProc = {id:'co-1',source:'secop-ii',title:'Software CO',status:'Publicado'};
+  const esProc = {id:'es-1',source:'placsp',title:'Software ES',status:'Publicado',statusCode:'PUB'};
+  const archCoProc = {id:'co-arch',source:'secop-ii',title:'Archivado CO',status:'Publicado'};
+  const archEsProc = {id:'es-arch',source:'ted',title:'Archivado ES',status:'Publicado',statusCode:'PUB'};
+
+  await db.prepare("INSERT INTO opportunity_search_snapshots(id,owner_id,settings_version,credential_id,source_fingerprint,profile_json,shortlist_json,candidates_json,created_at,expires_at,source_state) VALUES('snap-old','owner',1,'key','fp','{}','[]',?,?,?,?)")
+   .bind(JSON.stringify([{id:'secop-ii:co-arch',process:archCoProc},{id:'ted:es-arch',process:archEsProc}]),'2026-01-01T00:00:00Z',Date.now()+86400000,'{}').run();
+  await db.prepare("INSERT INTO account_jobs(id,owner_id,kind,client_request_id,payload_json,state,created_at,updated_at,credential_id,result_json) VALUES('job-old','owner','opportunity.analyze','k-old',?,'succeeded','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','key',?)")
+   .bind(JSON.stringify({snapshotId:'snap-old'}),JSON.stringify({recommendations:[{id:'secop-ii:co-arch',reason:'r1',checks:'c1'},{id:'ted:es-arch',reason:'r2',checks:'c2'}]})).run();
+  await db.prepare("INSERT INTO opportunity_suggestion_reviews_web(owner_id,source,process_id,reviewed_at) VALUES('owner','secop-ii','co-arch','2026-01-02T00:00:00Z'),('owner','ted','es-arch','2026-01-03T00:00:00Z')").run();
+
+  await db.prepare("INSERT INTO opportunity_search_snapshots(id,owner_id,settings_version,credential_id,source_fingerprint,profile_json,shortlist_json,candidates_json,created_at,expires_at,source_state) VALUES('snap-mix','owner',1,'key','fp','{}','[]',?,?,?,?)")
+   .bind(JSON.stringify([{id:'secop-ii:co-1',process:coProc},{id:'placsp:es-1',process:esProc}]),'2026-01-04T00:00:00Z',Date.now()+86400000,'{}').run();
+  await db.prepare("INSERT INTO account_jobs(id,owner_id,kind,client_request_id,payload_json,state,created_at,updated_at,credential_id,result_json) VALUES('job-mix','owner','opportunity.analyze','k-mix',?,'succeeded','2026-01-04T00:00:00Z','2026-01-04T00:00:00Z','key',?)")
+   .bind(JSON.stringify({snapshotId:'snap-mix'}),JSON.stringify({recommendations:[{id:'secop-ii:co-1',reason:'r1',checks:'c1'},{id:'placsp:es-1',reason:'r2',checks:'c2'}]})).run();
+
+  const resCo = await (await search.opportunityResults(new Request('http://localhost/api/opportunity-suggestions/results?market=CO'),env,'owner',undefined,{userId:'owner',tenantCountry:'ALL'})).json();
+  assert.deepEqual(resCo.items.map(i=>i.id),['secop-ii:co-1']);
+  const resEs = await (await search.opportunityResults(new Request('http://localhost/api/opportunity-suggestions/results?market=ES'),env,'owner',undefined,{userId:'owner',tenantCountry:'ALL'})).json();
+  assert.deepEqual(resEs.items.map(i=>i.id),['placsp:es-1']);
+  const resAll = await (await search.opportunityResults(new Request('http://localhost/api/opportunity-suggestions/results?market=ALL'),env,'owner',undefined,{userId:'owner',tenantCountry:'ALL'})).json();
+  assert.deepEqual(resAll.items.map(i=>i.id),['secop-ii:co-1','placsp:es-1']);
+
+  const archCo = await (await search.opportunityResults(new Request('http://localhost/api/opportunity-suggestions/results?archive=1&market=CO'),env,'owner',undefined,{userId:'owner',tenantCountry:'ALL'})).json();
+  assert.deepEqual(archCo.items.map(i=>i.id),['secop-ii:co-arch']);
+  const archEs = await (await search.opportunityResults(new Request('http://localhost/api/opportunity-suggestions/results?archive=1&market=ES'),env,'owner',undefined,{userId:'owner',tenantCountry:'ALL'})).json();
+  assert.deepEqual(archEs.items.map(i=>i.id),['ted:es-arch']);
+
+  // When latest job only has candidates for another country, return jobId: null so UI opens search setup.
+  await db.prepare('UPDATE opportunity_search_snapshots SET candidates_json=? WHERE id=?').bind(JSON.stringify([{id:'secop-ii:co-1',process:coProc}]),'snap-mix').run();
+  await db.prepare('UPDATE account_jobs SET result_json=? WHERE id=?').bind(JSON.stringify({recommendations:[{id:'secop-ii:co-1',reason:'r1',checks:'c1'}]}),'job-mix').run();
+  const onlyCoForEs = await (await search.opportunityResults(new Request('http://localhost/api/opportunity-suggestions/results?market=ES'),env,'owner',undefined,{userId:'owner',tenantCountry:'ALL'})).json();
+  assert.equal(onlyCoForEs.jobId,null);
+  assert.deepEqual(onlyCoForEs.items,[]);
+  const onlyCoForCo = await (await search.opportunityResults(new Request('http://localhost/api/opportunity-suggestions/results?market=CO'),env,'owner',undefined,{userId:'owner',tenantCountry:'ALL'})).json();
+  assert.equal(onlyCoForCo.jobId,'job-mix');
+  assert.deepEqual(onlyCoForCo.items.map(i=>i.id),['secop-ii:co-1']);
+ } finally { await worker?.dispose(); }
+});
