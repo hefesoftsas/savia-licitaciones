@@ -589,6 +589,17 @@
 .web-selected-import-status[data-state="imported"] { color:#166534; border-color:#bbf7d0; background:#f0fdf4; }
 .web-selected-import-status[data-state="importing"], .web-selected-import-status[data-state="queued"] { color:var(--web-link); border-color:var(--web-input-border); }
 .web-selected-import-status[data-state="failed"] { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }
+.web-selected-import-manual { font-size:.8rem; white-space:nowrap; }
+.web-secop-project[data-mode="simple"]:empty { display:none; }
+.web-project-panel .web-secop-project[data-mode="simple"] { padding-bottom:0; border-bottom:0; margin-bottom:16px; }
+.web-project-panel .web-secop-project[data-mode="simple"] .web-selected-imports { margin-top:0; padding:14px; border:1px solid var(--web-border); border-radius:10px; }
+.web-documents-simple { display:grid; gap:14px; max-width:920px; }
+.web-documents-simple-list { padding:12px 14px; border:1px solid var(--web-border); border-radius:10px; background:var(--web-subtle-bg); }
+.web-documents-simple-list strong { display:block; font-size:13px; margin-bottom:8px; }
+.web-documents-simple-list ul { list-style:none; margin:0; padding:0; display:grid; gap:4px; max-height:200px; overflow-y:auto; }
+.web-documents-simple-list li { font-size:13px; color:var(--web-muted); overflow-wrap:anywhere; }
+.web-documents-simple-empty { color:var(--web-muted); font-size:13px; margin:0; }
+.web-documents-next-steps { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding-top:4px; }
 .web-addendum-history { margin:1.5rem 0; padding:1rem; border:1px solid var(--web-border); border-radius:.5rem; }
 .web-addendum-history h3 { font-size:1rem; font-weight:650; margin:0; }
 .web-addendum-history p { font-size:.85rem; line-height:1.5; }

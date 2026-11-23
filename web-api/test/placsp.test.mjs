@@ -1089,11 +1089,13 @@ test('web-api integra el buscador oficial PLACSP (estructurado y texto libre hí
     const beforeImports = await (await req(`/api/projects/${created.project.id}/secop/imports`, { headers: { cookie } })).json();
     assert.equal(beforeImports.items[0].id, catalog.items[0].id);
     assert.equal(beforeImports.items[0].name, catalog.items[0].name);
+    assert.match(beforeImports.items[0].downloadUrl || '', /^https:\/\/contrataciondelestado\.es\/FileSystem\/servlet\/GetDocumentByIdServlet/);
     assert.equal(beforeImports.items[0].state, 'pending');
     const imp = await post(`/api/projects/${created.project.id}/secop/imports/${catalog.items[0].id}`, {}, cookie);
     assert.equal(imp.status, 201);
     const afterImports = await (await req(`/api/projects/${created.project.id}/secop/imports`, { headers: { cookie } })).json();
     assert.equal(afterImports.items[0].name, catalog.items[0].name);
+    assert.match(afterImports.items[0].downloadUrl || '', /^https:\/\/contrataciondelestado\.es\/FileSystem\/servlet\/GetDocumentByIdServlet/);
     assert.equal(afterImports.items[0].state, 'imported');
 
     // 2. Keyword hybrid search merges licit.es + Buscador de Documentos and deduplicates SHARED1

@@ -1055,6 +1055,17 @@ export async function createSecopProject(request, env, ownerId) {
   }
   return Response.json({ project }, { status: 201 });
 }
+function safeManualDownloadUrl(value) {
+  const placspUrl = placsp.validatePlacspUrl(value);
+  if (placspUrl) return placspUrl;
+  try {
+    const url = new URL(value || '');
+    return url.protocol === 'https:' && url.hostname.toLowerCase() === 'community.secop.gov.co' ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function secopSelectedImports(request,env,ownerId,projectId,documentId) {
   const owned=await env.DB.prepare('SELECT source, external_id, process_json FROM project_secop WHERE project_id=? AND owner_id=?').bind(projectId,ownerId).first();
   if (!owned) return Response.json({error:'not_found'},{status:404});
@@ -1065,12 +1076,20 @@ export async function secopSelectedImports(request,env,ownerId,projectId,documen
       (owned.source==='placsp'||owned.source==='ted') ? env.DB.prepare('SELECT documents_json FROM placsp_tenders WHERE id = ?').bind(owned.external_id).first() : Promise.resolve(null),
     ]);
     const nameById=new Map();
+    const urlById=new Map();
+    const recordDoc=doc=>{
+      if (!doc?.id) return;
+      if (doc.name) nameById.set(doc.id, doc.name);
+      const url=safeManualDownloadUrl(doc.url);
+      if (url) urlById.set(doc.id, url);
+    };
     const processDocs=(() => { try { return JSON.parse(owned.process_json || '{}').documents; } catch { return null; } })();
-    for (const doc of Array.isArray(processDocs) ? processDocs : []) { if (doc?.id && doc?.name) nameById.set(doc.id, doc.name); }
+    for (const doc of Array.isArray(processDocs) ? processDocs : []) recordDoc(doc);
     const tenderDocs=(() => { try { return JSON.parse(tenderRow?.documents_json || '[]'); } catch { return null; } })();
-    for (const doc of Array.isArray(tenderDocs) ? tenderDocs : []) { if (doc?.id && doc?.name) nameById.set(doc.id, doc.name); }
+    for (const doc of Array.isArray(tenderDocs) ? tenderDocs : []) recordDoc(doc);
     for (const saved of savedFiles.results) { if (saved?.document_id && saved?.name) nameById.set(saved.document_id, saved.name); }
-    return Response.json({items:rows.results.map(row=>({id:row.id,name:nameById.get(row.id)||null,state:row.state!=='queued'?row.state:row.imported_zip || row.job_state==='succeeded'?'imported':['queued','running'].includes(row.job_state)?'queued':'failed'}))});
+    const fallbackSecopUrl=id=>(owned.source==='secop-ii'&&/^\d+$/.test(id))?`https://community.secop.gov.co/Public/Archive/RetrieveFile/Index?DocumentId=${encodeURIComponent(id)}&InCommunity=False&InPaymentGateway=False&DocUniqueIdentifier=`:null;
+    return Response.json({items:rows.results.map(row=>({id:row.id,name:nameById.get(row.id)||null,downloadUrl:urlById.get(row.id)||fallbackSecopUrl(row.id),state:row.state!=='queued'?row.state:row.imported_zip || row.job_state==='succeeded'?'imported':['queued','running'].includes(row.job_state)?'queued':'failed'}))});
   }
   if (!documentId || request.method!=='POST') return new Response('Method not allowed',{status:405});
   if (!sameOrigin(request,env)) return Response.json({error:'invalid_origin'},{status:403});

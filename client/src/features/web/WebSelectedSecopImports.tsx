@@ -3,10 +3,10 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 import {ActionButton as Button} from '@/shared/ui/ActionButton';
 import {request} from './api.mjs';
 
-export type Selection = {id:string;name?:string|null;state:'pending'|'failed'|'imported'|'queued'};
+export type Selection = {id:string;name?:string|null;downloadUrl?:string|null;state:'pending'|'failed'|'imported'|'queued'};
 type ImportState = Selection['state'];
 
-export function WebSelectedSecopImports({projectId,language,onRefresh,onActivity}:{projectId:string;language:'es'|'en';onRefresh:()=>Promise<void>;onActivity?:(state:{items:Selection[];busy:string})=>void}) {
+export function WebSelectedSecopImports({projectId,language,fallbackUrl,onRefresh,onActivity}:{projectId:string;language:'es'|'en';fallbackUrl?:string;onRefresh:()=>Promise<void>;onActivity?:(state:{items:Selection[];busy:string})=>void}) {
   const en=language==='en';
   const [items,setItems]=useState<Selection[] | null>(null);
   const [busy,setBusy]=useState('');
@@ -144,16 +144,18 @@ export function WebSelectedSecopImports({projectId,language,onRefresh,onActivity
       </div>}
       {allImported&&completedInSession&&<p className="web-selected-imports-done" role="status">{en?`All ${items.length} document(s) imported successfully.`:`Se importaron correctamente los ${items.length} documento(s).`}</p>}
       <div className="web-selected-imports-actions">
-        <p>{en?'Pending imports resume when you open this project. ZIP files need a local runner.':'Las importaciones pendientes continúan al abrir este proyecto. Los ZIP necesitan un runner local.'}</p>
+        <p>{failed>0?(en?'If a file fails, download it manually and upload it in the drop zone below.':'Si algún archivo falla, descárgalo manualmente y súbelo en la zona de carga.'):(en?'Pending imports resume when you open this project. ZIP files need a local runner.':'Las importaciones pendientes continúan al abrir este proyecto. Los ZIP necesitan un runner local.')}</p>
         {failed>0&&!busy&&<Button icon={RefreshCw} variant="outline" size="sm" onClick={()=>void retryFailed()}>{en?'Retry failed':'Reintentar fallidos'}</Button>}
       </div>
       <div className="web-selected-import-list">
         {items.map(item=>{
           const visualState=item.id===busy?'importing':item.state;
+          const manualUrl=item.downloadUrl||fallbackUrl;
           return <div className="web-selected-import" key={item.id}>
             <span className="web-selected-import-name">{item.name||(en?`Document ${item.id}`:`Documento ${item.id}`)}</span>
             <div className="web-inline">
               <span className="web-selected-import-status" data-state={visualState}>{statusLabel(item)}</span>
+              {item.state==='failed'&&manualUrl&&<a className="web-link web-selected-import-manual" href={manualUrl} target="_blank" rel="noopener noreferrer">{en?'Download manually ↗':'Descargar manualmente ↗'}</a>}
               {item.state==='failed'&&<Button icon={RefreshCw} iconOnly variant="outline" size="sm" disabled={!!busy} onClick={()=>void retry(item.id)}>{en?'Retry':'Reintentar'}</Button>}
             </div>
           </div>;
