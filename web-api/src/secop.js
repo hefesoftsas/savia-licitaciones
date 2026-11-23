@@ -70,7 +70,7 @@ function fetchPlacspDocuments(id, {url, reference} = {}) {
   const catalanId = /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\/\d+(?:[/?#]|$)/i.exec(url || '')?.[1];
   const pscpId = id.startsWith('pscp:') ? id : catalanId && 'pscp:' + catalanId;
   if (pscpId) return placsp.createPlacspService().fetchPscpProcessDocuments(pscpId, {reference});
-  if ((id.startsWith('licit:') || isPortalTenderId(id) || isTedTenderId(id)) && url) return fetchPlacspPortalDocuments(url);
+  if (url) return fetchPlacspPortalDocuments(url);
   return Promise.resolve([]);
 }
 
@@ -798,7 +798,7 @@ export async function getPlacspDetail(env, id, {fresh = false} = {}) {
     const tender = await fetchPlacspPortalTender(existingRow.url, {
       id,
       publicationDate: existingRow.publication_date || '',
-      includeDocuments: fresh,
+      includeDocuments: fresh || !existingRow.documents_json || existingRow.documents_json === '[]',
     }).catch(() => null);
     if (!tender) {
       if (fresh) return {success:false, data:null, message:'No se pudo actualizar el expediente en PLACSP.'};

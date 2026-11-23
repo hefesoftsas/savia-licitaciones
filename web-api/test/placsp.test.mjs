@@ -1068,3 +1068,54 @@ test('web-api integra el buscador oficial PLACSP (estructurado y texto libre hí
     await rm(build, { recursive: true, force: true });
   }
 });
+
+test('fetchPlacspPortalDocuments envía cabeceras de navegador y extrae documentos XML/PDF del portal', async () => {
+  const seenHeaders = [];
+  const targetUrl = 'https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=HEADERS123';
+  const xmlDocUrl = 'https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=XMLDOC1';
+  const pdfDocUrl = 'https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=PDFDOC1';
+  const pcapUrl = 'https://contrataciondelestado.es/FileSystem/servlet/GetDocumentByIdServlet?DocumentIdParam=PCAP1';
+  const html = `
+    <span id="app:form1:text_Expediente">CO-034/2026</span>
+    <span id="app:form1:text_ObjetoContrato">Servicio de transporte</span>
+    <span id="app:form1:text_OC_con">Consorcio</span>
+    <table id="myTablaDetalleVISUOE">
+      <tr>
+        <td>20/11/2026</td>
+        <td>Pliego</td>
+        <td>
+          <a href="${pdfDocUrl}"><img alt="Documento pdf"></a>
+          <a href="${xmlDocUrl}"><img alt="Documento xml"></a>
+        </td>
+      </tr>
+    </table>
+  `;
+  const codiceXml = `<?xml version="1.0" encoding="UTF-8"?>
+    <ContractFolderStatus xmlns:cbc="urn:dgpe:names:draft:codice:schema:xsd:CommonBasicComponents-2"
+                          xmlns:cac="urn:dgpe:names:draft:codice:schema:xsd:CommonAggregateComponents-2">
+      <cac:LegalDocumentReference>
+        <cbc:ID>PCAP_CO-034_2026.pdf</cbc:ID>
+        <cac:Attachment><cac:ExternalReference><cbc:URI>${pcapUrl}</cbc:URI></cac:ExternalReference></cac:Attachment>
+      </cac:LegalDocumentReference>
+    </ContractFolderStatus>
+  `;
+  const fetchImpl = async (href, options = {}) => {
+    seenHeaders.push({ href, headers: options.headers || {} });
+    const ua = options.headers?.['User-Agent'] || '';
+    const accept = options.headers?.Accept || '';
+    const lang = options.headers?.['Accept-Language'] || '';
+    if (!ua.includes('Mozilla/') || !accept || (href.includes('/wps/poc') && !lang)) {
+      return new Response('', { status: 403 });
+    }
+    if (href === xmlDocUrl) {
+      return new Response(codiceXml, { status: 200, headers: { 'content-type': 'application/xml' } });
+    }
+    return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=UTF-8' } });
+  };
+  const docs = await placspPortal.fetchPlacspPortalDocuments(targetUrl, { fetchImpl });
+  assert.equal(seenHeaders.length, 2);
+  assert.match(seenHeaders[0].headers['User-Agent'] || '', /Mozilla\//);
+  assert.ok(seenHeaders[0].headers.Accept?.includes('text/html'));
+  assert.equal(seenHeaders[0].headers['Accept-Language'], 'es-ES,es;q=0.9');
+  assert.deepEqual(docs.map(d => d.name), ['Pliego.pdf', 'PCAP_CO-034_2026.pdf']);
+});

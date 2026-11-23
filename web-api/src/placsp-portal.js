@@ -193,17 +193,21 @@ export async function fetchPlacspDetail(url, request) {
   return '';
 }
 
+function portalPageHeaders(options = {}) {
+  return {
+    ...placspDocumentHeaders('text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'),
+    'Accept-Language': 'es-ES,es;q=0.9',
+    ...(options.headers || {}),
+  };
+}
+
 export async function fetchPlacspPortalTender(url, { id, publicationDate = '', includeDocuments = false, fetchImpl = fetch, timeoutMs = 12_000 } = {}) {
   const page = officialUrl(url);
   if (!page?.pathname.startsWith('/wps/')) return null;
   const signal = AbortSignal.timeout(timeoutMs);
   const html = await fetchPlacspDetail(page.href, (href, options) => fetchImpl(href, {
     ...options,
-    headers: {
-      ...placspDocumentHeaders('text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'),
-      'Accept-Language': 'es-ES,es;q=0.9',
-      ...(options.headers || {}),
-    },
+    headers: portalPageHeaders(options),
     signal,
   }));
   const parsed = parsePlacspDetailHtml(html, page.href);
@@ -280,10 +284,14 @@ async function extractPortalDocumentsFromHtml(html, pageHref, { fetchImpl = fetc
   return [...documents.values()];
 }
 
-export async function fetchPlacspPortalDocuments(url) {
+export async function fetchPlacspPortalDocuments(url, { fetchImpl = fetch, timeoutMs = 12_000 } = {}) {
   const page = officialUrl(url);
   if (!page?.pathname.startsWith('/wps/')) return [];
-  const signal = AbortSignal.timeout(12000);
-  const html = await fetchPlacspDetail(page.href, (href, options) => fetch(href, {...options, signal}));
-  return extractPortalDocumentsFromHtml(html, page.href, { signal });
+  const signal = AbortSignal.timeout(timeoutMs);
+  const html = await fetchPlacspDetail(page.href, (href, options) => fetchImpl(href, {
+    ...options,
+    headers: portalPageHeaders(options),
+    signal,
+  }));
+  return extractPortalDocumentsFromHtml(html, page.href, { fetchImpl, signal });
 }
