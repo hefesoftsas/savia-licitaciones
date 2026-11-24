@@ -1740,7 +1740,7 @@
 .web-project-status-trigger { min-width:190px; height:36px; padding:0 12px; justify-content:space-between; gap:10px; border:1px solid var(--web-input-border); border-radius:8px; background:var(--web-bg); color:var(--web-text); font-size:13px; font-weight:500; }
 .web-project-status-trigger-value { display:inline-flex; align-items:center; gap:6px; min-width:0; }
 .web-project-status-trigger-label { color:var(--web-muted); font-weight:400; }
-.web-project-status-menu { width:220px; padding:6px; display:grid; gap:2px; }
+.web-project-status-menu { width:220px; padding:6px; display:grid; gap:2px; border:1px solid var(--web-border); border-radius:10px; background:var(--web-bg); }
 .web-project-status-option { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; padding:8px 10px; border:0; border-radius:6px; background:transparent; color:var(--web-text); font-size:13px; text-align:left; cursor:pointer; }
 .web-project-status-option:hover { background:var(--web-subtle-bg); }
 .web-project-status-option[data-active=true] { background:var(--web-active-bg); color:var(--web-active-text); font-weight:600; }
@@ -1947,12 +1947,13 @@
 .web-project-title-button { display: inline-flex; max-width: 100%; text-align: left; border: 0; padding: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; }
 .web-project-title-button:hover { color: var(--web-link); text-decoration: underline; text-underline-offset: 3px; }
 .web-project-title-button:focus-visible { outline: 2px solid var(--web-active-text); outline-offset: 3px; border-radius: 2px; }
-.web-project-options { width: min(320px, calc(100vw - 32px)); max-height: min(520px, var(--radix-popover-content-available-height)); overflow-y: auto; padding: 8px; }
+.web-project-options { width: min(320px, calc(100vw - 32px)); max-height: min(520px, var(--radix-popover-content-available-height)); overflow-y: auto; padding: 8px; border: 1px solid var(--web-border); border-radius: 10px; background: var(--web-bg); box-shadow: 0 10px 28px rgba(15, 23, 42, 0.1); }
 .web-project-options > strong { display: block; padding: 8px 10px; font-size: 12px; color: var(--web-muted); }
 .web-project-options-list { display: grid; gap: 2px; }
 .web-project-options-list button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 13px; color: var(--web-text); cursor: pointer; }
 .web-project-options-list button svg { flex: none; color: var(--web-link); }
-.web-project-options-list button:hover:not(:disabled), .web-project-options-list button:focus-visible { background: var(--web-active-bg); color: var(--web-active-text); }
+.web-project-options-list button:hover:not(:disabled), .web-project-options-list button:focus-visible { background: var(--web-active-bg); color: var(--web-active-text); outline: none; }
+.web-project-options-list button:focus-visible { box-shadow: inset 0 0 0 1px var(--web-notice-border); }
 .web-project-options-list button:disabled { opacity: .5; cursor: not-allowed; }
 
 .web-connection-header { display: grid; gap: 12px; margin-bottom: 24px; }
@@ -2255,17 +2256,53 @@ button.web-autopilot-term-chip.is-selected { border-color: var(--web-link); back
 .web-workflow-summary-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--web-border); border-radius: 8px; background: var(--web-subtle-bg); min-width: 0; }
 .web-workflow-summary-label { display: inline-flex; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 0; font-size: 13.5px; color: var(--web-text); }
 .web-workflow-summary-label > strong { font-weight: 600; overflow-wrap: anywhere; }
-.web-workflow-summary-row > a { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; }
+.web-workflow-summary-row > a,
+.web-workflow-summary-actions > a,
+.web-workflow-revision-actions > a { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; }
+.web-workflow-summary-actions,
+.web-workflow-revision-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; flex: 0 0 auto; }
+.web-workflow-revisions-details > summary > .web-workflow-summary-label { font-weight: 600; }
+.web-workflow-revisions-list { display: grid; gap: 8px; }
+.web-workflow-revision-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; border: 1px solid var(--web-border); border-radius: 8px; background: var(--web-subtle-bg); min-width: 0; }
+.web-workflow-revision-info { display: grid; gap: 3px; flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.web-workflow-revision-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; }
+.web-autopilot-item-row.is-column { flex-direction: column; align-items: stretch; gap: 10px; }
+.web-autopilot-item-main { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.web-workflow-req-controls { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 0 0 auto; }
+.web-workflow-req-resolver { display: grid; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--web-border-soft); background: var(--web-subtle-bg); border-radius: 6px; min-width: 0; }
+.web-workflow-req-resolver-field { display: grid; gap: 5px; font-size: 12.5px; font-weight: 500; color: var(--web-text); }
+.web-workflow-req-resolver details { border: 1px solid var(--web-border); border-radius: 6px; padding: 8px 10px; background: var(--web-bg); min-width: 0; }
+.web-workflow-req-resolver details > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--web-text); list-style: none; }
+.web-workflow-req-resolver details > summary::-webkit-details-marker { display: none; }
+.web-workflow-req-resolver details > summary::after { content: '+'; font-weight: 500; color: var(--web-muted); }
+.web-workflow-req-resolver details[open] > summary::after { content: '−'; }
+.web-workflow-req-resolver details > .web-stack { margin-top: 10px; gap: 10px; font-size: 12.5px; }
 .web-workflow-summary-details { border: 1px solid var(--web-border); border-radius: 8px; background: var(--web-bg); min-width: 0; }
-.web-main .web-module-autopilot .web-workflow-summary-list details.web-workflow-summary-details > summary::before { content: none; }
+.web-main .web-module-autopilot .web-workflow-summary-list details > summary::before { content: none; }
 .web-workflow-summary-details > summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; cursor: pointer; list-style: none; font-size: 13.5px; font-weight: 600; color: var(--web-text); }
 .web-workflow-summary-details > summary > span:first-child { flex: 1 1 200px; min-width: 0; }
 .web-workflow-summary-details > summary::-webkit-details-marker { display: none; }
 .web-workflow-summary-details > summary:hover { background: var(--web-subtle-bg); border-radius: 8px; }
 .web-workflow-summary-meta { display: inline-flex; align-items: center; gap: 6px; color: var(--web-muted); font-size: 12.5px; font-weight: 500; }
 .web-workflow-summary-chevron { transition: transform 0.15s ease; flex: none; }
-.web-workflow-summary-details[open] .web-workflow-summary-chevron { transform: rotate(180deg); }
+.web-workflow-summary-details[open] .web-workflow-summary-chevron,
+.web-workflow-fix-details[open] .web-workflow-summary-chevron { transform: rotate(180deg); }
 .web-workflow-summary-body { display: grid; gap: 10px; padding: 0 12px 12px; border-top: 1px solid var(--web-border-soft); padding-top: 10px; min-width: 0; }
+.web-workflow-fix-log { list-style: none; margin: 0; padding: 8px 10px; max-height: 150px; overflow-y: auto; display: grid; gap: 5px; border: 1px solid var(--web-border); border-radius: 6px; background: var(--web-bg); font-size: 12px; line-height: 1.45; color: var(--web-text); }
+.web-workflow-fix-log li { overflow-wrap: anywhere; }
+.web-workflow-fix-result { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--web-border); border-radius: 8px; background: var(--web-subtle-bg); }
+.web-workflow-fix-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; list-style: none; font-size: 12.5px; font-weight: 500; color: var(--web-link); }
+.web-workflow-fix-details > summary::-webkit-details-marker { display: none; }
+.web-workflow-fix-details[open] .web-workflow-fix-log { margin-top: 6px; }
+.web-workflow-req-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.web-workflow-req-head > strong { font-size: 13.5px; font-weight: 600; color: var(--web-text); }
+.web-workflow-req-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.web-workflow-req-badge.is-ai { background: var(--web-active-bg); color: var(--web-active-text); }
+.web-workflow-req-badge.is-manual { background: var(--web-warning-bg); color: var(--web-warning-text); }
+.web-feasibility-progress-meta { font-size: 12px; color: var(--web-muted); font-variant-numeric: tabular-nums; }
+.web-feasibility-progress-bar { width: 100%; height: 8px; border-radius: 999px; background: var(--web-bg); border: 1px solid var(--web-border); overflow: hidden; }
+.web-feasibility-progress-fill { height: 100%; background: var(--web-link); border-radius: 999px; }
+.web-feasibility-progress-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12.5px; color: var(--web-muted); font-variant-numeric: tabular-nums; }
 
 @media (max-width: 900px) {
   .web-autopilot-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }

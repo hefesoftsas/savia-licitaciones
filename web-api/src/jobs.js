@@ -162,8 +162,42 @@ export async function handleUserJobs(request, env, userId) {
       canonicalPayload={fileIds,tenderFileIds,bidFileIds,language};
     }
     if (input.kind === 'proposal-review.apply-suggestions') {
-      const { proposalId, reviewJobIds, language, dataProcessingConsent } = input.payload;
-      if (!['es', 'en'].includes(language) || !isReviewFileId(proposalId, true) || !Array.isArray(reviewJobIds) || !reviewJobIds.length || reviewJobIds.length > 4 || new Set(reviewJobIds).size !== reviewJobIds.length || reviewJobIds.some(id => !isReviewFileId(id, false))) return Response.json({ error: 'invalid_job' }, { status: 400 });
+      const { proposalId, reviewJobIds = [], workflowRequirements = [], language, dataProcessingConsent } = input.payload;
+      if (
+        !['es', 'en'].includes(language) ||
+        !isReviewFileId(proposalId, true) ||
+        !Array.isArray(reviewJobIds) ||
+        reviewJobIds.length > 4 ||
+        new Set(reviewJobIds).size !== reviewJobIds.length ||
+        reviewJobIds.some(id => !isReviewFileId(id, false)) ||
+        !Array.isArray(workflowRequirements) ||
+        workflowRequirements.length > 40 ||
+        (!reviewJobIds.length && !workflowRequirements.length)
+      ) {
+        return Response.json({ error: 'invalid_job' }, { status: 400 });
+      }
+      const sanitizedRequirements = [];
+      for (const reqItem of workflowRequirements) {
+        if (!reqItem || typeof reqItem !== 'object' || Array.isArray(reqItem)) {
+          return Response.json({ error: 'invalid_job' }, { status: 400 });
+        }
+        const title = typeof reqItem.title === 'string' ? reqItem.title.trim() : '';
+        if (!title || title.length > 300) return Response.json({ error: 'invalid_job' }, { status: 400 });
+        if (
+          (reqItem.source !== undefined && typeof reqItem.source !== 'string') ||
+          (reqItem.evidence !== undefined && typeof reqItem.evidence !== 'string') ||
+          (reqItem.status !== undefined && typeof reqItem.status !== 'string')
+        ) {
+          return Response.json({ error: 'invalid_job' }, { status: 400 });
+        }
+        const source = typeof reqItem.source === 'string' ? reqItem.source.trim() : '';
+        const evidence = typeof reqItem.evidence === 'string' ? reqItem.evidence.trim() : '';
+        const status = typeof reqItem.status === 'string' ? reqItem.status.trim() : 'pending';
+        if (source.length > 2000 || evidence.length > 300 || status.length > 40) {
+          return Response.json({ error: 'invalid_job' }, { status: 400 });
+        }
+        sanitizedRequirements.push({ title, source, evidence, status });
+      }
       if (proposalId.startsWith(WORD_DRAFT_PREFIX)) {
         if (!await hasValidWordDrafts([proposalId])) return Response.json({ error: 'not_found' }, { status: 404 });
       } else {
@@ -171,12 +205,15 @@ export async function handleUserJobs(request, env, userId) {
         if (!file) return Response.json({ error: 'not_found' }, { status: 404 });
         if (!/\.docx$/i.test(file.name)) return Response.json({ error: 'invalid_job' }, { status: 400 });
       }
-      const reviewPlaceholders = reviewJobIds.map(() => '?').join(',');
-      const reviewRows = (await env.DB.prepare(`SELECT j.id, j.kind FROM jobs j JOIN job_artifacts a ON a.job_id = j.id WHERE j.project_id = ? AND j.owner_id = ? AND j.state = 'succeeded' AND a.deleted_at IS NULL AND j.kind IN ('blind-check.inspect','rejection-check.analyze','bid-evaluation.analyze','duplicate-check.analyze') AND j.id IN (${reviewPlaceholders})`).bind(projectId, userId, ...reviewJobIds).all()).results;
-      if (reviewRows.length !== reviewJobIds.length) return Response.json({ error: 'not_found' }, { status: 404 });
+      let reviewRows = [];
+      if (reviewJobIds.length) {
+        const reviewPlaceholders = reviewJobIds.map(() => '?').join(',');
+        reviewRows = (await env.DB.prepare(`SELECT j.id, j.kind FROM jobs j JOIN job_artifacts a ON a.job_id = j.id WHERE j.project_id = ? AND j.owner_id = ? AND j.state = 'succeeded' AND a.deleted_at IS NULL AND j.kind IN ('blind-check.inspect','rejection-check.analyze','bid-evaluation.analyze','duplicate-check.analyze') AND j.id IN (${reviewPlaceholders})`).bind(projectId, userId, ...reviewJobIds).all()).results;
+        if (reviewRows.length !== reviewJobIds.length) return Response.json({ error: 'not_found' }, { status: 404 });
+      }
       if (input.credentialId != null) {
         if (typeof input.credentialId !== 'string' || !input.credentialId || dataProcessingConsent !== true) return Response.json({ error: 'invalid_job' }, { status: 400 });
-      } else if (!reviewRows.some(row => row.kind === 'blind-check.inspect')) {
+      } else if (!reviewRows.some(row => row.kind === 'blind-check.inspect') || sanitizedRequirements.length > 0) {
         return Response.json({ error: 'invalid_job' }, { status: 400 });
       }
       canonicalPayload = {
@@ -184,6 +221,7 @@ export async function handleUserJobs(request, env, userId) {
         proposalId,
         targetExportJobId: proposalId.startsWith(WORD_DRAFT_PREFIX) ? proposalId.slice(WORD_DRAFT_PREFIX.length) : null,
         reviewJobs: reviewRows.map(row => ({ id: row.id, kind: row.kind })),
+        ...(sanitizedRequirements.length ? { workflowRequirements: sanitizedRequirements } : {}),
         language,
         ...(input.credentialId != null ? { dataProcessingConsent: true } : {}),
       };

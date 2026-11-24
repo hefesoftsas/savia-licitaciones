@@ -266,6 +266,7 @@ export default function WebWorkflow({ projectId, language, onDirtyChange, fileId
                 });
               }}
               onRequirementAccepted={item => setRequirements(current => (current.some(value => value.id === item.id) ? current : [...current, item]))}
+              onRequirementUpdated={updated => setRequirements(current => current.map(value => (value.id === updated.id ? updated : value)))}
               onRequirementStatusChange={async (item, status) => {
                 await run(async () => {
                   const result = await request<{ item: Requirement }>(`${base}/requirements/${item.id}`, {

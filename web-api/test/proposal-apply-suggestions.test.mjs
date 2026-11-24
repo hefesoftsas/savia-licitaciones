@@ -193,6 +193,51 @@ test('proposal-review.apply-suggestions sirve revisiones, recibe DOCX y actualiz
     assert.equal(applyArtifactRes.status, 200);
     assert.match(applyArtifactRes.headers.get('content-disposition') || '', /propuesta-actualizada\.docx/);
     assert.deepEqual(Buffer.from(await applyArtifactRes.arrayBuffer()), updatedDocx);
+
+    // También acepta workflowRequirements sin reviewJobIds cuando hay credencial y consentimiento
+    assert.equal(
+      (await post(jobsUrl, { kind: 'proposal-review.apply-suggestions', credentialId: credential.id, payload: { proposalId, reviewJobIds: [], workflowRequirements: [], language: 'es', dataProcessingConsent: true } }, { cookie: alice, 'idempotency-key': 'empty-reqs' })).status,
+      400,
+    );
+    assert.equal(
+      (await post(jobsUrl, { kind: 'proposal-review.apply-suggestions', payload: { proposalId, reviewJobIds: [], workflowRequirements: [{ title: 'Plazo de ejecución', status: 'pending' }], language: 'es' } }, { cookie: alice, 'idempotency-key': 'reqs-no-cred' })).status,
+      400,
+    );
+    const reqCreateRes = await post(
+      jobsUrl,
+      {
+        kind: 'proposal-review.apply-suggestions',
+        credentialId: credential.id,
+        payload: {
+          proposalId,
+          reviewJobIds: [],
+          workflowRequirements: [
+            {
+              title: 'Plazo de presentación de la oferta',
+              source: 'La oferta tendrá validez mínima de 3 meses.',
+              evidence: 'No se especifica el plazo.',
+              status: 'pending',
+            },
+          ],
+          language: 'es',
+          dataProcessingConsent: true,
+        },
+      },
+      { cookie: alice, 'idempotency-key': 'reqs-only-ok' },
+    );
+    assert.equal(reqCreateRes.status, 201);
+    const reqJob = (await reqCreateRes.json()).job;
+    const reqClaim = await (await post('/api/runner/jobs/claim', { kinds: ['proposal-review.apply-suggestions'] }, auth)).json();
+    assert.equal(reqClaim.job.id, reqJob.id);
+    assert.deepEqual(reqClaim.job.payload.reviewJobs, []);
+    assert.deepEqual(reqClaim.job.payload.workflowRequirements, [
+      {
+        title: 'Plazo de presentación de la oferta',
+        source: 'La oferta tendrá validez mínima de 3 meses.',
+        evidence: 'No se especifica el plazo.',
+        status: 'pending',
+      },
+    ]);
   } finally {
     await worker?.dispose();
     await rm(dir, { recursive: true, force: true });

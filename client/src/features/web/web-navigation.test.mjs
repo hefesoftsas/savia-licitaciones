@@ -10,12 +10,13 @@ test('autopilot is only a mode of the offer preparation tab', () => {
   assert.equal(query.has('mode'), tab === 'prepare', tab);
  }
 });
-test('an explicit project shortcut selects its detailed screen independently of the saved preference', () => {
+test('preparation defaults to autopilot unless detailed is explicitly requested', () => {
  for (const tab of ['documents','chat','prepare','tracking','reviews','feasibility','history']) {
   const route = readNavigation(`?view=projects&project=p&tab=${tab}`);
-  assert.equal(route.projectMode, 'detailed', tab);
+  assert.equal(route.projectMode, tab === 'prepare' ? 'autopilot' : 'detailed', tab);
   assert.equal(route.tab, tab);
  }
+ assert.equal(readNavigation('?view=projects&project=p&tab=prepare&mode=detailed').projectMode, 'detailed');
  assert.equal(readNavigation('?view=projects&project=p').projectMode, null);
 });
 test('autopilot and focused review destinations survive reload and browser history', () => {
