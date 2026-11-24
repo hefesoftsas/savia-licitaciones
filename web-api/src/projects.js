@@ -52,6 +52,7 @@ export async function handleProjects(request, env, userId, tenantCountry) {
       (SELECT json_extract(s.process_json,'$.currency') FROM project_secop s WHERE s.project_id=p.id AND s.owner_id=p.owner_id) AS tenderCurrency,
       (SELECT json_extract(s.process_json,'$.department') FROM project_secop s WHERE s.project_id=p.id AND s.owner_id=p.owner_id) AS tenderDepartment,
       (SELECT json_extract(s.process_json,'$.source') FROM project_secop s WHERE s.project_id=p.id AND s.owner_id=p.owner_id) AS tenderSource,
+      opportunity.external_id AS tenderExternalId,
       (SELECT json_extract(s.process_json,'$.country') FROM project_secop s WHERE s.project_id=p.id AND s.owner_id=p.owner_id) AS tenderCountry,
       (SELECT json_extract(s.process_json,'$.territory') FROM project_secop s WHERE s.project_id=p.id AND s.owner_id=p.owner_id) AS tenderTerritory,
       (EXISTS(SELECT 1 FROM project_technical_analyses a WHERE a.project_id=p.id)

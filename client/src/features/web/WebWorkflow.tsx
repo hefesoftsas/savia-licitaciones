@@ -16,6 +16,7 @@ import WebRequirementSupports from './WebRequirementSupports';
 import WebSubmissionTracking from './WebSubmissionTracking';
 import WebOfferDocuments from './WebOfferDocuments';
 import WebSubmissionRecords from './WebSubmissionRecords';
+import { WebWorkflowAutopilot } from './WebWorkflowAutopilot';
 import {WebWorkflowHelp} from './WebWorkflowHelp';
 
 const WordCanvas = lazy(() => import('./WebWordCanvas'));
@@ -118,6 +119,10 @@ function RequirementForm({ item, language, busy, save, remove, projectId, onDirt
 export default function WebWorkflow({ projectId, language, onDirtyChange, fileIds, projectFiles, credentialId, credentialLabel }: { projectId: string; language: Language; onDirtyChange: (dirty: boolean) => void; fileIds: string[]; projectFiles: ProjectFile[]; credentialId: string; credentialLabel: string }) {
   const en = language === 'en', { showToast } = useToast(), base = `/api/projects/${projectId}/workflow`;
   const [focus, setFocus] = useState<Focus>(() => focusFromUrl(projectId) || 'prepare');
+  const [viewMode, setViewMode] = useState<'autopilot' | 'advanced'>(() => {
+    const initialFocus = focusFromUrl(projectId);
+    return initialFocus && initialFocus !== 'prepare' ? 'advanced' : 'autopilot';
+  });
   const [expanded, setExpanded] = useState(false);
   const [readerOpen, setReaderOpen] = useState(false);
   const availableFiles = projectFiles.filter(file => !file.deleting && !/\.zip$/i.test(file.name));
@@ -142,7 +147,9 @@ export default function WebWorkflow({ projectId, language, onDirtyChange, fileId
   useEffect(() => {
     const sync = () => {
       if (new URLSearchParams(window.location.search).get('tab') === 'tracking') {
-        setFocus(focusFromUrl(projectId) || 'prepare');
+        const nextFocus = focusFromUrl(projectId) || 'prepare';
+        setFocus(nextFocus);
+        if (nextFocus !== 'prepare') setViewMode('advanced');
       }
     };
     window.addEventListener('popstate', sync);
@@ -219,6 +226,63 @@ export default function WebWorkflow({ projectId, language, onDirtyChange, fileId
         <p role="alert">{en ? 'Could not load tracking. Reload the page.' : 'No se pudo cargar el seguimiento. Vuelve a cargar la página.'}</p>
       ) : (
         <>
+          <div className="web-project-mode-bar" role="group" aria-label={en ? 'Offer organization mode' : 'Modo de organización de la oferta'}>
+            <button type="button" className={viewMode === 'autopilot' ? 'is-active' : ''} aria-pressed={viewMode === 'autopilot'} onClick={() => setViewMode('autopilot')}>
+              {en ? 'Autopilot' : 'Piloto automático'}
+            </button>
+            <button type="button" className={viewMode === 'advanced' ? 'is-active' : ''} aria-pressed={viewMode === 'advanced'} onClick={() => setViewMode('advanced')}>
+              {en ? 'Advanced view' : 'Vista avanzada'}
+            </button>
+          </div>
+          {viewMode === 'autopilot' ? (
+            <WebWorkflowAutopilot
+              projectId={projectId}
+              language={language}
+              stage={stage}
+              tasks={tasks}
+              requirements={requirements}
+              fileIds={fileIds}
+              projectFiles={projectFiles}
+              credentialId={credentialId}
+              submissionCount={submissionSummary?.submissions.length || 0}
+              openRequestCount={openRequestCount}
+              onStageChange={next =>
+                run(async () => {
+                  const result = await request<{ stage: Stage; version: number }>(base, { method: 'PUT', json: { stage: next, version: stage.version } });
+                  setStage(result);
+                })
+              }
+              onTaskCreated={item => setTasks(current => (current.some(value => value.id === item.id) ? current : [...current, item]))}
+              onTaskToggled={async (task, completed) => {
+                await run(async () => {
+                  const result = await request<{ item: Task }>(`${base}/tasks/${task.id}`, { method: 'PATCH', json: { completed, version: task.version } });
+                  setTasks(current => current.map(value => (value.id === task.id ? result.item : value)));
+                });
+              }}
+              onTaskDeleted={async task => {
+                await run(async () => {
+                  await request(`${base}/tasks/${task.id}`, { method: 'DELETE', json: { version: task.version } });
+                  setTasks(current => current.filter(value => value.id !== task.id));
+                });
+              }}
+              onRequirementAccepted={item => setRequirements(current => (current.some(value => value.id === item.id) ? current : [...current, item]))}
+              onRequirementStatusChange={async (item, status) => {
+                await run(async () => {
+                  const result = await request<{ item: Requirement }>(`${base}/requirements/${item.id}`, {
+                    method: 'PATCH',
+                    json: { title: item.title, source: item.source, evidence: item.evidence, status, category: item.category, version: item.version },
+                  });
+                  setRequirements(current => current.map(value => (value.id === item.id ? result.item : value)));
+                });
+              }}
+              onExportRequirements={exportRequirements}
+              onOpenAdvanced={nextFocus => {
+                if (nextFocus) selectFocus(nextFocus);
+                setViewMode('advanced');
+              }}
+            />
+          ) : (
+            <>
           <nav className="web-wizard-steps web-feasibility-steps" aria-label={en ? 'Offer organization stages' : 'Etapas de organización de la oferta'}>
             {workflowSteps.map((step, index) => {
               const status = step.complete ? 'complete' : focus === step.id ? 'current' : 'pending';
@@ -555,6 +619,8 @@ export default function WebWorkflow({ projectId, language, onDirtyChange, fileId
               </>
             }
           />
+            </>
+          )}
         </>
       )}
     </div>

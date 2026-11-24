@@ -257,9 +257,79 @@ export function localizeFindingNote(value, language, category) {
   return localizeFindingText(value, language, category);
 }
 
+const ruleTitles = {
+  '上下标': { es: 'Superíndices y subíndices', en: 'Superscript and subscript' },
+  '下划线': { es: 'Subrayado', en: 'Underline' },
+  '中文字体': { es: 'Fuente china', en: 'Chinese font' },
+  '全角字母': { es: 'Letras de ancho completo', en: 'Full-width letters' },
+  '全角数字': { es: 'Números de ancho completo', en: 'Full-width digits' },
+  '分栏': { es: 'Columnas', en: 'Columns' },
+  '制表符': { es: 'Tabuladores', en: 'Tabs' },
+  '加粗': { es: 'Negrita', en: 'Bold' },
+  '半角括号': { es: 'Paréntesis de ancho medio', en: 'Half-width brackets' },
+  '单元格底纹': { es: 'Sombreado de celdas', en: 'Cell shading' },
+  '各节页面设置一致': { es: 'Consistencia de configuración por sección', en: 'Section page setup consistency' },
+  '合并单元格': { es: 'Celdas combinadas', en: 'Merged cells' },
+  '同级标题格式一致性': { es: 'Consistencia de formato en títulos', en: 'Heading format consistency' },
+  '命名书签': { es: 'Marcadores con nombre', en: 'Named bookmarks' },
+  '图片元数据': { es: 'Metadatos de imágenes', en: 'Image metadata' },
+  '域代码': { es: 'Códigos de campo', en: 'Field codes' },
+  '多余空格': { es: 'Espacios sobrantes', en: 'Extra spaces' },
+  '字体缩放': { es: 'Escala de fuente', en: 'Font scaling' },
+  '字号': { es: 'Tamaño de letra', en: 'Font size' },
+  '字符间距': { es: 'Espaciado entre caracteres', en: 'Character spacing' },
+  '对齐到网格': { es: 'Alineación a la cuadrícula', en: 'Snap to grid' },
+  '嵌套表格': { es: 'Tablas anidadas', en: 'Nested tables' },
+  '异常字体效果': { es: 'Efectos de fuente inusuales', en: 'Unusual font effects' },
+  '彩色图片': { es: 'Imágenes en color', en: 'Color images' },
+  '彩色图表和图形': { es: 'Gráficos y formas en color', en: 'Color charts and shapes' },
+  '手动换行': { es: 'Saltos de línea manuales', en: 'Manual line breaks' },
+  '批注': { es: 'Comentarios', en: 'Comments' },
+  '敏感信息/身份泄露': { es: 'Información sensible / identidad', en: 'Sensitive / identity info' },
+  '文字颜色': { es: 'Color de texto', en: 'Text color' },
+  '文本框': { es: 'Cuadros de texto', en: 'Text boxes' },
+  '文档属性': { es: 'Propiedades del documento', en: 'Document properties' },
+  '斜体': { es: 'Cursiva', en: 'Italic' },
+  '未接受的修订': { es: 'Cambios sin aceptar', en: 'Unaccepted revisions' },
+  '标题内容异常': { es: 'Contenido anómalo en títulos', en: 'Unusual heading content' },
+  '标题层级跳跃': { es: 'Saltos de nivel en títulos', en: 'Heading level jumps' },
+  '标题序号格式': { es: 'Formato de numeración de títulos', en: 'Heading numbering format' },
+  '标题编号连续性': { es: 'Continuidad de numeración de títulos', en: 'Heading numbering continuity' },
+  '正文格式一致性': { es: 'Consistencia de formato del texto', en: 'Body format consistency' },
+  '正文页码文字与缺少页码': { es: 'Numeración de páginas', en: 'Page numbering' },
+  '段内字体混用': { es: 'Mezcla de fuentes en el párrafo', en: 'Mixed fonts in paragraph' },
+  '段前分页': { es: 'Salto de página anterior', en: 'Page break before' },
+  '段前段后间距': { es: 'Espaciado entre párrafos', en: 'Paragraph spacing' },
+  '段落对齐方式': { es: 'Alineación de párrafo', en: 'Paragraph alignment' },
+  '特殊字符': { es: 'Caracteres especiales', en: 'Special characters' },
+  '目录': { es: 'Índice', en: 'Table of contents' },
+  '矢量图中的文字': { es: 'Texto en gráficos vectoriales', en: 'Text in vector graphics' },
+  '空段落': { es: 'Párrafos vacíos', en: 'Empty paragraphs' },
+  '突出显示和文字底纹': { es: 'Resaltado y sombreado de texto', en: 'Highlight and text shading' },
+  '纸张大小': { es: 'Tamaño de papel', en: 'Paper size' },
+  '纸张方向': { es: 'Orientación de página', en: 'Page orientation' },
+  '英文标点': { es: 'Puntuación latina', en: 'Latin punctuation' },
+  '行距': { es: 'Interlineado', en: 'Line spacing' },
+  '表格字体': { es: 'Fuente en tablas', en: 'Table font' },
+  '表格字号': { es: 'Tamaño de letra en tablas', en: 'Table font size' },
+  '表格对齐方式': { es: 'Alineación de tablas', en: 'Table alignment' },
+  '表格样式': { es: 'Estilos de tabla', en: 'Table styles' },
+  '表格首行缩进': { es: 'Sangría de primera línea en tablas', en: 'Table first-line indent' },
+  '西文字体': { es: 'Fuente occidental', en: 'Western font' },
+  '超链接': { es: 'Hipervínculos', en: 'Hyperlinks' },
+  '隐藏文字': { es: 'Texto oculto', en: 'Hidden text' },
+  '页眉页脚内容': { es: 'Contenido en encabezados y pies', en: 'Header and footer content' },
+  '页边距': { es: 'Márgenes de página', en: 'Page margins' },
+  '页面背景色': { es: 'Color de fondo de página', en: 'Page background color' },
+  '首行缩进': { es: 'Sangría de primera línea', en: 'First-line indent' },
+};
+
 /** Translate exact generated messages only; quotations and unknown text remain intact. */
 export function localizeFindingText(value, language, category) {
+  if (value && ruleTitles[value]?.[language]) return ruleTitles[value][language];
   if (language === 'en' && value) return value
+    .replace(/^当前颜色 (#[0-9A-Fa-f]{6})(?:（主题色 ([^）]+)）)?$/, (_match, hex, theme) => `Current color ${hex}${theme ? ` (theme color ${theme})` : ''}`)
+    .replace(/^主题色 ([^（]+)(?:（(#[0-9A-Fa-f]{6})）)?$/, (_match, theme, hex) => `Theme color ${theme}${hex ? ` (${hex})` : ''}`)
     .replace(/^纸张大小不是 (A3|A4|Letter)$/, 'Paper size is not $1')
     .replace(/^布局 → 纸张大小 → (A3|A4|Letter)$/, 'Layout → Paper size → $1')
     .replace(/^当前 ([\d.,]+)×([\d.,]+) cm，应为 ([\d.,]+)×([\d.,]+) cm$/, 'Current: $1×$2 cm; required: $3×$4 cm')
@@ -271,6 +341,8 @@ export function localizeFindingText(value, language, category) {
   const headingDifferences = localizeHeadingDifferences(value);
   if (headingDifferences !== value) return headingDifferences;
   return value
+    .replace(/^当前颜色 (#[0-9A-Fa-f]{6})(?:（主题色 ([^）]+)）)?$/, (_match, hex, theme) => `Color actual ${hex}${theme ? ` (color de tema ${theme})` : ''}`)
+    .replace(/^主题色 ([^（]+)(?:（(#[0-9A-Fa-f]{6})）)?$/, (_match, theme, hex) => `Color de tema ${theme}${hex ? ` (${hex})` : ''}`)
     .replace(/^所在节定义了文档网格，本段行距为「(最小值 [\d.]+ 磅|[\d.]+ 倍行距)」，Word 会把行高放大到网格行高的整数倍$/, (_match, spacing) => `La sección tiene una cuadrícula de documento y el párrafo usa ${localizeFormatValue(spacing)}; Word puede aumentar la altura de línea para ajustarla a la cuadrícula.`)
     .replace(/^共 (\d+) 条批注，批注作者：(.+)。批注会暴露作者和单位信息$/, (_match, count, authors) => `Hay ${count} comentarios; autores: ${authors === '未知' ? 'desconocidos' : authors}. Los comentarios pueden revelar información de autoría y organización.`)
     .replace(/^((?:(?:插入|删除|移动|格式修改) \d+ 处)(?:、(?:插入|删除|移动|格式修改) \d+ 处)*)。未接受的修订会暴露修改痕迹，评审时可能显示被删除的内容$/, (_match, entries) => {

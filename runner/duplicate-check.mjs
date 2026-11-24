@@ -22,7 +22,7 @@ async function previewBytes(reference,directory){
 export function createDuplicateCheckHandler({temporaryRoot=tmpdir()}={}){
  return async(payload,context)=>{
   const ids=payload?.fileIds,tenders=payload?.tenderFileIds,bids=payload?.bidFileIds;
-  if(!Array.isArray(ids)||!Array.isArray(tenders)||!Array.isArray(bids)||!bids.length||ids.length>50||tenders.length+bids.length!==ids.length||new Set(ids).size!==ids.length||new Set([...tenders,...bids]).size!==ids.length||[...tenders,...bids].some(id=>!ids.includes(id))||ids.some(id=>typeof id!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(id)))throw new TaskInputError('Selecciona los documentos de la revisión.');
+  if(!Array.isArray(ids)||!Array.isArray(tenders)||!Array.isArray(bids)||!bids.length||ids.length>50||tenders.length+bids.length!==ids.length||new Set(ids).size!==ids.length||new Set([...tenders,...bids]).size!==ids.length||[...tenders,...bids].some(id=>!ids.includes(id))||ids.some(id=>typeof id!=='string'||!/^(?:word-draft:)?[A-Za-z0-9_-]{1,128}$/.test(id)))throw new TaskInputError('Selecciona los documentos de la revisión.');
   context.signal?.throwIfAborted();const directory=await createManagedWorkspace(temporaryRoot,'duplicate-check');
   try {
    const files=new Map();

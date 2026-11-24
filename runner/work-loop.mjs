@@ -299,6 +299,7 @@ export async function runOnce({ server, token, handlers, outbox, draftOutbox, ar
         assertRequirementSources: () => requestWithRetry(`/api/runner/jobs/${job.id}/requirements-context?check=1`, { lease }),
         getKnowledgeDocumentInfo: documentId => requestWithRetry(`/api/runner/jobs/${job.id}/knowledge-documents/${encodeURIComponent(documentId)}`, { lease }, { fileInfo: true }),
         getKnowledgeFile: () => requestWithRetry(`/api/runner/jobs/${job.id}/knowledge-source`, { lease }, { fileInfo: true }),
+        getCompanyDossierFile: sourceId => requestWithRetry(`/api/runner/jobs/${job.id}/company-dossier/${encodeURIComponent(sourceId)}`, { lease }, { fileInfo: true }),
         assertKnowledgeCurrent: () => requestWithRetry(`/api/runner/jobs/${job.id}/knowledge-source?check=1`, { lease }),
         getFeasibilityContentContext: () => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-content-context`, { lease }),
         getFeasibilityContentDraft: id => requestWithRetry(`/api/runner/jobs/${job.id}/feasibility-content-drafts/${encodeURIComponent(id)}`, { lease, fetch: true }),

@@ -3,6 +3,7 @@ import {RefreshCw, Settings2, Play, ChevronRight, Archive, Info} from 'lucide-re
 import {WebJobProgress} from './WebJobProgress';
 import {WebLoading} from './WebLoading';
 import {WebOpportunityDetail} from './WebOpportunityDetail';
+import { WebOpportunityAutopilot } from './WebOpportunityAutopilot';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import type {ProcurementMarket,SecopProcess} from '@/shared/types/secop';
 import {ActionButton as Button} from '@/shared/ui/ActionButton';
@@ -26,8 +27,8 @@ export function OpportunityResultsView({language,market='ALL',items,jobId,stale,
  return <div className="web-secop-results"><h3>{en?'Recommendations':'Recomendaciones'}</h3>{onLoadArchive&&<details className="web-recommendation-archive" onToggle={event=>{if(event.currentTarget.open)onLoadArchive();}}><summary title={en?'Archived recommendations':'Recomendaciones archivadas'} aria-label={en?'Archived recommendations':'Recomendaciones archivadas'}><Archive size={17} aria-hidden="true"/><span className="sr-only">{en?'Archived recommendations':'Recomendaciones archivadas'}</span></summary>{archive===null||archive===undefined?<p role="status">{en?'Loading…':'Cargando…'}</p>:archive.length?archive.map(item=>card(item,item.jobId)):<p>{en?'No archived recommendations.':'No hay recomendaciones archivadas.'}</p>}</details>}{verificationUnavailable&&<p role="status">{en?`Some recommendations could not be checked with ${sourceLabel}. They will appear once their status can be verified.`:`No se pudo comprobar el estado de algunas recomendaciones en ${sourceLabel}. Aparecerán cuando podamos verificarlas.`}</p>}{stale&&<p role="status">{en?'The company sources or preferences changed since this analysis.':'Las fuentes de la empresa o las preferencias cambiaron desde este análisis.'}</p>}{!jobId?<p>{en?'No analysis yet.':'Aún no hay un análisis.'}</p>:!items.length?<p>{en?'No relevant opportunities were found in this search.':'No se encontraron oportunidades relevantes en esta búsqueda.'}</p>:!unread.length?<p>{en?'No unread recommendations.':'No hay recomendaciones pendientes.'}</p>:unread.map(item=>card(item,jobId))}</div>;
 }
 export function RunnerAutomaticOption({language,checked,onChange}:{language:Locale;checked:boolean;onChange:(value:boolean)=>void}){return <label className="web-consent"><input type="checkbox" checked={checked} onChange={event=>onChange(event.target.checked)}/>{language==='en'?'Search automatically with the local runner':'Buscar automáticamente con el runner local'}</label>;}
-export default function WebOpportunitySuggestions({language,market='ALL',credentials,onOpen,onSearch,onModel}:{language:Locale;market?:ProcurementMarket;credentials:Credential[];onOpen:(id:string)=>void;onSearch:()=>void;onModel:()=>void}){
- const en=language==='en',{showToast}=useToast(),[settings,setSettings]=useState<Settings|null>(null),[keywords,setKeywords]=useState(''),[includeRup,setIncludeRup]=useState(false),credential=credentials[0]?.id||'',[enabled,setEnabled]=useState(false),[autoEnabled,setAutoEnabled]=useState(false),[runnerAutoEnabled,setRunnerAutoEnabled]=useState(false),[refreshHours,setRefreshHours]=useState(6),[consent,setConsent]=useState(true),[jobs,setJobs]=useState<Job[]>([]),[results,setResults]=useState<Results|null>(null),[busy,setBusy]=useState(false),[loadError,setLoadError]=useState(false);
+export default function WebOpportunitySuggestions({language,market='ALL',credentials,onOpen,onSearch: _onSearch,onModel: _onModel,onPrepareProject,onCompanyProfile}:{language:Locale;market?:ProcurementMarket;credentials:Credential[];onOpen:(id:string)=>void;onSearch:()=>void;onModel:()=>void;onPrepareProject?:(projectId:string,openAutopilot:boolean)=>void;onCompanyProfile?:()=>void}){
+ const en=language==='en',{showToast}=useToast(),[viewMode,setViewMode]=useState<'autopilot'|'advanced'>('autopilot'),[settings,setSettings]=useState<Settings|null>(null),[keywords,setKeywords]=useState(''),[includeRup,setIncludeRup]=useState(false),credential=credentials[0]?.id||'',[enabled,setEnabled]=useState(false),[autoEnabled,setAutoEnabled]=useState(false),[runnerAutoEnabled,setRunnerAutoEnabled]=useState(false),[refreshHours,setRefreshHours]=useState(6),[consent,setConsent]=useState(true),[jobs,setJobs]=useState<Job[]>([]),[results,setResults]=useState<Results|null>(null),[busy,setBusy]=useState(false),[loadError,setLoadError]=useState(false);
  const [setupOpen,setSetupOpen]=useState(true);
  const [searching,setSearching]=useState(false);
  const [verifyingSecop,setVerifyingSecop]=useState(false);
@@ -52,22 +53,56 @@ export default function WebOpportunitySuggestions({language,market='ALL',credent
  const dirty=!!settings&&(keywords.trim()!==settings.keywords||includeRup!==settings.includeRup||refreshHours!==settings.refreshHours||(credential ? credential!==(settings.credentialId||'') : !settings.localRunner)||enabled!==settings.enabled||autoEnabled!==settings.autoEnabled||runnerAutoEnabled!==settings.runnerAutoEnabled||(runnerAutoEnabled&&language!==settings.runnerLanguage));
  useEffect(()=>{const timer=window.setInterval(()=>void refresh().catch(()=>setLoadError(true)),active?5000:60000);const started=()=>void refresh().catch(()=>setLoadError(true));window.addEventListener('savia:opportunity-started',started);return()=>{window.clearInterval(timer);window.removeEventListener('savia:opportunity-started',started);};},[active?.id,refresh]);
  const saveSettings=async()=>{if(!settings)return;setBusy(true);try{await request('/api/opportunity-suggestions/settings',{method:'PUT',json:{version:settings.version,enabled:enabled||autoEnabled,autoEnabled,runnerAutoEnabled:autoEnabled,refreshHours,language,keywords,includeRup,credentialId:credential||null,localRunner:!credential,dataProcessingConsent:consent}});pending.current=null;await loadSettings();showToast(en?'Preferences saved.':'Preferencias guardadas.','success');}catch(error){showToast((error as Error & {status?:number}).status===409?(en?'Preferences changed. Reload and try again.':'Las preferencias cambiaron. Recarga e inténtalo de nuevo.'):(en?'Could not save preferences.':'No se pudieron guardar las preferencias.'),'error');}finally{setBusy(false);}};
- const start=async()=>{if(!settings)return;setBusy(true);setSearching(true);try{
-  if(dirty||!settings.enabled||(!settings.localRunner&&!settings.credentialAvailable)){
-   await request('/api/opportunity-suggestions/settings',{method:'PUT',json:{version:settings.version,enabled:true,autoEnabled,runnerAutoEnabled:autoEnabled,refreshHours,language,keywords,includeRup,credentialId:credential||null,localRunner:!credential,dataProcessingConsent:true}});
+ const start=async(forceIncludeRup?:boolean)=>{if(!settings)return;setBusy(true);setSearching(true);const useRup=forceIncludeRup??includeRup;try{
+  if(dirty||(forceIncludeRup!==undefined&&useRup!==settings.includeRup)||!settings.enabled||(!settings.localRunner&&!settings.credentialAvailable)){
+   await request('/api/opportunity-suggestions/settings',{method:'PUT',json:{version:settings.version,enabled:true,autoEnabled,runnerAutoEnabled:autoEnabled,refreshHours,language,keywords,includeRup:useRup,credentialId:credential||null,localRunner:!credential,dataProcessingConsent:true}});
    pending.current=null;await loadSettings();
   }
   if(!pending.current){const result=await request<{snapshotId:string}>('/api/opportunity-suggestions/search',{method:'POST',json:{language,market}});pending.current={snapshotId:result.snapshotId,key:crypto.randomUUID()};}
   await request('/api/opportunity-suggestions/jobs',{method:'POST',headers:{'idempotency-key':pending.current.key},json:{snapshotId:pending.current.snapshotId,language,dataProcessingConsent:true}});pending.current=null;const jobData=await request<{jobs:Job[]}>('/api/opportunity-suggestions/jobs');setJobs(jobData.jobs);void refresh().catch(()=>setLoadError(true));
   showToast(en?'Analysis queued.':'Análisis en cola.','success');
  }catch(error){if((error as Error & {status?:number}).status===409)pending.current=null;showToast(en?'Could not start the analysis. Check your terms and runner.':'No se pudo iniciar el análisis. Revisa los términos y el runner.','error');void refresh().catch(()=>undefined);}finally{setSearching(false);setBusy(false);}};
+ const toggleAutoRefresh=async(nextAuto:boolean)=>{if(!settings)return;setBusy(true);try{await request('/api/opportunity-suggestions/settings',{method:'PUT',json:{version:settings.version,enabled:enabled||nextAuto,autoEnabled:nextAuto,runnerAutoEnabled:nextAuto,refreshHours,language,keywords,includeRup:includeRup||settings.hasRup,credentialId:credential||null,localRunner:!credential,dataProcessingConsent:true}});pending.current=null;await loadSettings();showToast(nextAuto?(en?'Automatic radar enabled.':'Actualización automática activada.'):(en?'Automatic radar paused.':'Actualización automática desactivada.'),'success');}catch{showToast(en?'Could not update refresh settings.':'No se pudo actualizar la frecuencia automática.','error');}finally{setBusy(false);}};
  const perform=async(action:'review'|'save',jobId:string,candidateId:string)=>{setBusy(true);try{await request(`/api/opportunity-suggestions/results/${action}`,{method:'POST',json:{jobId,candidateId}});await refresh();if(archive!==null)await loadArchive();showToast(action==='save'?(en?'Tender saved.':'Licitación guardada.'):(en?'Marked as reviewed.':'Marcada como revisada.'),'success');}catch{showToast(en?'Could not update the opportunity.':'No se pudo actualizar la oportunidad.','error');}finally{setBusy(false);}};
  const saveTender=async(process:SecopProcess,ids:string[])=>{if(!saveTarget)return;setBusy(true);try{const result=await request<{project:{id:string}}>('/api/projects/from-secop',{method:'POST',json:{process,documentIds:ids}});try{await request('/api/opportunity-suggestions/results/review',{method:'POST',json:{jobId:saveTarget.jobId,candidateId:saveTarget.item.id}});}catch{showToast(en?'The project was saved, but the recommendation could not be archived.':'El proyecto se guardó, pero no se pudo archivar la recomendación.','error');}setSaveTarget(null);await refresh();if(archive!==null)await loadArchive();showToast(ids.length?(en?'Project created. Your documents are being imported.':'Proyecto creado. Estamos importando tus documentos.'):(en?'Project created.':'Proyecto creado.'),'success');onOpen(result.project.id);}catch(error){showToast((error as Error & {status?:number}).status===409?(en?'This opportunity is already saved in your projects.':'Esta oportunidad ya está guardada en tus proyectos.'):(en?'Could not create the project.':'No se pudo crear el proyecto.'),'error');}finally{setBusy(false);}};
  const cancel=async()=>{if(!active)return;setBusy(true);try{await request(`/api/opportunity-suggestions/jobs/${encodeURIComponent(active.id)}/cancel`,{method:'POST'});await refresh();}catch{showToast(en?'Could not cancel the task.':'No se pudo cancelar la tarea.','error');}finally{setBusy(false);}};
  return <section className="web-opportunity-suggestions web-recommendation-flow">
+  <div className="web-project-mode-bar" role="group" aria-label={en?'Recommendations mode':'Modo de recomendaciones'}>
+   <button type="button" className={viewMode==='autopilot'?'is-active':''} aria-pressed={viewMode==='autopilot'} onClick={()=>setViewMode('autopilot')}>{en?'Autopilot':'Piloto automático'}</button>
+   <button type="button" className={viewMode==='advanced'?'is-active':''} aria-pressed={viewMode==='advanced'} onClick={()=>setViewMode('advanced')}>{en?'Advanced view':'Vista avanzada'}</button>
+  </div>
   {loadError&&<p role="alert">{en?'Could not refresh.':'No se pudo actualizar.'} <Button icon={RefreshCw} iconOnly variant="outline" onClick={()=>void Promise.all([loadSettings(),refresh()]).then(()=>setLoadError(false)).catch(()=>setLoadError(true))}>{en?'Retry':'Reintentar'}</Button></p>}
   {!settings&&!loadError&&<WebLoading message={en?'Loading recommendations…':'Cargando recomendaciones…'} detail={en?'Preparing your search preferences.':'Estamos preparando tus preferencias de búsqueda.'}/>}
   {settings&&!results&&!loadError&&!active&&!searching&&!checkingResults&&<WebLoading message={en?'Loading recommendations…':'Cargando recomendaciones…'} detail={en?'Checking your latest results.':'Consultamos tus resultados más recientes.'}/>}
+  {settings&&viewMode==='autopilot'?<>
+   <WebOpportunityAutopilot
+    language={language}
+    market={market}
+    settings={settings}
+    jobs={jobs}
+    results={results}
+    active={active}
+    searching={searching}
+    checkingResults={checkingResults}
+    verifyingSecop={verifyingSecop}
+    elapsedSeconds={elapsedSeconds}
+    busy={busy}
+    credential={credential}
+    autoEnabled={autoEnabled}
+    archive={archive}
+    onStartAutopilotSearch={()=>start(settings.hasRup?true:includeRup)}
+    onToggleAutoRefresh={toggleAutoRefresh}
+    onCancel={cancel}
+    onReview={(jobId,id)=>perform('review',jobId,id)}
+    onOpenDetail={(jobId,item)=>setSaveTarget({jobId,item})}
+    onLoadArchive={loadArchive}
+    onOpen={onOpen}
+    onPrepareProject={onPrepareProject}
+    onCompanyProfile={onCompanyProfile}
+    onOpenAdvanced={()=>setViewMode('advanced')}
+   />
+   {saveTarget&&<WebOpportunityDetail item={saveTarget.item.process} language={language} saving={busy} selectDocumentsByDefault onClose={()=>setSaveTarget(null)} onSave={(process,ids)=>void saveTender(process,ids)}/>}
+  </>:<>
   {settings&&<div className="web-recommendation-setup-row"><details className="web-recommendation-setup" open={setupOpen} onToggle={event=>setSetupOpen(event.currentTarget.open)}><summary className="web-recommendation-setup-toggle"><Settings2 size={16} aria-hidden="true"/><span>{en?'Search preferences':'Configurar búsqueda'}</span><ChevronRight size={16} aria-hidden="true"/></summary><div className="web-recommendation-setup-body">
    <div className="web-recommendation-step"><span className="web-recommendation-number">1</span><div><strong>{en?'What are you looking for?':'¿Qué estás buscando?'}</strong><label><span className="sr-only">{en?'Search terms':'Términos de búsqueda'}</span><Input placeholder={en?'e.g. software, maintenance':'Ej. software, mantenimiento'} value={keywords} maxLength={400} onChange={event=>setKeywords(event.target.value)}/></label><small>{en?'Up to four terms, separated by commas.':'Hasta cuatro términos, separados por comas.'}</small></div></div>
    <div className="web-recommendation-step"><span className="web-recommendation-number">2</span><div><strong>{en?'Find recommendations':'Buscar recomendaciones'}</strong><p>{credential?(en?'Uses your account model and connected runner.':'Usa el modelo de tu cuenta y el runner conectado.'):(en?'Uses the model configured on your connected runner.':'Usa el modelo configurado en tu runner conectado.')}</p>
@@ -82,5 +117,6 @@ export default function WebOpportunitySuggestions({language,market='ALL',credent
   {!searching&&!active&&!checkingResults&&verifyingSecop&&results?.jobId&&<p role="status">{en?`Checking current status in ${market==='CO'?'SECOP':market==='ES'?'PLACSP / TED':'official sources'}… (${formatElapsed(elapsedSeconds)})`:`Comprobando estado actual en ${market==='CO'?'SECOP':market==='ES'?'PLACSP / TED':'fuentes oficiales'}… (${formatElapsed(elapsedSeconds)})`}</p>}
   {!searching&&!active&&!checkingResults&&results?.jobId&&<OpportunityResultsView language={language} market={market} items={results.items} jobId={results.jobId} stale={results.stale} verificationUnavailable={results.verificationUnavailable} busy={busy} onReview={(job,id)=>void perform('review',job,id)} onSave={(job,item)=>setSaveTarget({jobId:job,item})} onOpen={onOpen} archive={archive} onLoadArchive={()=>void loadArchive()} />}
   {saveTarget&&<WebOpportunityDetail item={saveTarget.item.process} language={language} saving={busy} selectDocumentsByDefault onClose={()=>setSaveTarget(null)} onSave={(process,ids)=>void saveTender(process,ids)}/>}
+  </>}
  </section>;
 }

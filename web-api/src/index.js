@@ -106,6 +106,7 @@ import {runnerProjectInventory} from './project-inventory.js';
 import { clearChatHistory, handleAgentJobs, handleUserJobs } from './jobs.js';
 import { uploadSecopZipPart, commitSecopZipParts } from './secop-zip-parts.js';
 import { companyProfile } from './company-profile.js';
+import { companyDossier, runnerCompanyDossierFile } from './company-dossier.js';
 import { runnerCompanyProfileCapture } from './account-company-profile-capture.js';
 import { opportunitySuggestionSettings } from './opportunity-suggestion-settings.js';
 import { opportunitySearch, opportunityJobs, opportunityResults, runnerOpportunityDue, runnerOpportunityContext } from './opportunity-candidates.js';
@@ -669,6 +670,12 @@ const apiWorker = {
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
       return privateResponse(await userAccountJobs(request, env, session.workspaceId, session));
     }
+    const runnerCompanyDossier = /^\/api\/runner\/jobs\/([^/]+)\/company-dossier\/([^/]+)$/.exec(url.pathname);
+    if (runnerCompanyDossier) {
+      const runner = await authenticateRunner(request, env);
+      if (!runner) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
+      return privateResponse(await runnerCompanyDossierFile(request, env, runner, runnerCompanyDossier[1], runnerCompanyDossier[2]));
+    }
     const runnerRup = /^\/api\/runner\/jobs\/([^/]+)\/rup$/.exec(url.pathname);
     if (runnerRup) {
       const runner = await authenticateRunner(request, env);
@@ -904,6 +911,11 @@ const apiWorker = {
     const exportTemplates=/^\/api\/export-templates(?:\/([^/]+))?$/.exec(url.pathname);
     if(exportTemplates){const session=await getScopedSession();if(!session)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await userExportTemplates(request,env,session.workspaceId,exportTemplates[1]));}
     if(url.pathname==='/api/export-format'){const session=await getScopedSession();if(!session)return privateResponse(Response.json({error:'unauthorized'},{status:401}));return privateResponse(await exportFormat(request,env,session.workspaceId));}
+    if (url.pathname.startsWith('/api/company-dossier/')) {
+      const session = await getScopedSession();
+      if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));
+      return privateResponse(await companyDossier(request, env, session.workspaceId, session));
+    }
     if (url.pathname === '/api/company-profile') {
       const session = await getScopedSession();
       if (!session) return privateResponse(Response.json({ error: 'unauthorized' }, { status: 401 }));

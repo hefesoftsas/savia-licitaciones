@@ -20,6 +20,7 @@ import { chapterFingerprint, templateValuesGuard } from './template-sources.js';
 import { analysisCategories } from './technical-analysis.js';
 import { captureOutlineSources, outlineGuard, outlineSnapshotCurrent, expandedOutlineGuard } from './outline-sources.js';
 import { accountView, expireAccountJobs } from './account-jobs.js';
+import { cleanupCompanyDossierFiles } from './company-dossier.js';
 import { captureRequirementSources, sourceGuard } from './requirement-sources.js';
 import exportDefaults from '../../client/electron/services/exportFormatDefaults.cjs';
 
@@ -31,7 +32,7 @@ function view(row) {
   return { id: row.id, projectId: row.project_id, kind: row.kind, credentialId: row.credential_id, payload: JSON.parse(row.payload_json), state: row.state,
     result: row.result_json === null ? null : JSON.parse(row.result_json), progress: row.state === 'running' ? row.progress ?? null : null, createdAt: row.created_at, updatedAt: row.updated_at,
     ...(row.kind === 'technical-plan.generate-batch' && row.batch_draft_count !== undefined ? { draftCount: row.batch_draft_count, appliedVersion: row.batch_applied_version ?? null } : {}),
-    ...(['technical-plan.export-word', 'technical-plan.extract-template', 'duplicate-check.analyze', 'rejection-check.analyze', 'blind-check.inspect', 'blind-check.fix', 'blind-check.fix-report', 'blind-check.fix-ai', 'bid-evaluation.analyze'].includes(row.kind) ? { wordRevision: row.edit_revision || 0, artifactState: !row.artifact_id ? 'none' : !row.artifact_deleted_at ? 'stored' : row.artifact_storage_deleted_at ? 'deleted' : 'deletion_pending' } : {}) };
+    ...(['technical-plan.export-word', 'technical-plan.extract-template', 'duplicate-check.analyze', 'rejection-check.analyze', 'blind-check.inspect', 'blind-check.fix', 'blind-check.fix-report', 'blind-check.fix-ai', 'bid-evaluation.analyze', 'proposal-review.apply-suggestions'].includes(row.kind) ? { wordRevision: row.edit_revision || 0, artifactState: !row.artifact_id ? 'none' : !row.artifact_deleted_at ? 'stored' : row.artifact_storage_deleted_at ? 'deleted' : 'deletion_pending' } : {}) };
 }
 async function expire(env, ownerId) {
   await env.DB.prepare("UPDATE jobs SET state = 'interrupted', updated_at = ? WHERE owner_id = ? AND state = 'running' AND lease_expires_at <= ?")
@@ -86,15 +87,36 @@ export async function handleUserJobs(request, env, userId) {
     const input = await json(request);
     if (!input || typeof input.kind !== 'string' || !/^[a-z][a-z0-9.-]{0,79}$/.test(input.kind) || !input.payload || typeof input.payload !== 'object' || Array.isArray(input.payload)) return Response.json({ error: 'invalid_job' }, { status: 400 });
     if (input.kind === 'secop.import-zip') return Response.json({error:'invalid_job'},{status:400});
-    const localKinds = ['rejection-check.extract','rejection-check.analyze','blind-check.fix-ai','blind-check.inspect','bid-evaluation.analyze','requirements.suggest','tender-chat.send','technical-plan.analyze','technical-plan.generate-roots','technical-plan.expand-outline','technical-plan.extract-template','technical-plan.generate-facts','technical-plan.generate-section','technical-plan.generate-batch'];
+    const localKinds = ['proposal-review.apply-suggestions','rejection-check.extract','rejection-check.analyze','blind-check.fix-ai','blind-check.inspect','bid-evaluation.analyze','requirements.suggest','tender-chat.send','technical-plan.analyze','technical-plan.generate-roots','technical-plan.expand-outline','technical-plan.extract-template','technical-plan.generate-facts','technical-plan.generate-section','technical-plan.generate-batch'];
     const localModel = input.credentialId === 'local-runner' && localKinds.includes(input.kind);
     let canonicalPayload = input.payload, sourcesGuard;
+    const WORD_DRAFT_PREFIX = 'word-draft:';
+    const isReviewFileId = (id, allowDraft = false) => typeof id === 'string' && (/^[A-Za-z0-9_-]{1,128}$/.test(id) || (allowDraft && id.startsWith(WORD_DRAFT_PREFIX) && /^[A-Za-z0-9_-]{1,128}$/.test(id.slice(WORD_DRAFT_PREFIX.length))));
+    const hasValidWordDrafts = async draftFileIds => {
+      if (!draftFileIds.length) return true;
+      const draftJobIds = draftFileIds.map(id => id.slice(WORD_DRAFT_PREFIX.length));
+      const placeholders = draftJobIds.map(() => '?').join(',');
+      const foundDrafts = await env.DB.prepare(`SELECT COUNT(*) AS count FROM jobs j JOIN job_artifacts a ON a.job_id=j.id WHERE j.project_id=? AND j.owner_id=? AND j.kind='technical-plan.export-word' AND j.state='succeeded' AND COALESCE(json_extract(j.payload_json,'$.bidDocument'),'')!='economic' AND a.deleted_at IS NULL AND j.id IN (${placeholders})`).bind(projectId, userId, ...draftJobIds).first();
+      return foundDrafts.count === draftJobIds.length;
+    };
+    const hasAllReviewSources = async fileIds => {
+      const draftFileIds = fileIds.filter(id => id.startsWith(WORD_DRAFT_PREFIX));
+      const projectFileIds = fileIds.filter(id => !id.startsWith(WORD_DRAFT_PREFIX));
+      if (projectFileIds.length) {
+        const placeholders = projectFileIds.map(() => '?').join(',');
+        const found = await env.DB.prepare(`SELECT COUNT(*) AS count FROM project_files WHERE project_id=? AND id IN (${placeholders})`).bind(projectId, ...projectFileIds).first();
+        if (found.count !== projectFileIds.length) return false;
+      }
+      return hasValidWordDrafts(draftFileIds);
+    };
     if (['rejection-check.extract','rejection-check.analyze'].includes(input.kind)) {
       const {fileIds,language,dataProcessingConsent}=input.payload,isExtract=input.kind==='rejection-check.extract';
       const tenderFileIds=isExtract?fileIds:input.payload.tenderFileIds,bidFileIds=isExtract?[]:input.payload.bidFileIds,options=input.payload.options,criteria=input.payload.criteria??'',customCheckItems=input.payload.customCheckItems??'';
       if(dataProcessingConsent!==true||!['es','en'].includes(language)||typeof input.credentialId!=='string'||!input.credentialId||!Array.isArray(fileIds)||!fileIds.length||fileIds.length>50||fileIds.some(id=>typeof id!=='string'||!id)||!Array.isArray(tenderFileIds)||!Array.isArray(bidFileIds)||(!isExtract&&!bidFileIds.length)||tenderFileIds.length+bidFileIds.length!==fileIds.length||new Set(fileIds).size!==fileIds.length||new Set([...tenderFileIds,...bidFileIds]).size!==fileIds.length||[...tenderFileIds,...bidFileIds].some(id=>!fileIds.includes(id)))return Response.json({error:'invalid_job'},{status:400});
+      const draftFileIds=fileIds.filter(id=>id.startsWith(WORD_DRAFT_PREFIX));
+      if(draftFileIds.length&&(isExtract||draftFileIds.some(id=>id.length<=WORD_DRAFT_PREFIX.length||!bidFileIds.includes(id)||tenderFileIds.includes(id))))return Response.json({error:'invalid_job'},{status:400});
       if(!isExtract&&(!options||['rejectionCheck','typoCheck','logicCheck'].some(key=>typeof options[key]!=='boolean')||!['rejectionCheck','typoCheck','logicCheck'].some(key=>options[key])||typeof criteria!=='string'||criteria.length>200000||(options.rejectionCheck&&!criteria.trim())||typeof customCheckItems!=='string'||customCheckItems.length>20000))return Response.json({error:'invalid_job'},{status:400});
-      const placeholders=fileIds.map(()=>'?').join(','),found=await env.DB.prepare(`SELECT COUNT(*) AS count FROM project_files WHERE project_id=? AND id IN (${placeholders})`).bind(projectId,...fileIds).first();if(found.count!==fileIds.length)return Response.json({error:'not_found'},{status:404});
+      if(!await hasAllReviewSources(fileIds))return Response.json({error:'not_found'},{status:404});
       canonicalPayload=isExtract?{mode:'extract',fileIds,tenderFileIds,bidFileIds,language,dataProcessingConsent:true}:{mode:'analyze',fileIds,tenderFileIds,bidFileIds,language,dataProcessingConsent:true,criteria,customCheckItems,options:{rejectionCheck:options.rejectionCheck,typoCheck:options.typoCheck,logicCheck:options.logicCheck}};
     }
     if (['blind-check.fix','blind-check.fix-report','blind-check.fix-ai'].includes(input.kind)) {
@@ -115,25 +137,56 @@ export async function handleUserJobs(request, env, userId) {
     if (input.kind === 'blind-check.inspect') {
       const { fileIds, language, preset, sensitiveWords, tenderFileId } = input.payload, aiReview=input.payload.aiReview===true;
       const bidFileId=input.payload.bidFileId||(Array.isArray(fileIds)?fileIds[0]:undefined);
-      if (!Array.isArray(fileIds) || !fileIds.length || fileIds.length > 2 || fileIds.some(id=>typeof id!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(id)) || new Set(fileIds).size!==fileIds.length || !fileIds.includes(bidFileId) || (tenderFileId!==undefined && (typeof tenderFileId!=='string'||tenderFileId===bidFileId||!fileIds.includes(tenderFileId))) || fileIds.length !== 1+(tenderFileId?1:0) || (!aiReview && (input.credentialId!=null || tenderFileId)) || (aiReview && (input.payload.dataProcessingConsent!==true || typeof input.credentialId!=='string' || !input.credentialId)) || (input.payload.aiReview!==undefined && typeof input.payload.aiReview!=='boolean') || !['es','en'].includes(language) || !['builtin-general','project'].includes(preset) || (preset==='project' && (!Number.isSafeInteger(input.payload.profileVersion) || input.payload.profileVersion < 0)) || !Array.isArray(sensitiveWords) || sensitiveWords.length > 100 || sensitiveWords.some(word => typeof word !== 'string' || !word.trim() || word.length > 200)) return Response.json({error:'invalid_job'}, {status:400});
-      const file = await env.DB.prepare('SELECT name FROM project_files WHERE id = ? AND project_id = ?').bind(bidFileId,projectId).first();
-      if (!file) return Response.json({error:'not_found'}, {status:404});
-      if (!/\.docx$/i.test(file.name)) return Response.json({error:'invalid_job'}, {status:400});
+      if (!Array.isArray(fileIds) || !fileIds.length || fileIds.length > 2 || !isReviewFileId(bidFileId, true) || (tenderFileId!==undefined && (!isReviewFileId(tenderFileId, false) || tenderFileId===bidFileId || !fileIds.includes(tenderFileId))) || new Set(fileIds).size!==fileIds.length || !fileIds.includes(bidFileId) || fileIds.length !== 1+(tenderFileId?1:0) || (!aiReview && (input.credentialId!=null || tenderFileId)) || (aiReview && (input.payload.dataProcessingConsent!==true || typeof input.credentialId!=='string' || !input.credentialId)) || (input.payload.aiReview!==undefined && typeof input.payload.aiReview!=='boolean') || !['es','en'].includes(language) || !['builtin-general','project'].includes(preset) || (preset==='project' && (!Number.isSafeInteger(input.payload.profileVersion) || input.payload.profileVersion < 0)) || !Array.isArray(sensitiveWords) || sensitiveWords.length > 100 || sensitiveWords.some(word => typeof word !== 'string' || !word.trim() || word.length > 200)) return Response.json({error:'invalid_job'}, {status:400});
+      if (bidFileId.startsWith(WORD_DRAFT_PREFIX)) {
+        if (!await hasValidWordDrafts([bidFileId])) return Response.json({error:'not_found'}, {status:404});
+      } else {
+        const file = await env.DB.prepare('SELECT name FROM project_files WHERE id = ? AND project_id = ?').bind(bidFileId,projectId).first();
+        if (!file) return Response.json({error:'not_found'}, {status:404});
+        if (!/\.docx$/i.test(file.name)) return Response.json({error:'invalid_job'}, {status:400});
+      }
       if(tenderFileId){const tender=await env.DB.prepare('SELECT name FROM project_files WHERE id=? AND project_id=?').bind(tenderFileId,projectId).first();if(!tender)return Response.json({error:'not_found'},{status:404});if(!/\.(txt|md|markdown|docx|pdf)$/i.test(tender.name))return Response.json({error:'invalid_job'},{status:400});}
       canonicalPayload = {fileIds,language,preset,sensitiveWords:sensitiveWords.map(word=>word.trim()),...(aiReview?{aiReview:true,bidFileId,dataProcessingConsent:true,...(tenderFileId?{tenderFileId}:{})}:{})};
       if (preset==='project') { const saved=await getBlindProfile(env,projectId); if(saved.version!==input.payload.profileVersion)return Response.json({error:'version_conflict'},{status:409}); canonicalPayload={...canonicalPayload,profileVersion:saved.version,profile:saved.profile}; }
     }
     if(input.kind==='bid-evaluation.analyze'){
       const {fileIds,tenderFileIds,bidFileIds,language,dataProcessingConsent}=input.payload;
-      if(dataProcessingConsent!==true||typeof input.credentialId!=='string'||!input.credentialId||!['es','en'].includes(language)||!Array.isArray(fileIds)||!Array.isArray(tenderFileIds)||!Array.isArray(bidFileIds)||!tenderFileIds.length||!bidFileIds.length||fileIds.length>50||tenderFileIds.length+bidFileIds.length!==fileIds.length||new Set(fileIds).size!==fileIds.length||new Set([...tenderFileIds,...bidFileIds]).size!==fileIds.length||fileIds.some(id=>typeof id!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(id))||[...tenderFileIds,...bidFileIds].some(id=>!fileIds.includes(id)))return Response.json({error:'invalid_job'},{status:400});
-      const placeholders=fileIds.map(()=>'?').join(','),found=await env.DB.prepare(`SELECT COUNT(*) AS count FROM project_files WHERE project_id=? AND id IN (${placeholders})`).bind(projectId,...fileIds).first();if(found.count!==fileIds.length)return Response.json({error:'not_found'},{status:404});
+      if(dataProcessingConsent!==true||typeof input.credentialId!=='string'||!input.credentialId||!['es','en'].includes(language)||!Array.isArray(fileIds)||!Array.isArray(tenderFileIds)||!Array.isArray(bidFileIds)||!tenderFileIds.length||!bidFileIds.length||fileIds.length>50||tenderFileIds.length+bidFileIds.length!==fileIds.length||new Set(fileIds).size!==fileIds.length||new Set([...tenderFileIds,...bidFileIds]).size!==fileIds.length||tenderFileIds.some(id=>!isReviewFileId(id,false))||bidFileIds.some(id=>!isReviewFileId(id,true))||[...tenderFileIds,...bidFileIds].some(id=>!fileIds.includes(id)))return Response.json({error:'invalid_job'},{status:400});
+      if(!await hasAllReviewSources(fileIds))return Response.json({error:'not_found'},{status:404});
       canonicalPayload={fileIds,tenderFileIds,bidFileIds,language,dataProcessingConsent:true};
     }
     if (input.kind === 'duplicate-check.analyze') {
       const {fileIds,tenderFileIds,bidFileIds,language}=input.payload;
-      if(input.credentialId!=null||!['es','en'].includes(language)||!Array.isArray(fileIds)||!Array.isArray(tenderFileIds)||!Array.isArray(bidFileIds)||!bidFileIds.length||fileIds.length>50||tenderFileIds.length+bidFileIds.length!==fileIds.length||new Set(fileIds).size!==fileIds.length||new Set([...tenderFileIds,...bidFileIds]).size!==fileIds.length||fileIds.some(id=>typeof id!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(id))||[...tenderFileIds,...bidFileIds].some(id=>!fileIds.includes(id)))return Response.json({error:'invalid_job'},{status:400});
-      const placeholders=fileIds.map(()=>'?').join(',');const found=await env.DB.prepare(`SELECT COUNT(*) AS count FROM project_files WHERE project_id=? AND id IN (${placeholders})`).bind(projectId,...fileIds).first();if(found.count!==fileIds.length)return Response.json({error:'not_found'},{status:404});
+      if(input.credentialId!=null||!['es','en'].includes(language)||!Array.isArray(fileIds)||!Array.isArray(tenderFileIds)||!Array.isArray(bidFileIds)||!bidFileIds.length||fileIds.length>50||tenderFileIds.length+bidFileIds.length!==fileIds.length||new Set(fileIds).size!==fileIds.length||new Set([...tenderFileIds,...bidFileIds]).size!==fileIds.length||tenderFileIds.some(id=>!isReviewFileId(id,false))||bidFileIds.some(id=>!isReviewFileId(id,true))||[...tenderFileIds,...bidFileIds].some(id=>!fileIds.includes(id)))return Response.json({error:'invalid_job'},{status:400});
+      if(!await hasAllReviewSources(fileIds))return Response.json({error:'not_found'},{status:404});
       canonicalPayload={fileIds,tenderFileIds,bidFileIds,language};
+    }
+    if (input.kind === 'proposal-review.apply-suggestions') {
+      const { proposalId, reviewJobIds, language, dataProcessingConsent } = input.payload;
+      if (!['es', 'en'].includes(language) || !isReviewFileId(proposalId, true) || !Array.isArray(reviewJobIds) || !reviewJobIds.length || reviewJobIds.length > 4 || new Set(reviewJobIds).size !== reviewJobIds.length || reviewJobIds.some(id => !isReviewFileId(id, false))) return Response.json({ error: 'invalid_job' }, { status: 400 });
+      if (proposalId.startsWith(WORD_DRAFT_PREFIX)) {
+        if (!await hasValidWordDrafts([proposalId])) return Response.json({ error: 'not_found' }, { status: 404 });
+      } else {
+        const file = await env.DB.prepare('SELECT name FROM project_files WHERE id = ? AND project_id = ?').bind(proposalId, projectId).first();
+        if (!file) return Response.json({ error: 'not_found' }, { status: 404 });
+        if (!/\.docx$/i.test(file.name)) return Response.json({ error: 'invalid_job' }, { status: 400 });
+      }
+      const reviewPlaceholders = reviewJobIds.map(() => '?').join(',');
+      const reviewRows = (await env.DB.prepare(`SELECT j.id, j.kind FROM jobs j JOIN job_artifacts a ON a.job_id = j.id WHERE j.project_id = ? AND j.owner_id = ? AND j.state = 'succeeded' AND a.deleted_at IS NULL AND j.kind IN ('blind-check.inspect','rejection-check.analyze','bid-evaluation.analyze','duplicate-check.analyze') AND j.id IN (${reviewPlaceholders})`).bind(projectId, userId, ...reviewJobIds).all()).results;
+      if (reviewRows.length !== reviewJobIds.length) return Response.json({ error: 'not_found' }, { status: 404 });
+      if (input.credentialId != null) {
+        if (typeof input.credentialId !== 'string' || !input.credentialId || dataProcessingConsent !== true) return Response.json({ error: 'invalid_job' }, { status: 400 });
+      } else if (!reviewRows.some(row => row.kind === 'blind-check.inspect')) {
+        return Response.json({ error: 'invalid_job' }, { status: 400 });
+      }
+      canonicalPayload = {
+        fileIds: [proposalId, ...reviewJobIds.map(id => `review-artifact:${id}`)],
+        proposalId,
+        targetExportJobId: proposalId.startsWith(WORD_DRAFT_PREFIX) ? proposalId.slice(WORD_DRAFT_PREFIX.length) : null,
+        reviewJobs: reviewRows.map(row => ({ id: row.id, kind: row.kind })),
+        language,
+        ...(input.credentialId != null ? { dataProcessingConsent: true } : {}),
+      };
     }
     if (input.kind === 'requirements.suggest') {
       const { fileIds, language, dataProcessingConsent, includeRup } = input.payload;
@@ -395,7 +448,7 @@ export async function handleAgentJobs(request, env, runner) {
     const localReady = input.localModel===true && (!selectedLocalModel || input.localModelSelection===true);
     const bidDocumentsReady = input.supportsBidDocuments === true ? 1 : 0;
     const requiresBidDocuments = "COALESCE(json_extract(payload_json,'$.bidDocumentRules'),0)=1 OR COALESCE(json_extract(payload_json,'$.technicalOnly'),0)=1 OR json_extract(payload_json,'$.bidDocument') IS NOT NULL";
-    if (input.kinds.some(kind => ['word-format.preview', 'opportunity.analyze', 'rup.analyze', 'knowledge.analyze', 'feasibility.export-word', 'feasibility.extract-sources', 'feasibility.analyze', 'feasibility.generate-outline', 'feasibility.generate-parameters', 'feasibility.generate-content'].includes(kind))) {
+    if (input.kinds.some(kind => ['word-format.preview', 'opportunity.analyze', 'rup.analyze', 'knowledge.analyze', 'company-dossier.extract', 'feasibility.export-word', 'feasibility.extract-sources', 'feasibility.analyze', 'feasibility.generate-outline', 'feasibility.generate-parameters', 'feasibility.generate-content'].includes(kind))) {
       await expireAccountJobs(env, runner.ownerId);
       const account = await env.DB.prepare(`UPDATE account_jobs SET state = 'running', runner_id = ?, lease_hash = ?, lease_expires_at = ?, updated_at = ?
         WHERE id = (SELECT a.id FROM account_jobs a WHERE a.owner_id = ? AND a.state = 'queued' AND a.kind IN (SELECT value FROM json_each(?))
@@ -410,7 +463,7 @@ export async function handleAgentJobs(request, env, runner) {
     if (!row) {
       const preference = await env.DB.prepare('SELECT interval_seconds FROM runner_poll_preferences WHERE owner_id=?').bind(runner.ownerId).first();
       const pollAfterMs = (preference?.interval_seconds ?? 10) * 1000;
-      if (!input.kinds.some(kind => ['word-format.preview', 'opportunity.analyze', 'rup.analyze', 'knowledge.analyze', 'feasibility.export-word', 'feasibility.extract-sources', 'feasibility.analyze', 'feasibility.generate-outline', 'feasibility.generate-parameters', 'feasibility.generate-content'].includes(kind))) return Response.json({ job: null, pollAfterMs });
+      if (!input.kinds.some(kind => ['word-format.preview', 'opportunity.analyze', 'rup.analyze', 'knowledge.analyze', 'company-dossier.extract', 'feasibility.export-word', 'feasibility.extract-sources', 'feasibility.analyze', 'feasibility.generate-outline', 'feasibility.generate-parameters', 'feasibility.generate-content'].includes(kind))) return Response.json({ job: null, pollAfterMs });
       const account = await env.DB.prepare("UPDATE account_jobs SET state = 'running', runner_id = ?, lease_hash = ?, lease_expires_at = ?, updated_at = ? WHERE id = (SELECT id FROM account_jobs WHERE owner_id = ? AND state = 'queued' AND kind IN (SELECT value FROM json_each(?)) AND ((kind!='opportunity.analyze' OR credential_id IS NOT NULL) AND COALESCE(json_extract(payload_json,'$.localRunner'),0)!=1 OR ?=1) ORDER BY created_at, id LIMIT 1) AND state = 'queued' RETURNING *").bind(runner.id, await digest(lease), now + leaseDurationMs, new Date(now).toISOString(), runner.ownerId, JSON.stringify(input.kinds), localReady?1:0).first();
       return account ? Response.json({ job: accountView(account), lease, leaseDurationMs, localModel: selectedLocalModel }) : Response.json({ job: null, pollAfterMs });
     }
@@ -438,7 +491,12 @@ export async function handleAgentJobs(request, env, runner) {
     const result = JSON.stringify(input.result);
     if (result.length > 1_000_000) return Response.json({ error: 'result_too_large' }, { status: 413 });
     const updated = await env.DB.prepare(`UPDATE account_jobs SET state = ?, result_json = ?, updated_at = ? WHERE id = ? AND owner_id = ? AND runner_id = ? AND lease_hash = ? AND state = 'running' AND lease_expires_at > ? AND (? != 'succeeded' OR kind != 'feasibility.export-word' OR (((account_jobs.project_id IS NULL AND EXISTS (SELECT 1 FROM feasibility_reports f WHERE f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version'))) OR (account_jobs.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_feasibility_reports f WHERE f.project_id=account_jobs.project_id AND f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version')))) AND EXISTS (SELECT 1 FROM account_job_artifacts a WHERE a.job_id=account_jobs.id AND a.id=json_extract(?, '$.artifactId') AND a.deleted_at IS NULL))) AND (? != 'succeeded' OR kind != 'feasibility.extract-sources' OR ((account_jobs.project_id IS NULL AND (EXISTS (SELECT 1 FROM feasibility_reports f WHERE f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version')) AND (SELECT COUNT(*) FROM feasibility_extracted_texts t WHERE t.job_id=account_jobs.id AND t.owner_id=account_jobs.owner_id)=json_array_length(account_jobs.payload_json,'$.sourceKeys') AND json_extract(?,'$.extractedCount')=json_array_length(account_jobs.payload_json,'$.sourceKeys') AND (COALESCE(json_extract(account_jobs.payload_json,'$.preserveImages'),0)!=1 OR ((SELECT COALESCE(SUM(image_count),0) FROM feasibility_extracted_texts t WHERE t.job_id=account_jobs.id AND t.owner_id=account_jobs.owner_id)=(SELECT COUNT(*) FROM feasibility_extracted_images i WHERE i.job_id=account_jobs.id AND i.owner_id=account_jobs.owner_id) AND json_extract(?,'$.imageCount')=(SELECT COUNT(*) FROM feasibility_extracted_images i WHERE i.job_id=account_jobs.id AND i.owner_id=account_jobs.owner_id)))))) OR (account_jobs.project_id IS NOT NULL AND (EXISTS (SELECT 1 FROM project_feasibility_reports f WHERE f.project_id=account_jobs.project_id AND f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version')) AND (SELECT COUNT(*) FROM project_feasibility_extracted_texts t WHERE t.job_id=account_jobs.id AND t.owner_id=account_jobs.owner_id)=json_array_length(account_jobs.payload_json,'$.sourceKeys') AND json_extract(?,'$.extractedCount')=json_array_length(account_jobs.payload_json,'$.sourceKeys') AND (COALESCE(json_extract(account_jobs.payload_json,'$.preserveImages'),0)!=1 OR ((SELECT COALESCE(SUM(image_count),0) FROM project_feasibility_extracted_texts t WHERE t.job_id=account_jobs.id AND t.owner_id=account_jobs.owner_id)=(SELECT COUNT(*) FROM project_feasibility_extracted_images i WHERE i.job_id=account_jobs.id AND i.owner_id=account_jobs.owner_id) AND json_extract(?,'$.imageCount')=(SELECT COUNT(*) FROM project_feasibility_extracted_images i WHERE i.job_id=account_jobs.id AND i.owner_id=account_jobs.owner_id)))))) AND (? != 'succeeded' OR kind != 'feasibility.analyze' OR (((account_jobs.project_id IS NULL AND EXISTS (SELECT 1 FROM feasibility_reports f WHERE f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version'))) OR (account_jobs.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_feasibility_reports f WHERE f.project_id=account_jobs.project_id AND f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version')))) AND (account_jobs.project_id IS NULL OR ${projectFeasibilityAnalysisSourcesGuard}) AND json_type(?,'$.content')='text' AND length(json_extract(?,'$.content')) BETWEEN 1 AND 200000)) AND (? != 'succeeded' OR kind != 'feasibility.generate-outline' OR (((account_jobs.project_id IS NULL AND EXISTS (SELECT 1 FROM feasibility_reports f WHERE f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version'))) OR (account_jobs.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_feasibility_reports f WHERE f.project_id=account_jobs.project_id AND f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version')))) AND ${feasibilityKnowledgeGuard})) AND (? != 'succeeded' OR kind != 'feasibility.generate-parameters' OR (((account_jobs.project_id IS NULL AND EXISTS (SELECT 1 FROM feasibility_reports f WHERE f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version'))) OR (account_jobs.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_feasibility_reports f WHERE f.project_id=account_jobs.project_id AND f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version')))) AND ${feasibilityKnowledgeGuard} AND json_type(?,'$.content')='text' AND length(json_extract(?,'$.content')) BETWEEN 1 AND 200000)) AND (? != 'succeeded' OR kind != 'feasibility.generate-content' OR (((account_jobs.project_id IS NULL AND EXISTS (SELECT 1 FROM feasibility_reports f WHERE f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version'))) OR (account_jobs.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_feasibility_reports f WHERE f.project_id=account_jobs.project_id AND f.owner_id=account_jobs.owner_id AND f.version=json_extract(account_jobs.payload_json,'$.version')))) AND ${feasibilityKnowledgeGuard} AND (SELECT COUNT(*) FROM feasibility_content_drafts d WHERE d.job_id=account_jobs.id AND d.owner_id=account_jobs.owner_id)=json_array_length(account_jobs.payload_json,'$.targets') AND json_extract(?,'$.generatedCount')=json_array_length(account_jobs.payload_json,'$.targets') AND (COALESCE(json_extract(account_jobs.payload_json,'$.autoReview'),0) != 1 OR ((SELECT COUNT(*) FROM feasibility_content_reviews r WHERE r.job_id=account_jobs.id AND r.owner_id=account_jobs.owner_id)=json_array_length(account_jobs.payload_json,'$.reviewTargets') AND json_extract(?,'$.reviewedCount')=json_array_length(account_jobs.payload_json,'$.reviewTargets') AND json_extract(?,'$.reviewFallbackCount')=(SELECT COALESCE(SUM(fallback),0) FROM feasibility_content_reviews r WHERE r.job_id=account_jobs.id AND r.owner_id=account_jobs.owner_id))))) RETURNING id`).bind(input.status, result, new Date(now).toISOString(), match[1], runner.ownerId, runner.id, hash, now, input.status, result, input.status, result, result, result, result, input.status, result, result, input.status, input.status, result, result, input.status, result, result, result).first();
-    if (updated) return Response.json({ ok: true });
+    if (updated) {
+      if (account.kind === 'company-dossier.extract' && ['succeeded', 'failed'].includes(input.status)) {
+        await cleanupCompanyDossierFiles(env, runner.ownerId, account.payload_json);
+      }
+      return Response.json({ ok: true });
+    }
     const existing = await env.DB.prepare('SELECT id FROM account_jobs WHERE id = ? AND owner_id = ? AND runner_id = ? AND lease_hash = ? AND state = ? AND result_json = ?').bind(match[1], runner.ownerId, runner.id, hash, input.status, result).first();
     return existing ? Response.json({ ok: true }) : Response.json({ error: 'lease_conflict' }, { status: 409 });
   }
@@ -456,7 +514,7 @@ export async function handleAgentJobs(request, env, runner) {
       const committed = await env.DB.prepare('SELECT part_count,skipped FROM secop_zip_commits WHERE job_id=? AND owner_id=?').bind(match[1],runner.ownerId).first();
       if (!committed || input.result?.imported !== committed.part_count || input.result?.skipped !== committed.skipped) return Response.json({error:'invalid_result'},{status:400});
     }
-    if (['technical-plan.export-word', 'technical-plan.extract-template', 'duplicate-check.analyze', 'rejection-check.analyze', 'blind-check.inspect', 'blind-check.fix', 'blind-check.fix-report', 'blind-check.fix-ai', 'bid-evaluation.analyze'].includes(job?.kind)) {
+    if (['technical-plan.export-word', 'technical-plan.extract-template', 'duplicate-check.analyze', 'rejection-check.analyze', 'blind-check.inspect', 'blind-check.fix', 'blind-check.fix-report', 'blind-check.fix-ai', 'bid-evaluation.analyze', 'proposal-review.apply-suggestions'].includes(job?.kind)) {
       const artifact = await env.DB.prepare('SELECT id FROM job_artifacts WHERE job_id = ?').bind(match[1]).first();
       const payload=JSON.parse(job.payload_json);
       if (payload.bidDocument && input.result?.bidDocument!==payload.bidDocument) return Response.json({error:'invalid_result'},{status:400});

@@ -1,4 +1,5 @@
 import { digest } from './runners.js';
+import { filterRejectionReport } from './rejection-findings.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -130,17 +131,43 @@ export async function handleRunnerCredential(request, env, runner, jobId) {
   } catch { return unavailable(); }
 }
 
-export async function handleRunnerFile(request, env, runner, jobId, fileId) {
+export async function handleRunnerFile(request, env, runner, jobId, rawFileId) {
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+  let fileId;
+  try { fileId = decodeURIComponent(rawFileId); } catch { return Response.json({ error: 'invalid_file' }, { status: 400 }); }
   let input;
   try { input = await request.json(); } catch { return Response.json({ error: 'invalid_json' }, { status: 400 }); }
   if (typeof input?.lease !== 'string' || !/^[a-f0-9]{64}$/.test(input.lease)) return Response.json({ error: 'invalid_lease' }, { status: 400 });
-  const row = await env.DB.prepare("SELECT j.payload_json AS payload, f.object_key AS objectKey, f.content_type AS contentType, f.name AS name FROM jobs j JOIN project_files f ON f.project_id = j.project_id WHERE j.id = ? AND j.owner_id = ? AND j.runner_id = ? AND j.lease_hash = ? AND j.state = 'running' AND j.lease_expires_at > ? AND f.id = ?")
-    .bind(jobId, runner.ownerId, runner.id, await digest(input.lease), Date.now(), fileId).first();
-  if (!row) return Response.json({ error: 'lease_conflict' }, { status: 409 });
-  const payload = JSON.parse(row.payload);
+  const job = await env.DB.prepare("SELECT project_id AS projectId, payload_json AS payload FROM jobs WHERE id = ? AND owner_id = ? AND runner_id = ? AND lease_hash = ? AND state = 'running' AND lease_expires_at > ?")
+    .bind(jobId, runner.ownerId, runner.id, await digest(input.lease), Date.now()).first();
+  if (!job) return Response.json({ error: 'lease_conflict' }, { status: 409 });
+  const payload = JSON.parse(job.payload);
   if (!Array.isArray(payload.fileIds) || !payload.fileIds.includes(fileId)) return Response.json({ error: 'lease_conflict' }, { status: 409 });
-  const object = await env.FILES.get(row.objectKey);
+  let file = null;
+  if (fileId.startsWith('word-draft:')) {
+    const draftJobId = fileId.slice('word-draft:'.length);
+    const row = draftJobId ? await env.DB.prepare("SELECT a.object_key AS objectKey FROM jobs j JOIN job_artifacts a ON a.job_id = j.id WHERE j.id = ? AND j.project_id = ? AND j.owner_id = ? AND j.kind = 'technical-plan.export-word' AND j.state = 'succeeded' AND COALESCE(json_extract(j.payload_json, '$.bidDocument'), '') != 'economic' AND a.deleted_at IS NULL")
+      .bind(draftJobId, job.projectId, runner.ownerId).first() : null;
+    if (row) file = { objectKey: row.objectKey, contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name: 'Borrador-propuesta-generada.docx' };
+  } else if (fileId.startsWith('review-artifact:')) {
+    const reviewJobId = fileId.slice('review-artifact:'.length);
+    const row = reviewJobId ? await env.DB.prepare("SELECT a.object_key AS objectKey, j.kind AS kind FROM jobs j JOIN job_artifacts a ON a.job_id = j.id WHERE j.id = ? AND j.project_id = ? AND j.owner_id = ? AND j.state = 'succeeded' AND a.deleted_at IS NULL AND j.kind IN ('blind-check.inspect','rejection-check.analyze','bid-evaluation.analyze','duplicate-check.analyze')")
+      .bind(reviewJobId, job.projectId, runner.ownerId).first() : null;
+    if (!row) return Response.json({ error: 'not_found' }, { status: 404 });
+    const object = await env.FILES.get(row.objectKey);
+    if (!object) return Response.json({ error: 'not_found' }, { status: 404 });
+    const headers = { 'content-disposition': 'attachment', 'x-content-type-options': 'nosniff', 'x-savia-file-name': encodeURIComponent(`${reviewJobId}.json`) };
+    if (row.kind === 'rejection-check.analyze') {
+      let report;
+      try { report = await object.json(); } catch { return Response.json({ error: 'stored_data_invalid' }, { status: 503 }); }
+      return Response.json(await filterRejectionReport(env, runner.ownerId, reviewJobId, report), { headers });
+    }
+    return new Response(object.body, { headers: { ...headers, 'content-type': 'application/json' } });
+  } else {
+    file = await env.DB.prepare('SELECT object_key AS objectKey, content_type AS contentType, name AS name FROM project_files WHERE project_id = ? AND id = ?').bind(job.projectId, fileId).first();
+  }
+  if (!file) return Response.json({ error: 'not_found' }, { status: 404 });
+  const object = await env.FILES.get(file.objectKey);
   if (!object) return Response.json({ error: 'not_found' }, { status: 404 });
-  return new Response(object.body, { headers: { 'content-type': row.contentType, 'content-disposition': 'attachment', 'x-content-type-options': 'nosniff', 'x-savia-file-name': encodeURIComponent(row.name) } });
+  return new Response(object.body, { headers: { 'content-type': file.contentType, 'content-disposition': 'attachment', 'x-content-type-options': 'nosniff', 'x-savia-file-name': encodeURIComponent(file.name) } });
 }

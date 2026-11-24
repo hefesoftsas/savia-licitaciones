@@ -190,3 +190,19 @@ test('all literal Chinese errors from application backend modules are covered', 
   }
   assert.ok(checked>=100);
 });
+
+test('blind-check rule titles and color details translate cleanly to Spanish and English', () => {
+  const cases = [
+    ['文字颜色', 'Color de texto', 'Text color'],
+    ['行距', 'Interlineado', 'Line spacing'],
+    ['字号', 'Tamaño de letra', 'Font size'],
+    ['当前颜色 #243048', 'Color actual #243048', 'Current color #243048'],
+    ['当前颜色 #243048（主题色 accent1）', 'Color actual #243048 (color de tema accent1)', 'Current color #243048 (theme color accent1)'],
+    ['主题色 accent1', 'Color de tema accent1', 'Theme color accent1'],
+    ['主题色 accent1（#243048）', 'Color de tema accent1 (#243048)', 'Theme color accent1 (#243048)'],
+  ];
+  for (const [source, expectedEs, expectedEn] of cases) {
+    assert.equal(localizeFindingText(source, 'es'), expectedEs);
+    assert.equal(localizeFindingText(source, 'en'), expectedEn);
+  }
+});
