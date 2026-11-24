@@ -153,7 +153,7 @@ export async function handleRunnerFile(request, env, runner, jobId, rawFileId) {
     const reviewJobId = fileId.slice('review-artifact:'.length);
     const row = reviewJobId ? await env.DB.prepare("SELECT a.object_key AS objectKey, j.kind AS kind FROM jobs j JOIN job_artifacts a ON a.job_id = j.id WHERE j.id = ? AND j.project_id = ? AND j.owner_id = ? AND j.state = 'succeeded' AND a.deleted_at IS NULL AND j.kind IN ('blind-check.inspect','rejection-check.analyze','bid-evaluation.analyze','duplicate-check.analyze')")
       .bind(reviewJobId, job.projectId, runner.ownerId).first() : null;
-    if (!row) return Response.json({ error: 'not_found' }, { status: 404 });
+    if (!row) return Response.json({ error: 'lease_conflict' }, { status: 409 });
     const object = await env.FILES.get(row.objectKey);
     if (!object) return Response.json({ error: 'not_found' }, { status: 404 });
     const headers = { 'content-disposition': 'attachment', 'x-content-type-options': 'nosniff', 'x-savia-file-name': encodeURIComponent(`${reviewJobId}.json`) };
@@ -166,7 +166,7 @@ export async function handleRunnerFile(request, env, runner, jobId, rawFileId) {
   } else {
     file = await env.DB.prepare('SELECT object_key AS objectKey, content_type AS contentType, name AS name FROM project_files WHERE project_id = ? AND id = ?').bind(job.projectId, fileId).first();
   }
-  if (!file) return Response.json({ error: 'not_found' }, { status: 404 });
+  if (!file) return Response.json({ error: 'lease_conflict' }, { status: 409 });
   const object = await env.FILES.get(file.objectKey);
   if (!object) return Response.json({ error: 'not_found' }, { status: 404 });
   return new Response(object.body, { headers: { 'content-type': file.contentType, 'content-disposition': 'attachment', 'x-content-type-options': 'nosniff', 'x-savia-file-name': encodeURIComponent(file.name) } });
