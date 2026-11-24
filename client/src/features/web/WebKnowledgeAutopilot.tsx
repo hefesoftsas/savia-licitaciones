@@ -2,6 +2,7 @@ import { CheckCircle2, FolderOpen, FolderTree, Loader2, Search, Sparkles, Square
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActionButton as Button } from '@/shared/ui/ActionButton';
 import { Input } from '@/shared/ui/primitives/input';
+import { SelectField } from '@/shared/ui/SelectField';
 import { useToast } from '@/shared/ui/ToastProvider';
 import { request } from './api.mjs';
 import { WebDocumentDropZone } from './WebDocumentDropZone';
@@ -481,25 +482,34 @@ export function WebKnowledgeAutopilot({
         )}
 
         <div className="web-feasibility-grid">
-          <label>
-            {en ? 'Destination folder' : 'Destino en biblioteca'}
-            <select value={targetMode} disabled={submitting} onChange={event => setTargetMode(event.target.value as 'auto' | 'folder' | 'new')}>
-              <option value="auto">{en ? 'Classify automatically into suggested folders' : 'Clasificar automáticamente en carpetas sugeridas'}</option>
-              {folders.length > 0 && <option value="folder">{en ? 'Existing folder' : 'Usar carpeta existente'}</option>}
-              <option value="new">{en ? 'Create a new folder' : 'Crear una nueva carpeta'}</option>
-            </select>
-          </label>
+          <div className="web-admin-sheet-field">
+            <span>{en ? 'Destination folder' : 'Destino en biblioteca'}</span>
+            <SelectField
+              disabled={submitting}
+              value={targetMode}
+              aria-label={en ? 'Destination folder' : 'Destino en biblioteca'}
+              options={[
+                {
+                  value: 'auto',
+                  label: en ? 'Classify automatically into suggested folders' : 'Clasificar automáticamente en carpetas sugeridas',
+                },
+                ...(folders.length > 0 ? [{ value: 'folder', label: en ? 'Existing folder' : 'Usar carpeta existente' }] : []),
+                { value: 'new', label: en ? 'Create a new folder' : 'Crear una nueva carpeta' },
+              ]}
+              onChange={value => setTargetMode(value as 'auto' | 'folder' | 'new')}
+            />
+          </div>
           {targetMode === 'folder' && (
-            <label>
-              {en ? 'Folder' : 'Carpeta'}
-              <select value={selectedFolderId} disabled={submitting} onChange={event => setSelectedFolderId(event.target.value)}>
-                {folders.map(folder => (
-                  <option key={folder.id} value={folder.id}>
-                    {folder.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="web-admin-sheet-field">
+              <span>{en ? 'Folder' : 'Carpeta'}</span>
+              <SelectField
+                disabled={submitting}
+                value={selectedFolderId}
+                aria-label={en ? 'Folder' : 'Carpeta'}
+                options={folders.map(folder => ({ value: folder.id, label: folder.name }))}
+                onChange={setSelectedFolderId}
+              />
+            </div>
           )}
           {targetMode === 'new' && (
             <label>

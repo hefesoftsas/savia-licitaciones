@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'reac
 import { ActionButton as Button } from '@/shared/ui/ActionButton';
 import AppDialog from '@/shared/ui/AppDialog';
 import MarkdownRenderer from '@/shared/ui/MarkdownRenderer';
+import { SelectField } from '@/shared/ui/SelectField';
 import { Input } from '@/shared/ui/primitives/input';
 import { useToast } from '@/shared/ui/ToastProvider';
 import type { ExportFormatConfig } from '@/shared/types/exportFormat';
@@ -580,20 +581,16 @@ export function WebFeasibilityAutopilot({
               onChange={event => setProjectInfoField('projectName', event.target.value)}
             />
           </label>
-          <label>
-            {en ? 'Report template' : 'Plantilla del informe'}
-            <select
+          <div className="web-admin-sheet-field">
+            <span>{en ? 'Report template' : 'Plantilla del informe'}</span>
+            <SelectField
               disabled={running}
               value={state.outlineTemplate}
-              onChange={event => onStateChange({ ...state, outlineTemplate: event.target.value })}
-            >
-              {templates.map(([id, esLabel, enLabel]) => (
-                <option key={id} value={id}>
-                  {en ? enLabel : esLabel}
-                </option>
-              ))}
-            </select>
-          </label>
+              aria-label={en ? 'Report template' : 'Plantilla del informe'}
+              options={templates.map(([id, esLabel, enLabel]) => ({ value: id, label: en ? enLabel : esLabel }))}
+              onChange={value => onStateChange({ ...state, outlineTemplate: value })}
+            />
+          </div>
           <label>
             {en ? 'Implementing entity' : 'Entidad ejecutora'}
             <Input
