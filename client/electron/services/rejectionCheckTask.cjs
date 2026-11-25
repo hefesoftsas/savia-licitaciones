@@ -72,6 +72,17 @@ function normalizeSeverity(value) {
   return 'medium';
 }
 
+function getOutputLanguage(aiService) {
+  const config = getCurrentAiConfig(aiService);
+  return config?.ui_language === 'en' || config?.language === 'en' ? 'en' : 'es';
+}
+
+function buildOutputLanguageDirective(language = 'es') {
+  return language === 'en'
+    ? 'OUTPUT LANGUAGE: Write every title, summary, requirement, evidence, reason, location hint and suggestion in English. The Chinese instructions and examples describe structure only; do not copy their language. Preserve JSON keys and bidDocumentId unchanged.'
+    : 'IDIOMA DE SALIDA: Escribe todos los títulos, resúmenes, requisitos, evidencias, motivos, ubicaciones y sugerencias en español. Las instrucciones y ejemplos en chino solo describen la estructura; no copies su idioma. Conserva las claves JSON y los bidDocumentId sin cambios.';
+}
+
 // Rejection, spelling, and logic checks share a byte-identical leading bid-source message; providers reuse caches only at message boundaries,
 // allowing concurrent checks and multiple rejection rounds to share the prefix. Put each check's source-use requirements in subsequent messages.
 function buildBidDocumentsMessage(input) {
@@ -117,7 +128,7 @@ ${input.customCheckItems.trim()}`,
   return messages;
 }
 
-function buildRejectionCheckAnalysisMessages(input) {
+function buildRejectionCheckAnalysisMessages(input, language = 'es') {
   return [
     ...buildCommonRejectionCheckMessages(input),
     {
@@ -131,12 +142,14 @@ function buildRejectionCheckAnalysisMessages(input) {
 3. 结合各投标文件目录和正文结构，指出重点核查章节、附件、报价、资格材料、技术/商务响应位置，并说明是否存在不同文件需要分别关注的风险。
 4. 判断材料是否缺失时，先识别章节标题、目录项、附件标题、材料清单项、表格条目、页码线索、图片占位线索等结构性文本线索；只要存在这类线索，就不能因为图片或扫描件正文不可见而判定缺失。
 5. 如果某项检查需要外部事实、现场行为或纸质原件才能判断，标记为“不纳入电子文件检查”。
-6. 仅输出分析结论，使用简体中文。`,
+6. 仅输出分析结论。
+
+${buildOutputLanguageDirective(language)}`,
     },
   ];
 }
 
-function buildRejectionCheckInspectionMessages(input, analysis) {
+function buildRejectionCheckInspectionMessages(input, analysis, language = 'es') {
   return [
     ...buildCommonRejectionCheckMessages(input),
     { role: 'user', content: `【废标项检查任务 v1｜第一轮分析结果】
@@ -153,12 +166,14 @@ ${analysis}` },
 4. 判断“材料缺失”时，只有在目录、章节标题、附件标题、材料清单、正文、表格和其他结构性线索中均找不到对应材料痕迹，才可以输出疑似缺失；不得仅因图片内容、扫描件正文或附件正文不可见而输出缺失风险。
 5. 如果投标文件中已有对应材料的结构性文本线索，应视为至少有提交线索，可提示人工复核内容完整性，但不要判定为缺失。
 6. 区分风险类型：无效标使用 invalidBid，废标项使用 rejectionItem。
-7. 暂不要求 JSON，可用结构化 Markdown 输出初步结果。`,
+7. 暂不要求 JSON，可用结构化 Markdown 输出初步结果。
+
+${buildOutputLanguageDirective(language)}`,
     },
   ];
 }
 
-function buildRejectionCheckFinalMessages(input, analysis, draftFindings) {
+function buildRejectionCheckFinalMessages(input, analysis, draftFindings, language = 'es') {
   return [
     ...buildCommonRejectionCheckMessages(input),
     { role: 'user', content: `【废标项检查任务 v1｜第一轮分析结果】
@@ -186,7 +201,7 @@ JSON 格式：
       "bidDocumentId": "对应投标文件的 bidDocumentId，例如 bid-xxxx",
       "type": "invalidBid",
       "severity": "high",
-      "title": "不超过 28 个中文字符的风险标题",
+      "title": "简短明确的风险标题（使用目标输出语言，不超过 80 字符）",
       "summary": "一句话概括风险",
       "requirement": "对应检查依据或招标要求，尽量引用原检查项",
       "bidEvidence": "投标文件中的明确证据、章节、原文摘录或缺失位置说明",
@@ -196,12 +211,14 @@ JSON 格式：
   ]
 }
 
+${buildOutputLanguageDirective(language)}
+
 仅输出 JSON，不要输出 Markdown、代码块或解释。`,
     },
   ];
 }
 
-function buildTypoCheckMessages(input) {
+function buildTypoCheckMessages(input, language = 'es') {
   return [
     buildBidDocumentsMessage(input),
     { role: 'user', content: `【错别字检查任务 v1】
@@ -217,11 +234,13 @@ function buildTypoCheckMessages(input) {
 
 JSON 格式：{"findings":[{"bidDocumentId":"对应投标文件的 bidDocumentId","wrongText":"原文中的错别字或短词","correctText":"建议正确字词","originalExcerpt":"包含错别字的原文短片段","reason":"为什么判断为错别字"}]}
 
+${buildOutputLanguageDirective(language)}
+
 仅输出 JSON，不要输出 Markdown、代码块或解释。` },
   ];
 }
 
-function buildLogicCheckMessages(input) {
+function buildLogicCheckMessages(input, language = 'es') {
   return [
     buildBidDocumentsMessage(input),
     { role: 'user', content: `【逻辑谬误检查任务 v1】
@@ -238,13 +257,16 @@ function buildLogicCheckMessages(input) {
 3. title 必须简短明确，便于作为折叠列表标题。
 4. 如果没有明确逻辑谬误，返回 {"findings":[]}。
 
-JSON 格式：{"findings":[{"bidDocumentId":"对应投标文件的 bidDocumentId","title":"不超过 28 个中文字符的简短标题","originalText":"关键原文摘录，可包含同一份文件内多处摘录","locationHint":"大概位置、章节、表格或上下文线索","fallacyReason":"谬误原因或前后不一致原因","suggestion":"修改建议"}]}
+JSON 格式：{"findings":[{"bidDocumentId":"对应投标文件的 bidDocumentId","title":"简短明确的标题（使用目标输出语言，不超过 80 字符）","originalText":"关键原文摘录，可包含同一份文件内多处摘录","locationHint":"大概位置、章节、表格或上下文线索","fallacyReason":"谬误原因或前后不一致原因","suggestion":"修改建议"}]}
+
+${buildOutputLanguageDirective(language)}
 
 仅输出 JSON，不要输出 Markdown、代码块或解释。` },
   ];
 }
 
-function normalizeRejectionCheckFindings(parsed, bidDocuments) {
+function normalizeRejectionCheckFindings(parsed, bidDocuments, language = 'es') {
+  const en = language === 'en';
   const bidDocumentIds = new Set((Array.isArray(bidDocuments) ? bidDocuments : []).map((document) => document.id).filter(Boolean));
   return getArrayPayload(parsed, ['findings', 'items', 'risks'])
     .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
@@ -260,10 +282,14 @@ function normalizeRejectionCheckFindings(parsed, bidDocuments) {
         severity: normalizeSeverity(item.severity),
         title,
         summary: normalizeText(item.summary) || title,
-        requirement: normalizeText(item.requirement || item.source) || '未明确引用具体检查依据，请人工复核。',
+        requirement: normalizeText(item.requirement || item.source) || (en
+          ? 'No specific requirement was cited; please review manually.'
+          : 'No se citó un requisito específico; revisa manualmente.'),
         bidEvidence,
         riskReason,
-        suggestion: normalizeText(item.suggestion) || '请结合招标文件要求和投标文件原文人工复核后处理。',
+        suggestion: normalizeText(item.suggestion) || (en
+          ? 'Review manually against the tender requirements and bid text.'
+          : 'Revisa manualmente frente a los requisitos del pliego y el texto de la oferta.'),
       };
     })
     .filter((item) => item.bidDocumentId && item.title && item.bidEvidence && item.riskReason);
@@ -313,12 +339,14 @@ function createVerifiedTypoExcerpt(bidContent, position, wrongText) {
   return bidContent.slice(start, end).trim();
 }
 
-function createLineLocationHint(bidContent, position) {
+function createLineLocationHint(bidContent, position, language = 'es') {
   const before = bidContent.slice(0, Math.max(0, position));
-  return `原文第 ${before.split(/\r\n|\r|\n/).length} 行附近`;
+  const line = before.split(/\r\n|\r|\n/).length;
+  return language === 'en' ? `Near line ${line}` : `Cerca de la línea ${line}`;
 }
 
 function normalizeTypoCheckFindings(parsed, bidDocuments, options = {}) {
+  const en = options.language === 'en';
   const documents = Array.isArray(bidDocuments) ? bidDocuments : [];
   const bidDocumentIds = new Set(documents.map((document) => document.id).filter(Boolean));
   const documentMap = new Map(documents.map((document) => [document.id, document]));
@@ -332,7 +360,9 @@ function normalizeTypoCheckFindings(parsed, bidDocuments, options = {}) {
     const wrongText = normalizeText(item.wrongText || item.wrong_text || item.wrong || item.typo).slice(0, 60);
     const correctText = normalizeText(item.correctText || item.correct_text || item.correct || item.suggestion).slice(0, 60);
     const originalExcerpt = normalizeText(item.originalExcerpt || item.original_excerpt || item.excerpt || item.context);
-    const reason = normalizeText(item.reason || item.riskReason || item.detail) || '疑似错别字，请结合原文复核。';
+    const reason = normalizeText(item.reason || item.riskReason || item.detail) || (en
+      ? 'Possible typo; please verify against the original text.'
+      : 'Posible error ortográfico; verifica con el texto original.');
     if (!wrongText || !correctText || wrongText === correctText) continue;
     const position = findVerifiedTypoPosition(bidDocument.content, wrongText, originalExcerpt, options);
     if (position < 0) continue;
@@ -346,14 +376,15 @@ function normalizeTypoCheckFindings(parsed, bidDocuments, options = {}) {
       correctText,
       originalExcerpt: createVerifiedTypoExcerpt(bidDocument.content, position, wrongText),
       reason,
-      locationHint: createLineLocationHint(bidDocument.content, position),
+      locationHint: createLineLocationHint(bidDocument.content, position, options.language),
       position,
     });
   }
   return findings;
 }
 
-function normalizeLogicCheckFindings(parsed, bidDocuments) {
+function normalizeLogicCheckFindings(parsed, bidDocuments, language = 'es') {
+  const en = language === 'en';
   const bidDocumentIds = new Set((Array.isArray(bidDocuments) ? bidDocuments : []).map((document) => document.id).filter(Boolean));
   const seen = new Set();
   const findings = [];
@@ -361,10 +392,16 @@ function normalizeLogicCheckFindings(parsed, bidDocuments) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const bidDocumentId = getBidDocumentIdFromItem(item, bidDocumentIds);
     const title = normalizeText(item.title || item.summary).slice(0, 80);
-    const originalText = normalizeText(item.originalText || item.original_text || item.evidence || item.bidEvidence) || '未提供明确原文摘录，请结合位置线索复核。';
-    const locationHint = normalizeText(item.locationHint || item.location_hint || item.location || item.position) || '未明确具体位置，请结合原文摘录复核。';
+    const originalText = normalizeText(item.originalText || item.original_text || item.evidence || item.bidEvidence) || (en
+      ? 'No explicit excerpt provided; review using the location hint.'
+      : 'No se proporcionó un extracto textual exacto; revisa según la ubicación.');
+    const locationHint = normalizeText(item.locationHint || item.location_hint || item.location || item.position) || (en
+      ? 'Location not specified; review using the original text.'
+      : 'Ubicación no especificada; revisa con el texto original.');
     const fallacyReason = normalizeText(item.fallacyReason || item.fallacy_reason || item.reason || item.riskReason);
-    const suggestion = normalizeText(item.suggestion || item.recommendation) || '请结合投标文件上下文人工复核后修改。';
+    const suggestion = normalizeText(item.suggestion || item.recommendation) || (en
+      ? 'Review manually in context and revise the bid text.'
+      : 'Revisa manualmente en contexto y corrige la oferta.');
     if (!bidDocumentId || !title || !fallacyReason) continue;
     const key = `${bidDocumentId}\u0000${title}\u0000${fallacyReason}`;
     if (seen.has(key)) continue;
@@ -594,7 +631,7 @@ function normalizeRollingRejectionResolve(item) {
   };
 }
 
-function normalizeRollingRejectionPatch(parsed, bidDocuments, fallbackBidDocumentId = '') {
+function normalizeRollingRejectionPatch(parsed, bidDocuments, fallbackBidDocumentId = '', language = 'es') {
   const source = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   const evidenceAdds = getArrayPayload(source, ['evidenceAdds', 'evidence_adds', 'submittedEvidenceAdds', 'submitted_evidence_adds', 'submittedEvidence', 'submitted_evidence'])
     .map((item) => normalizeRollingEvidenceItem(item, bidDocuments, fallbackBidDocumentId))
@@ -610,7 +647,7 @@ function normalizeRollingRejectionPatch(parsed, bidDocuments, fallbackBidDocumen
     .filter(Boolean);
   const confirmedRisks = normalizeRejectionCheckFindings({
     findings: getArrayPayload(source, ['confirmedRiskAdds', 'confirmed_risk_adds', 'confirmedRisks', 'confirmed_risks', 'confirmedFindings', 'confirmed_findings', 'findings']),
-  }, bidDocuments);
+  }, bidDocuments, language);
 
   return { evidenceAdds, pendingRiskAdds, pendingRiskUpdates, pendingRiskResolves, confirmedRiskAdds: confirmedRisks };
 }
@@ -756,7 +793,7 @@ function normalizeRollingLogicResolve(item) {
   };
 }
 
-function normalizeRollingLogicPatch(parsed, bidDocuments, fallbackBidDocumentId = '') {
+function normalizeRollingLogicPatch(parsed, bidDocuments, fallbackBidDocumentId = '', language = 'es') {
   const source = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   const factAdds = getArrayPayload(source, ['factAdds', 'fact_adds', 'factRegisterAdds', 'fact_register_adds', 'facts', 'factRegister', 'fact_register'])
     .map((item) => normalizeLogicFactItem(item, bidDocuments, fallbackBidDocumentId))
@@ -772,7 +809,7 @@ function normalizeRollingLogicPatch(parsed, bidDocuments, fallbackBidDocumentId 
     .filter(Boolean);
   const confirmedIssues = normalizeLogicCheckFindings({
     findings: getArrayPayload(source, ['confirmedIssueAdds', 'confirmed_issue_adds', 'confirmedIssues', 'confirmed_issues', 'confirmedFindings', 'confirmed_findings', 'findings']),
-  }, bidDocuments);
+  }, bidDocuments, language);
 
   return { factAdds, pendingIssueAdds, pendingIssueUpdates, pendingIssueResolves, confirmedIssueAdds: confirmedIssues };
 }
@@ -1043,7 +1080,7 @@ ${input.customCheckItems.trim()}`,
   return messages;
 }
 
-function buildRollingRejectionSegmentMessages(input, segment, stateSummary) {
+function buildRollingRejectionSegmentMessages(input, segment, stateSummary, language = 'es') {
   const bidDocumentIdList = formatBidDocumentIdList(input.bidDocuments);
   return [
     ...buildRollingRejectionBaseMessages(input),
@@ -1090,12 +1127,14 @@ JSON 格式：
   "pendingRiskUpdates": [{"id":"pendingRisks 中已有 id","bidEvidence":"补充证据或缺口","riskReason":"更新原因","statusReason":"当前仍需确认的原因"}],
   "pendingRiskResolves": [{"id":"pendingRisks 中已有 id","reason":"被当前片段或累计线索排除的原因","locationHint":"位置线索"}],
   "confirmedRiskAdds": [{"bidDocumentId":"有效 bidDocumentId","type":"invalidBid","severity":"high","title":"风险标题","summary":"摘要","requirement":"检查依据","bidEvidence":"明确投标文件证据","riskReason":"风险原因","suggestion":"建议"}]
-}`,
+}
+
+${buildOutputLanguageDirective(language)}`,
     },
   ];
 }
 
-function buildRejectionFinalBatchMessages(input, candidates, stateSummary, batchIndex, totalBatches) {
+function buildRejectionFinalBatchMessages(input, candidates, stateSummary, batchIndex, totalBatches, language = 'es') {
   const bidDocumentIdList = formatBidDocumentIdList(input.bidDocuments);
   return [
     ...buildRollingRejectionBaseMessages(input),
@@ -1123,12 +1162,14 @@ ${JSON.stringify(candidates, null, 2)}
 5. 同一问题合并为一条，bidDocumentId 必须来自上方有效 bidDocumentId。
 6. 如果没有符合条件的风险，返回 {"findings":[]}。
 
-JSON 格式：{"findings":[{"bidDocumentId":"有效 bidDocumentId","type":"invalidBid","severity":"high","title":"不超过 28 个中文字符的风险标题","summary":"一句话概括风险","requirement":"对应检查依据或招标要求","bidEvidence":"投标文件中的明确证据、章节、原文摘录或缺失位置说明","riskReason":"为什么该证据可能构成无效标或废标项风险","suggestion":"建议用户如何处理或复核"}]}`,
+JSON 格式：{"findings":[{"bidDocumentId":"有效 bidDocumentId","type":"invalidBid","severity":"high","title":"简短明确的风险标题（使用目标输出语言，不超过 80 字符）","summary":"一句话概括风险","requirement":"对应检查依据或招标要求","bidEvidence":"投标文件中的明确证据、章节、原文摘录或缺失位置说明","riskReason":"为什么该证据可能构成无效标或废标项风险","suggestion":"建议用户如何处理或复核"}]}
+
+${buildOutputLanguageDirective(language)}`,
     },
   ];
 }
 
-function buildRejectionGlobalMergeMessages(input, findings, finalSummary) {
+function buildRejectionGlobalMergeMessages(input, findings, finalSummary, language = 'es') {
   const bidDocumentIdList = formatBidDocumentIdList(input.bidDocuments);
   return [
     ...buildRollingRejectionBaseMessages(input),
@@ -1157,12 +1198,14 @@ ${JSON.stringify({ findings }, null, 2)}
 5. bidDocumentId 必须来自上方有效 bidDocumentId。
 6. 如果没有符合条件的风险，返回 {"findings":[]}。
 
-JSON 格式：{"findings":[{"bidDocumentId":"有效 bidDocumentId","type":"invalidBid","severity":"high","title":"不超过 28 个中文字符的风险标题","summary":"一句话概括风险","requirement":"对应检查依据或招标要求","bidEvidence":"投标文件中的明确证据、章节、原文摘录或缺失位置说明","riskReason":"为什么该证据可能构成无效标或废标项风险","suggestion":"建议用户如何处理或复核"}]}`,
+JSON 格式：{"findings":[{"bidDocumentId":"有效 bidDocumentId","type":"invalidBid","severity":"high","title":"简短明确的风险标题（使用目标输出语言，不超过 80 字符）","summary":"一句话概括风险","requirement":"对应检查依据或招标要求","bidEvidence":"投标文件中的明确证据、章节、原文摘录或缺失位置说明","riskReason":"为什么该证据可能构成无效标或废标项风险","suggestion":"建议用户如何处理或复核"}]}
+
+${buildOutputLanguageDirective(language)}`,
     },
   ];
 }
 
-function buildRollingLogicSegmentMessages(input, segment, stateSummary) {
+function buildRollingLogicSegmentMessages(input, segment, stateSummary, language = 'es') {
   const bidDocumentIdList = formatBidDocumentIdList(input.bidDocuments);
   return [
     {
@@ -1207,12 +1250,14 @@ JSON 格式：
   "pendingIssueUpdates": [{"id":"pendingIssues 中已有 id","originalText":"补充原文","fallacyReason":"更新原因","statusReason":"当前仍需确认的原因"}],
   "pendingIssueResolves": [{"id":"pendingIssues 中已有 id","reason":"被当前片段或累计线索排除的原因","locationHint":"位置线索"}],
   "confirmedIssueAdds": [{"bidDocumentId":"有效 bidDocumentId","title":"问题标题","originalText":"关键原文摘录","locationHint":"位置线索","fallacyReason":"谬误原因或前后不一致原因","suggestion":"修改建议"}]
-}`,
+}
+
+${buildOutputLanguageDirective(language)}`,
     },
   ];
 }
 
-function buildLogicFinalBatchMessages(input, candidates, stateSummary, batchIndex, totalBatches) {
+function buildLogicFinalBatchMessages(input, candidates, stateSummary, batchIndex, totalBatches, language = 'es') {
   const bidDocumentIdList = formatBidDocumentIdList(input.bidDocuments);
   return [
     {
@@ -1238,12 +1283,14 @@ ${JSON.stringify(candidates, null, 2)}
 4. 同一问题合并为一条，bidDocumentId 必须来自上方有效 bidDocumentId。
 5. 如果没有明确逻辑谬误，返回 {"findings":[]}。
 
-JSON 格式：{"findings":[{"bidDocumentId":"有效 bidDocumentId","title":"不超过 28 个中文字符的简短标题","originalText":"关键原文摘录，可包含同一份文件内多处摘录","locationHint":"大概位置、章节、表格或上下文线索","fallacyReason":"谬误原因或前后不一致原因","suggestion":"修改建议"}]}`,
+JSON 格式：{"findings":[{"bidDocumentId":"有效 bidDocumentId","title":"简短明确的标题（使用目标输出语言，不超过 80 字符）","originalText":"关键原文摘录，可包含同一份文件内多处摘录","locationHint":"大概位置、章节、表格或上下文线索","fallacyReason":"谬误原因或前后不一致原因","suggestion":"修改建议"}]}
+
+${buildOutputLanguageDirective(language)}`,
     },
   ];
 }
 
-function buildLogicGlobalMergeMessages(input, findings, finalSummary) {
+function buildLogicGlobalMergeMessages(input, findings, finalSummary, language = 'es') {
   const bidDocumentIdList = formatBidDocumentIdList(input.bidDocuments);
   return [
     {
@@ -1270,7 +1317,9 @@ ${JSON.stringify({ findings }, null, 2)}
 4. bidDocumentId 必须来自上方有效 bidDocumentId。
 5. 如果没有明确逻辑谬误，返回 {"findings":[]}。
 
-JSON 格式：{"findings":[{"bidDocumentId":"有效 bidDocumentId","title":"不超过 28 个中文字符的简短标题","originalText":"关键原文摘录，可包含同一份文件内多处摘录","locationHint":"大概位置、章节、表格或上下文线索","fallacyReason":"谬误原因或前后不一致原因","suggestion":"修改建议"}]}`,
+JSON 格式：{"findings":[{"bidDocumentId":"有效 bidDocumentId","title":"简短明确的标题（使用目标输出语言，不超过 80 字符）","originalText":"关键原文摘录，可包含同一份文件内多处摘录","locationHint":"大概位置、章节、表格或上下文线索","fallacyReason":"谬误原因或前后不一致原因","suggestion":"修改建议"}]}
+
+${buildOutputLanguageDirective(language)}`,
     },
   ];
 }
@@ -1326,6 +1375,7 @@ async function runJson(aiService, request, onProgress, _label) {
 
 async function runRollingRejectionItemCheck(aiService, input, onProgress) {
   const config = getCurrentAiConfig(aiService);
+  const language = getOutputLanguage(aiService);
   const segments = createBidPackageSegments(input.bidDocuments, config, rollingSegmentLimitRatio);
   let state = createEmptyRollingRejectionState();
   onProgress('正在按上下文长度滚动审阅投标包。');
@@ -1334,12 +1384,12 @@ async function runRollingRejectionItemCheck(aiService, input, onProgress) {
     onProgress(`${segment.documentLabel}：正在滚动审阅投标包第 ${segment.segmentIndex}/${segment.totalSegments} 段。`);
     const stateSummary = createRollingRejectionStateSummary(state);
     const payload = await runJson(aiService, {
-      messages: buildRollingRejectionSegmentMessages(input, segment, stateSummary),
+      messages: buildRollingRejectionSegmentMessages(input, segment, stateSummary, language),
       schemaName: 'RollingRejectionCheckPatch',
       progressLabel: '投标包废标项滚动审阅',
       failureMessage: '废标项滚动审阅状态格式无效，请重新检查',
     }, onProgress, '投标包废标项滚动审阅');
-    state = applyRollingRejectionPatch(state, normalizeRollingRejectionPatch(payload, input.bidDocuments, segment.documentId));
+    state = applyRollingRejectionPatch(state, normalizeRollingRejectionPatch(payload, input.bidDocuments, segment.documentId, language));
   }
 
   onProgress('正在基于全投标包状态定稿废标项风险。');
@@ -1351,27 +1401,28 @@ async function runRollingRejectionItemCheck(aiService, input, onProgress) {
   for (const [batchIndex, batch] of batches.entries()) {
     onProgress(`正在定稿废标项风险第 ${batchIndex + 1}/${batches.length} 批。`);
     const finalPayload = await runJson(aiService, {
-      messages: buildRejectionFinalBatchMessages(input, batch, finalSummary, batchIndex + 1, batches.length),
+      messages: buildRejectionFinalBatchMessages(input, batch, finalSummary, batchIndex + 1, batches.length, language),
       schemaName: 'RejectionCheckFindings',
       progressLabel: '投标包废标项检查定稿',
       failureMessage: '废标项检查结果格式无效，请重新检查',
     }, onProgress, '投标包废标项检查定稿');
-    findings.push(...normalizeRejectionCheckFindings(finalPayload, input.bidDocuments));
+    findings.push(...normalizeRejectionCheckFindings(finalPayload, input.bidDocuments, language));
   }
   const mergedFindings = dedupeRejectionFindings(findings);
   if (!mergedFindings.length) return [];
   onProgress('正在全局合并废标项风险。');
   const mergedPayload = await runJson(aiService, {
-    messages: buildRejectionGlobalMergeMessages(input, mergedFindings, finalSummary),
+    messages: buildRejectionGlobalMergeMessages(input, mergedFindings, finalSummary, language),
     schemaName: 'RejectionCheckGlobalMergeFindings',
     progressLabel: '废标项风险全局合稿',
     failureMessage: '废标项风险全局合稿结果格式无效，请重新检查',
   }, onProgress, '废标项风险全局合稿');
-  return dedupeRejectionFindings(normalizeRejectionCheckFindings(mergedPayload, input.bidDocuments));
+  return dedupeRejectionFindings(normalizeRejectionCheckFindings(mergedPayload, input.bidDocuments, language));
 }
 
 async function runSegmentedTypoCheck(aiService, input, onProgress) {
   const config = getCurrentAiConfig(aiService);
+  const language = getOutputLanguage(aiService);
   const findings = [];
   onProgress('正在按上下文长度分段识别错别字。');
 
@@ -1381,12 +1432,13 @@ async function runSegmentedTypoCheck(aiService, input, onProgress) {
     for (const segment of segments) {
       onProgress(`${documentLabel}：正在识别第 ${segment.segmentIndex}/${segment.totalSegments} 段错别字。`);
       const payload = await runJson(aiService, {
-        messages: buildTypoCheckMessages({ bidDocuments: [createSegmentPromptDocument(document, segment)] }),
+        messages: buildTypoCheckMessages({ bidDocuments: [createSegmentPromptDocument(document, segment)] }, language),
         schemaName: 'TypoCheckFindings',
         progressLabel: `${documentLabel}错别字检查`,
         failureMessage: '错别字检查结果格式无效，请重新检查',
       }, onProgress, `${documentLabel}错别字检查`);
       findings.push(...normalizeTypoCheckFindings(payload, [document], {
+        language,
         segmentStartOffset: segment.startOffset,
         segmentEndOffset: segment.endOffset,
       }));
@@ -1399,6 +1451,7 @@ async function runSegmentedTypoCheck(aiService, input, onProgress) {
 
 async function runRollingLogicCheck(aiService, input, onProgress) {
   const config = getCurrentAiConfig(aiService);
+  const language = getOutputLanguage(aiService);
   const segments = createBidPackageSegments(input.bidDocuments, config, rollingSegmentLimitRatio);
   let state = createEmptyRollingLogicState();
   onProgress('正在按上下文长度滚动检查投标包逻辑谬误。');
@@ -1407,12 +1460,12 @@ async function runRollingLogicCheck(aiService, input, onProgress) {
     onProgress(`${segment.documentLabel}：正在滚动检查投标包第 ${segment.segmentIndex}/${segment.totalSegments} 段逻辑。`);
     const stateSummary = createRollingLogicStateSummary(state);
     const payload = await runJson(aiService, {
-      messages: buildRollingLogicSegmentMessages(input, segment, stateSummary),
+      messages: buildRollingLogicSegmentMessages(input, segment, stateSummary, language),
       schemaName: 'RollingLogicCheckPatch',
       progressLabel: '投标包逻辑滚动检查',
       failureMessage: '逻辑谬误滚动检查状态格式无效，请重新检查',
     }, onProgress, '投标包逻辑滚动检查');
-    state = applyRollingLogicPatch(state, normalizeRollingLogicPatch(payload, input.bidDocuments, segment.documentId));
+    state = applyRollingLogicPatch(state, normalizeRollingLogicPatch(payload, input.bidDocuments, segment.documentId, language));
   }
 
   onProgress('正在基于全投标包状态定稿逻辑问题。');
@@ -1424,83 +1477,86 @@ async function runRollingLogicCheck(aiService, input, onProgress) {
   for (const [batchIndex, batch] of batches.entries()) {
     onProgress(`正在定稿逻辑问题第 ${batchIndex + 1}/${batches.length} 批。`);
     const finalPayload = await runJson(aiService, {
-      messages: buildLogicFinalBatchMessages(input, batch, finalSummary, batchIndex + 1, batches.length),
+      messages: buildLogicFinalBatchMessages(input, batch, finalSummary, batchIndex + 1, batches.length, language),
       schemaName: 'LogicCheckFindings',
       progressLabel: '投标包逻辑谬误检查定稿',
       failureMessage: '逻辑谬误检查结果格式无效，请重新检查',
     }, onProgress, '投标包逻辑谬误检查定稿');
-    findings.push(...normalizeLogicCheckFindings(finalPayload, input.bidDocuments));
+    findings.push(...normalizeLogicCheckFindings(finalPayload, input.bidDocuments, language));
   }
   const mergedFindings = dedupeLogicFindings(findings);
   if (!mergedFindings.length) return [];
   onProgress('正在全局合并逻辑问题。');
   const mergedPayload = await runJson(aiService, {
-    messages: buildLogicGlobalMergeMessages(input, mergedFindings, finalSummary),
+    messages: buildLogicGlobalMergeMessages(input, mergedFindings, finalSummary, language),
     schemaName: 'LogicCheckGlobalMergeFindings',
     progressLabel: '逻辑问题全局合稿',
     failureMessage: '逻辑问题全局合稿结果格式无效，请重新检查',
   }, onProgress, '逻辑问题全局合稿');
-  return dedupeLogicFindings(normalizeLogicCheckFindings(mergedPayload, input.bidDocuments));
+  return dedupeLogicFindings(normalizeLogicCheckFindings(mergedPayload, input.bidDocuments, language));
 }
 
 async function runRejectionItemCheck(aiService, input, onProgress) {
   if (shouldUseSegmentedRejectionFlow(aiService, input)) {
     return runRollingRejectionItemCheck(aiService, input, onProgress);
   }
+  const language = getOutputLanguage(aiService);
 
   onProgress('第一轮：正在分析检查范围。');
   const analysis = await runText(
     aiService,
-    { messages: buildRejectionCheckAnalysisMessages(input) },
+    { messages: buildRejectionCheckAnalysisMessages(input, language) },
     onProgress,
     '第一轮分析',
   );
   onProgress('第二轮：正在逐项检查投标文件。');
   const draftFindings = await runText(
     aiService,
-    { messages: buildRejectionCheckInspectionMessages(input, analysis) },
+    { messages: buildRejectionCheckInspectionMessages(input, analysis, language) },
     onProgress,
     '第二轮检查',
   );
   onProgress('第三轮：正在补充、去重并生成结果。');
   const payload = await runJson(aiService, {
-    messages: buildRejectionCheckFinalMessages(input, analysis, draftFindings),
+    messages: buildRejectionCheckFinalMessages(input, analysis, draftFindings, language),
     schemaName: 'RejectionCheckFindings',
     progressLabel: '废标项检查结果',
     failureMessage: '废标项检查结果格式无效，请重新检查',
   }, onProgress, '第三轮定稿');
-  return normalizeRejectionCheckFindings(payload, input.bidDocuments);
+  return normalizeRejectionCheckFindings(payload, input.bidDocuments, language);
 }
 
 async function runTypoCheck(aiService, input, onProgress) {
   if (shouldUseSegmentedBidDocuments(aiService, input.bidDocuments)) {
     return runSegmentedTypoCheck(aiService, input, onProgress);
   }
+  const language = getOutputLanguage(aiService);
 
   onProgress('正在识别错别字候选。');
   const payload = await runJson(aiService, {
-    messages: buildTypoCheckMessages({ bidDocuments: input.bidDocuments }),
+    messages: buildTypoCheckMessages({ bidDocuments: input.bidDocuments }, language),
     schemaName: 'TypoCheckFindings',
     progressLabel: '错别字检查结果',
     failureMessage: '错别字检查结果格式无效，请重新检查',
   }, onProgress, '错别字检查');
   onProgress('正在校验错别字原文位置。');
-  return normalizeTypoCheckFindings(payload, input.bidDocuments);
+  return normalizeTypoCheckFindings(payload, input.bidDocuments, { language });
 }
 
 async function runLogicCheck(aiService, input, onProgress) {
   if (shouldUseSegmentedBidDocuments(aiService, input.bidDocuments)) {
     return runRollingLogicCheck(aiService, input, onProgress);
   }
+  const language = getOutputLanguage(aiService);
 
   onProgress('正在检查逻辑谬误。');
   const payload = await runJson(aiService, {
-    messages: buildLogicCheckMessages({ bidDocuments: input.bidDocuments }),
+    messages: buildLogicCheckMessages({ bidDocuments: input.bidDocuments }, language),
     schemaName: 'LogicCheckFindings',
     progressLabel: '逻辑谬误检查结果',
     failureMessage: '逻辑谬误检查结果格式无效，请重新检查',
   }, onProgress, '逻辑谬误检查');
-  return normalizeLogicCheckFindings(payload, input.bidDocuments);
+  return normalizeLogicCheckFindings(payload, input.bidDocuments, language);
 }
 
 function updateExtractionState(checkpointTask, currentExtraction, taskPartial, extractionPartial) {

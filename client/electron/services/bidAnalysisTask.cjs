@@ -16,13 +16,23 @@ const SPANISH_LCSP_SYSTEM_ADDENDUM = `Contexto normativo España (LCSP, Ley 9/20
 - Si el pliego corresponde a contratación pública en España, interpreta y extrae con precisión la terminología LCSP: PCAP (Pliego de Cláusulas Administrativas Particulares), Cuadro de Características, PPT (Pliego de Prescripciones Técnicas), Presupuesto Base de Licitación (PBL, con y sin IVA), Valor Estimado del Contrato (VEC), lotes, códigos CPV, Sobres/Archivos electrónicos A (documentación administrativa / DEUC / ROLECE / solvencia / clasificación empresarial), B (criterios sujetos a juicio de valor / memoria técnica) y C (oferta económica y criterios evaluables mediante fórmulas), Mesa de Contratación, garantía provisional/definitiva, y causas de exclusión o subsanación.
 - Conserva exactamente las claves JSON y la estructura Markdown solicitadas, pero redacta todos los valores y textos extraídos en español (o en el idioma del pliego) con importes en EUR cuando proceda.`;
 
-const stableSystemPrompt = `你是专业的投标资料分析助手。请严格基于用户提供的上下文完成提取和总结。
+function getBidAnalysisLanguage(config = {}) {
+  return config?.ui_language === 'en' || config?.language === 'en' ? 'en' : 'es';
+}
+
+function getBidAnalysisSystemPrompt(config = {}) {
+  const en = getBidAnalysisLanguage(config) === 'en';
+  const languageRule = en
+    ? '4. OUTPUT LANGUAGE: Always write every heading, list item, JSON value and explanation in English (use "未提取到" only if the entire task yields zero relevant content). The Chinese instructions and JSON schemas describe structure only; do not copy their language.\n5. Write "Not mentioned" when partial fields or subsections are absent from the tender.'
+    : '4. IDIOMA DE SALIDA: Escribe siempre todos los títulos, listas, valores JSON y explicaciones en español (usa "未提取到" únicamente si la tarea no extrae ningún contenido relevante). Las instrucciones y esquemas en chino solo describen la estructura; no copies su idioma.\n5. Escribe "No se menciona" cuando falten datos o subapartados parciales en el pliego.';
+  return `你是专业的投标资料分析助手。请严格基于用户提供的上下文完成提取和总结。
 
 通用要求：
 1. 保持信息全面、准确，优先使用用户提供上下文中的内容；除非具体任务明确要求或允许根据经验补充，否则不要自行编造
-2. 已提取到相关内容但局部信息没有提及时，明确写“没有提及”
+2. 已提取到相关内容但局部信息没有提及时，使用目标语言明确写“No se menciona”或“Not mentioned”
 3. 只输出最终结果，不输出过程、提示语或客套话
-4. 始终使用简体中文`;
+${languageRule}`;
+}
 
 function jsonTask(title, goals, outputJson) {
   return `任务：${title}
@@ -32,7 +42,7 @@ function jsonTask(title, goals, outputJson) {
 约束：
 1. 输出格式必须为 JSON。
 2. 严格按照以下 JSON 格式输出，只修改 value，禁止修改 key 和结构。
-3. 招标文件中没有的字段填充“没有提及”。
+3. 招标文件中没有的字段使用目标输出语言填充“No se menciona”（西班牙语）或“Not mentioned”（英语）。
 
 JSON 格式：
 ${outputJson}
@@ -40,7 +50,44 @@ ${outputJson}
 仅输出 JSON，不要输出其他内容。`;
 }
 
-function buildInvalidBidAndRejectionItemsPrompt() {
+function buildInvalidBidAndRejectionItemsPrompt(language = 'es') {
+  const en = language === 'en';
+  const format = en
+    ? `# Explicitly mentioned in the tender
+
+## Invalid bid grounds
+- ...
+
+## Tender cancellation or rejection grounds
+- ...
+
+# Additional risks common in this type of tender
+
+## Invalid bid grounds
+- ...
+
+## Tender cancellation or rejection grounds
+- ...`
+    : `# Mencionados explícitamente en el pliego
+
+## Causales de oferta no válida
+- ...
+
+## Causales de rechazo o declaración de desierto
+- ...
+
+# Riesgos frecuentes en este tipo de licitación
+
+## Causales de oferta no válida
+- ...
+
+## Causales de rechazo o declaración de desierto
+- ...`;
+  const missingText = en ? 'Not mentioned in the tender' : 'El pliego no lo menciona';
+  const directive = en
+    ? 'OUTPUT LANGUAGE: Write all headings and items in English. Do not write Chinese characters.'
+    : 'IDIOMA DE SALIDA: Escribe todos los encabezados y elementos en español. No devuelvas caracteres chinos.';
+
   return `任务：提取并分析招标文件中的“无效投标”和“废标项”。
 
 概念边界：
@@ -50,29 +97,16 @@ function buildInvalidBidAndRejectionItemsPrompt() {
 
 输出要求：
 1. 必须明确区分“无效投标”和“废标项”。
-2. “招标文件中明确提到的”只能提取招标文件中明确出现或同义表达的内容，尽量保留招标文件中的关键句；如果没有提及，写“招标文件未提及”。
-3. “此类标书还可能涉及的”需要根据你的经验，补充招标文件中未明确提及、但结合本招标文件类型和招投标经验判断非常重要的高风险遗漏项。
+2. 第一部分只能提取招标文件中明确出现或同义表达的内容，尽量保留关键句；如果没有提及，写“${missingText}”。
+3. 第二部分需要根据你的经验，补充招标文件中未明确提及、但结合本招标文件类型和招投标经验判断非常重要的高风险遗漏项。
 4. 不要罗列所有常见可能项，不要输出泛泛的通用清单；每个小节最多输出 3-5 条。
 5. 不要使用表格，使用 Markdown 列表。
 6. 仅输出下方格式，不要输出解释、过程或额外段落。
 7. 不要输出三重引号、代码块标记或其他格式包裹符。
+8. ${directive}
 
 输出格式：
-# 招标文件中明确提到的
-
-## 无效投标
-- ...
-
-## 废标项
-- ...
-
-# 此类标书还可能涉及的
-
-## 无效投标
-- ...
-
-## 废标项
-- ...`;
+${format}`;
 }
 
 const tasks = [
@@ -194,12 +228,14 @@ function getBidAnalysisTaskById(taskId) {
 }
 
 // Use a common whole-item no-result marker for Markdown parsing to distinguish it from partially missing results.
-function buildTaskPrompt(task) {
-  const prompt = task.prompt();
+function buildTaskPrompt(task, config = {}) {
+  const language = getBidAnalysisLanguage(config);
+  const prompt = task.id === 'discardedBids' ? task.prompt(language) : task.prompt();
   if (task.output !== 'markdown') return prompt;
+  const partialMissing = language === 'en' ? 'Not mentioned' : 'No se menciona';
   return `${prompt}
 
-整体无结果规则：仅当当前任务完全未提取到任何相关内容时，只返回“${MARKDOWN_MISSING_RESULT}”，不要附加标题、标点、解释或其他文字。只要提取到任何有效内容，就正常返回结果；局部字段或局部分类缺失时写“没有提及”，不要使用“${MARKDOWN_MISSING_RESULT}”。`;
+整体无结果规则：仅当当前任务完全未提取到任何相关内容时，只返回“${MARKDOWN_MISSING_RESULT}”，不要附加标题、标点、解释或其他文字。只要提取到任何有效内容，就正常返回结果；局部字段或局部分类缺失时写“${partialMissing}”，不要使用“${MARKDOWN_MISSING_RESULT}”。`;
 }
 
 function isMissingMarkdownResult(task, content) {
@@ -208,7 +244,7 @@ function isMissingMarkdownResult(task, content) {
 
 function buildTenderContextMessages(fileContent, sectionHint, config = {}) {
   const messages = [
-    { role: 'system', content: stableSystemPrompt },
+    { role: 'system', content: getBidAnalysisSystemPrompt(config) },
   ];
   if (isSpanishLcspTender(fileContent, config)) {
     messages.push({ role: 'system', content: SPANISH_LCSP_SYSTEM_ADDENDUM });
@@ -223,7 +259,7 @@ function buildTenderContextMessages(fileContent, sectionHint, config = {}) {
 function buildMessages(fileContent, task, sectionHint, config = {}) {
   const messages = buildTenderContextMessages(fileContent, sectionHint, config);
   messages.push(
-    { role: 'user', content: buildTaskPrompt(task) },
+    { role: 'user', content: buildTaskPrompt(task, config) },
   );
   return messages;
 }
@@ -238,9 +274,10 @@ async function runSingleBidAnalysisPromptTask({ aiService, fileContent, task, se
 }
 
 async function runBidAnalysisPromptTaskOnce({ aiService, fileContent, fileSegments, task, sectionHint }) {
+  const config = typeof aiService?.getConfig === 'function' ? aiService.getConfig() : {};
   const segments = Array.isArray(fileSegments) && fileSegments.length
     ? fileSegments
-    : splitUserTextByContextLimit(fileContent, typeof aiService.getConfig === 'function' ? aiService.getConfig() : {});
+    : splitUserTextByContextLimit(fileContent, config);
   if (segments.length <= 1) {
     return runSingleBidAnalysisPromptTask({ aiService, fileContent: segments[0] || fileContent, task, sectionHint });
   }
@@ -260,9 +297,9 @@ async function runBidAnalysisPromptTaskOnce({ aiService, fileContent, fileSegmen
   return mergeSegmentedAiResults({
     aiService,
     segmentResults,
-    taskPrompt: buildTaskPrompt(task),
+    taskPrompt: buildTaskPrompt(task, config),
     output: task.output,
-    systemPrompt: stableSystemPrompt,
+    systemPrompt: getBidAnalysisSystemPrompt(config),
     sectionHint,
     taskLabel: task.label,
     logTitle: `招标解析合并-${task.label}`,
@@ -447,9 +484,10 @@ async function runBidAnalysisTask({ aiService, workspaceStore, updateTask, check
 
   // Parsing items share system and tender-document messages; warm this prefix per segment before running all items concurrently.
   if (tasksToRun.length > 1) {
+    const configForWarm = typeof aiService?.getConfig === 'function' ? aiService.getConfig() : {};
     await Promise.all(fileSegments.map((segment, index) => warmPromptPrefix({
       aiService,
-      messages: buildTenderContextMessages(segment, sectionHint),
+      messages: buildTenderContextMessages(segment, sectionHint, configForWarm),
       logTitle: fileSegments.length > 1 ? `招标解析-公共前缀预热-第${index + 1}段` : '招标解析-公共前缀预热',
       label: '招标文件',
       onActivity: ({ message }) => updateTask({ status: 'running', progress: doneProgress(currentTasks), logs: [message] }),

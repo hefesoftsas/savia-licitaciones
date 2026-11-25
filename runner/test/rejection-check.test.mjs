@@ -94,3 +94,49 @@ test('acepta Markdown cuando el navegador envía tipo genérico',async()=>{
  const handler=createRejectionCheckHandler({createAiService:()=>({}),createRuntime:()=>({close:async()=>{},runTask:async task=>({validation_result:task.validateOutput({output_content:'{"findings":[]}'}).value})})});
  const result=await handler({fileIds:['bid'],tenderFileIds:[],bidFileIds:['bid'],language:'es',dataProcessingConsent:true,options:{rejectionCheck:false,typoCheck:true,logicCheck:false}},{signal:new AbortController().signal,job:{id:'job'},getCredential:async()=>({provider:'opencode-go',model:'modelo',secret:'clave'}),getFileInfo:async()=>({name:'oferta.md',contentType:'application/octet-stream',bytes:Buffer.from('Contenido de oferta')})});assert.equal(result.status,'success');
 });
+
+test('las instrucciones, validación Pi y respaldos evitan salida en chino cuando los documentos están en español o inglés',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'savia-rejection-lang-'));const captured=[];let checkedCjkJson=false,checkedCjkMd=false;
+ try{
+  const runForLanguage=async language=>{
+   captured.length=0;
+   const handler=createRejectionCheckHandler({temporaryRoot:dir,createAiService:()=>({}),createRuntime:()=>({close:async()=>{},runTask:async task=>{
+    captured.push(task);
+    let output='Análisis preliminar completado.';
+    if(task.output_file==='response.json'){
+     if(task.prompt.includes('TypoCheckFindings'))output=JSON.stringify({findings:[{bidDocumentId:'bid',wrongText:'experiensia',correctText:'experiencia',originalExcerpt:'acredita experiensia'}]});
+     else if(task.prompt.includes('LogicCheckFindings')){
+      const cjkCheck=task.validateOutput({output_content:JSON.stringify({findings:[{bidDocumentId:'bid',title:'未勾选时限却称有约束承诺',originalText:'Texto original',fallacyReason:'Inconsistencia'}]})});
+      assert.ok(cjkCheck.issues.some(issue=>issue.severity==='blocking'));
+      checkedCjkJson=true;
+      output=JSON.stringify({findings:[{bidDocumentId:'bid',title:language==='en'?'Mismatch':'Inconsistencia',fallacyReason:language==='en'?'Conflict':'Contradicción'}]});
+     }else output=JSON.stringify({findings:[{bidDocumentId:'bid',type:'rejectionItem',severity:'high',title:language==='en'?'Missing requirement':'Requisito pendiente',bidEvidence:'acredita experiensia',riskReason:'Requiere revisión'}]});
+    }else if(language==='es'){
+     const mdCheck=task.validateOutput({output_content:'这是中文分析结果，应当被拦截。'});
+     assert.ok(mdCheck.issues.some(issue=>issue.severity==='blocking'));
+     checkedCjkMd=true;
+    }
+    const validation=task.validateOutput({output_content:output});assert.deepEqual(validation.issues,[]);return {validation_result:validation.value};
+   }})});
+   return handler({fileIds:['tender','bid'],tenderFileIds:['tender'],bidFileIds:['bid'],language,dataProcessingConsent:true,options:{rejectionCheck:true,typoCheck:true,logicCheck:true}},{signal:new AbortController().signal,job:{id:`job-${language}`},getCredential:async()=>({provider:'opencode-go',model:'modelo',secret:'clave'}),getFileInfo:async id=>({name:`${id}.txt`,contentType:'text/plain',bytes:Buffer.from(id==='bid'?'La oferta acredita experiensia en proyectos.':'El pliego exige acreditar experiencia.')})});
+  };
+  const esResult=await runForLanguage('es');
+  assert.equal(checkedCjkJson,true);assert.equal(checkedCjkMd,true);assert.ok(captured.length>=6);
+  for(const task of captured){
+   const messages=task.files.find(file=>file.path==='messages.json')?.content||'';
+   assert.doesNotMatch(messages,/使用简体中文|中文字符/);
+   assert.match(task.prompt,/IDIOMA DE SALIDA/);
+   if(task.output_file==='response.json'||messages.includes('第一轮：分析'))assert.match(messages,/IDIOMA DE SALIDA/);
+  }
+  assert.match(esResult.typoCheckResult.findings[0].locationHint,/^Cerca de la línea \d+$/);
+  assert.doesNotMatch(esResult.typoCheckResult.findings[0].reason,/[\u3400-\u9fff]/);
+  assert.doesNotMatch(esResult.logicCheckResult.findings[0].locationHint,/[\u3400-\u9fff]/);
+  assert.doesNotMatch(esResult.logicCheckResult.findings[0].originalText,/[\u3400-\u9fff]/);
+  assert.doesNotMatch(esResult.logicCheckResult.findings[0].suggestion,/[\u3400-\u9fff]/);
+  assert.doesNotMatch(esResult.rejectionCheckResult.findings[0].requirement,/[\u3400-\u9fff]/);
+  assert.doesNotMatch(esResult.rejectionCheckResult.findings[0].suggestion,/[\u3400-\u9fff]/);
+  const enResult=await runForLanguage('en');
+  for(const task of captured)assert.match(task.prompt,/OUTPUT LANGUAGE/);
+  assert.match(enResult.typoCheckResult.findings[0].locationHint,/^Near line \d+$/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});

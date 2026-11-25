@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { ActionButton as Button } from '@/shared/ui/ActionButton';
 import { request } from './api.mjs';
 import { localizeFindingLocation, localizeFindingNote, localizeFindingText } from './blind-check/findingText.mjs';
+import { localizeRejectionFieldText } from './rejection-text-locale';
 import WebDuplicateReport, { type DuplicateReport } from './WebDuplicateReport';
 import type { ReviewFileItem, ReviewJobItem } from './WebReviewAutopilot';
 
@@ -408,7 +409,7 @@ export function WebReviewAutopilotViewer({
                         {fields.map(([field, label]) =>
                           finding[field] ? (
                             <p key={field} className="web-review-viewer-text">
-                              <strong>{label}:</strong> {finding[field]}
+                              <strong>{label}:</strong> {localizeRejectionFieldText(String(finding[field]), language)}
                             </p>
                           ) : null,
                         )}
