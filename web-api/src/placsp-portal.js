@@ -100,7 +100,7 @@ export function parsePlacspDetailHtml(html, fallbackUrl = '') {
   const reference = field('Expediente');
   const title = field('ObjetoContrato');
   const status = field('Estado');
-  const entity = field('OC_con');
+  const entity = field('OC_con') || field('OC_sin');
   if (!reference || !title || !status || !entity) return null;
 
   const dateMatch = /^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}:\d{2})(?::(\d{2}))?)?$/.exec(field('FechaPresentacionOfertaConHora'));
@@ -120,7 +120,7 @@ export function parsePlacspDetailHtml(html, fallbackUrl = '') {
   }
 
   let publicationDate = '';
-  const docTable = /<table\b[^>]*id="[^"]*myTablaDetalleVISUOE[^"]*"[^>]*>([\s\S]*?)<\/table>/i.exec(html)?.[1] || '';
+  const docTable = /<table\b[^>]*id="[^"]*myTablaDetalle(?:PublicacionesPlatAgre)?VISUOE[^"]*"[^>]*>([\s\S]*?)<\/table>/i.exec(html)?.[1] || '';
   if (docTable) {
     let fallbackDate = '';
     for (const [, rowHtml] of docTable.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
@@ -201,7 +201,7 @@ function portalPageHeaders(options = {}) {
   };
 }
 
-export async function fetchPlacspPortalTender(url, { id, publicationDate = '', includeDocuments = false, fetchImpl = fetch, timeoutMs = 12_000 } = {}) {
+export async function fetchPlacspPortalTender(url, { id, publicationDate = '', includeDocuments = false, fetchImpl = fetch, timeoutMs = 15_000 } = {}) {
   const page = officialUrl(url);
   if (!page?.pathname.startsWith('/wps/')) return null;
   const signal = AbortSignal.timeout(timeoutMs);
@@ -246,6 +246,113 @@ async function addDocument(documents, document, url) {
   documents.set(id, {...document, id, url:url.href});
 }
 
+function extractAggregatedPortalUrl(html) {
+  const markup = String(html || '');
+  const hrefMatch = /<a\b[^>]*id="[^"]*:form1:link_EnlaceLicAgr"[^>]*\bhref="([^"]+)"/i.exec(markup)
+    || /<a\b[^>]*\bhref="([^"]+)"[^>]*id="[^"]*:form1:link_EnlaceLicAgr"/i.exec(markup);
+  const textMatch = /<span\b[^>]*id="[^"]*:form1:text_EnlaceLicAgr"[^>]*>([\s\S]*?)<\/span>/i.exec(markup);
+  const candidate = hrefMatch ? decodePlacspMarkup(hrefMatch[1]) : textMatch ? stripMarkup(textMatch[1]) : '';
+  return placsp.validatePlacspUrl(candidate);
+}
+
+function appendExtension(name, extension) {
+  return name.toLowerCase().endsWith('.' + extension) ? name : `${name}.${extension}`;
+}
+
+async function fetchAndaluciaDocuments(parsedUrl, { fetchImpl, signal }) {
+  const expId = parsedUrl.searchParams.get('idExpediente') || '';
+  if (!/^\d+$/.test(expId)) return [];
+  const apiUrl = 'https://www.juntadeandalucia.es/haciendayadministracionpublica/apl/pdc-front-publico/elastic/sirec_pdc_expedientes_details/_search';
+  const response = await fetchImpl(apiUrl, {
+    method: 'POST',
+    headers: {
+      ...placspDocumentHeaders('application/json'),
+      'Content-Type': 'application/json',
+      'Accept-Language': 'es-ES,es;q=0.9',
+    },
+    body: JSON.stringify({ query: { match: { _id: expId } } }),
+    signal,
+  });
+  if (!response?.ok) return [];
+  const payload = await response.json().catch(() => null);
+  const source = payload?.hits?.hits?.[0]?._source;
+  if (!source) return [];
+
+  const docs = [];
+  const seen = new Set();
+  for (const doc of Array.isArray(source.documentos) ? source.documentos : []) {
+    if (doc?.estado !== 'Activo') continue;
+    const validUrl = placsp.validatePlacspUrl(doc.descarga);
+    if (!validUrl || seen.has(validUrl)) continue;
+    seen.add(validUrl);
+    const rawId = String(doc.id ?? '').replace(/[^A-Za-z0-9._-]/g, '');
+    const id = rawId ? `AND-DOC-${rawId}` : `AND-DOC-${docs.length + 1}`;
+    const rawName = String(doc.nombre || doc.categoria || `documento_${rawId || docs.length + 1}.pdf`).trim();
+    const extMatch = /\.(pdf|docx?|xlsx?|zip)$/i.exec(rawName);
+    const extension = extMatch ? extMatch[1].toLowerCase() : 'pdf';
+    const docType = /\bPCAP\b/i.test(doc.categoria || '') ? 'PCAP' : /\bPPT\b/i.test(doc.categoria || '') ? 'PPT' : 'DOC';
+    docs.push({ id, name: appendExtension(rawName, extension), extension, docType, size: null, url: validUrl });
+  }
+  for (const anuncio of Array.isArray(source.anuncios) ? source.anuncios : []) {
+    if (anuncio?.activo === false) continue;
+    const validUrl = placsp.validatePlacspUrl(anuncio?.descarga);
+    if (!validUrl || seen.has(validUrl)) continue;
+    seen.add(validUrl);
+    const tailId = /\/(\d+)$/.exec(validUrl)?.[1] || String(anuncio?.referencia || docs.length + 1).replace(/[^A-Za-z0-9._-]/g, '');
+    const label = anuncio?.tipoAnuncio?.denominacion || 'Anuncio';
+    const ref = anuncio?.referencia ? ` (${anuncio.referencia})` : '';
+    docs.push({
+      id: `AND-AN-${tailId}`,
+      name: `${label}${ref}.pdf`,
+      extension: 'pdf',
+      docType: 'ANUNCIO',
+      size: null,
+      url: validUrl,
+    });
+  }
+  return docs;
+}
+
+async function fetchEuskadiDocuments(aggregatedUrl, { fetchImpl, signal }) {
+  const response = await fetchImpl(aggregatedUrl, { headers: portalPageHeaders(), signal });
+  if (!response?.ok) return [];
+  const html = await response.text().catch(() => '');
+  const docs = [];
+  const seen = new Set();
+  for (const match of html.matchAll(/<a\b[^>]*\bonclick="[^"]*descargarFichero\(['"](\d+)['"]\)[^"]*"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const fileId = match[1];
+    if (seen.has(fileId)) continue;
+    seen.add(fileId);
+    const rawName = stripMarkup(match[2]) || `documento_${fileId}.pdf`;
+    const extMatch = /\.([a-z0-9]{2,5})$/i.exec(rawName);
+    const extension = extMatch ? extMatch[1].toLowerCase() : 'pdf';
+    const docType = /pcap|administrativ/i.test(rawName) ? 'PCAP' : /ppt|t[eé]cnic/i.test(rawName) ? 'PPT' : 'DOC';
+    const url = `https://www.contratacion.euskadi.eus/ac70cPublicidadWar/downloadDokusiREST/descargaFicheroPorIdFichero?idFichero=${encodeURIComponent(fileId)}&R01HNoPortal=true`;
+    docs.push({ id: `EUSK-${fileId}`, name: appendExtension(rawName, extension), extension, docType, size: null, url });
+  }
+  return docs;
+}
+
+async function fetchAggregatedPortalDocuments(aggregatedUrl, { fetchImpl = fetch, signal } = {}) {
+  try {
+    const parsedUrl = new URL(aggregatedUrl);
+    const host = parsedUrl.hostname.toLowerCase();
+    if (host === 'juntadeandalucia.es' || host === 'www.juntadeandalucia.es') {
+      return await fetchAndaluciaDocuments(parsedUrl, { fetchImpl, signal });
+    }
+    if (host === 'contratacion.euskadi.eus' || host.endsWith('.contratacion.euskadi.eus')) {
+      return await fetchEuskadiDocuments(aggregatedUrl, { fetchImpl, signal });
+    }
+    const catalanMatch = /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\/\d+(?:[/?#]|$)/i.exec(aggregatedUrl);
+    if (catalanMatch) {
+      return await placsp.createPlacspService({ fetchImpl }).fetchPscpProcessDocuments('pscp:' + catalanMatch[1], { url: aggregatedUrl });
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 async function extractPortalDocumentsFromHtml(html, pageHref, { fetchImpl = fetch, signal } = {}) {
   const documents = new Map();
   const publications = [];
@@ -281,10 +388,16 @@ async function extractPortalDocumentsFromHtml(html, pageHref, { fetchImpl = fetc
       if (foundAttachments) break;
     }
   }
+  if (documents.size === 0) {
+    const aggregatedUrl = extractAggregatedPortalUrl(html);
+    if (aggregatedUrl) {
+      return fetchAggregatedPortalDocuments(aggregatedUrl, { fetchImpl, signal });
+    }
+  }
   return [...documents.values()];
 }
 
-export async function fetchPlacspPortalDocuments(url, { fetchImpl = fetch, timeoutMs = 12_000 } = {}) {
+export async function fetchPlacspPortalDocuments(url, { fetchImpl = fetch, timeoutMs = 15_000 } = {}) {
   const page = officialUrl(url);
   if (!page?.pathname.startsWith('/wps/')) return [];
   const signal = AbortSignal.timeout(timeoutMs);

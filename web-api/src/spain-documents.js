@@ -6,7 +6,7 @@ import { cached, existingFile, fileTypes, maxFileBytes, sameOrigin, storeDownloa
 export function fetchPlacspDocuments(id, { url, reference } = {}) {
   const catalanId = /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\/\d+(?:[/?#]|$)/i.exec(url || '')?.[1];
   const pscpId = id.startsWith('pscp:') ? id : catalanId && 'pscp:' + catalanId;
-  if (pscpId) return placsp.createPlacspService().fetchPscpProcessDocuments(pscpId, { reference });
+  if (pscpId) return placsp.createPlacspService().fetchPscpProcessDocuments(pscpId, { reference, url });
   if (url) return fetchPlacspPortalDocuments(url);
   return Promise.resolve([]);
 }
@@ -121,9 +121,14 @@ export async function spainProjectDocuments(request, env, ownerId, projectId, do
     const host = new URL(safeUrl).hostname.toLowerCase();
     isTedPdfHost = host === 'ted.europa.eu';
     const isPlacspPortalHost = host === 'contrataciondelestado.es' || host.endsWith('.contrataciondelestado.es') || host === 'contrataciondelsectorpublico.gob.es' || host.endsWith('.contrataciondelsectorpublico.gob.es');
+    const isRegionalSpainHost = host === 'contratacion.euskadi.eus' || host.endsWith('.contratacion.euskadi.eus') || host === 'juntadeandalucia.es' || host.endsWith('.juntadeandalucia.es');
     response = await fetch(safeUrl, {
       redirect: isPlacspPortalHost ? 'manual' : 'follow',
-      headers: isTedPdfHost ? { Accept: fileTypes[doc.extension] } : isPlacspPortalHost ? placspDocumentHeaders(fileTypes[doc.extension]) : undefined,
+      headers: isTedPdfHost
+        ? { Accept: fileTypes[doc.extension] }
+        : (isPlacspPortalHost || isRegionalSpainHost)
+          ? placspDocumentHeaders(fileTypes[doc.extension])
+          : undefined,
       signal: AbortSignal.timeout(60_000),
     });
   } catch {

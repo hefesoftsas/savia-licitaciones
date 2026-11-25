@@ -1168,3 +1168,109 @@ test('fetchPlacspPortalDocuments envía cabeceras de navegador y extrae document
   assert.equal(seenHeaders[0].headers['Accept-Language'], 'es-ES,es;q=0.9');
   assert.deepEqual(docs.map(d => d.name), ['Pliego.pdf', 'PCAP_CO-034_2026.pdf']);
 });
+
+test('validatePlacspUrl y portales agregados (Andalucía, Euskadi y Cataluña)', async () => {
+  assert.ok(placsp.validatePlacspUrl('https://www.juntadeandalucia.es/haciendayadministracionpublica/apl/pdc_sirec/perfiles-licitaciones/detalle-licitacion.jsf?idExpediente=1039564'));
+  assert.ok(placsp.validatePlacspUrl('https://www.juntadeandalucia.es/haciendayadministracionpublica/apl/pdc_sirec_documentacion/rest/descargar/documento/446917'));
+  assert.equal(placsp.validatePlacspUrl('https://www.juntadeandalucia.es/otro/sitio.pdf'), '');
+  assert.ok(placsp.validatePlacspUrl('https://www.contratacion.euskadi.eus/ac70cPublicidadWar/downloadDokusiREST/descargaFicheroPorIdFichero?idFichero=6568269&R01HNoPortal=true'));
+
+  const makeAgrHtml = agrUrl => `
+    <span id="view:form1:text_Expediente">CONTR 2026 0000401891</span>
+    <span id="view:form1:text_ObjetoContrato">Suministro varas</span>
+    <span id="view:form1:text_Estado">Publicada</span>
+    <span id="view:form1:text_OC_sin">Agencia Andaluza</span>
+    <span id="view:form1:text_CPV">31680000-6 Material eléctrico.</span>
+    <span id="view:form1:text_LugarEjecucion">España - Andalucía</span>
+    <a id="view:form1:link_EnlaceLicAgr" href="${agrUrl}"><span id="view:form1:text_EnlaceLicAgr">${agrUrl}</span></a>
+    <table id="myTablaDetallePublicacionesPlatAgreVISUOE">
+      <tr><td>25/11/2026</td><td>Anuncio de Licitación</td><td>Perfil del contratante</td></tr>
+    </table>
+  `;
+
+  // 1. Metadata parsing for Plataformas Agregadas
+  const andUrl = 'https://www.juntadeandalucia.es/haciendayadministracionpublica/apl/pdc_sirec/perfiles-licitaciones/detalle-licitacion.jsf?idExpediente=1039564';
+  const parsedAgr = placspPortal.parsePlacspDetailHtml(makeAgrHtml(andUrl), 'https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=AGR1');
+  assert.equal(parsedAgr.entity, 'Agencia Andaluza');
+  assert.equal(parsedAgr.publicationDate, '2026-11-25');
+  assert.equal(parsedAgr.territory, 'Andalucía');
+  assert.deepEqual(parsedAgr.cpvCodes, ['31680000']);
+
+  // 2. Andalucía documents + announcements
+  const andDocs = await placspPortal.fetchPlacspPortalDocuments(
+    'https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=AND1',
+    {
+      fetchImpl: async (href, opts = {}) => {
+        if (String(href).includes('sirec_pdc_expedientes_details')) {
+          assert.equal(opts.method, 'POST');
+          assert.equal(JSON.parse(opts.body).query.match._id, '1039564');
+          return Response.json({
+            hits: {
+              hits: [{
+                _source: {
+                  documentos: [
+                    { id: 446917, estado: 'Activo', categoria: 'PPT - Pliego de prescripciones técnicas', nombre: 'PPT.PDF', descarga: 'https://www.juntadeandalucia.es/haciendayadministracionpublica/apl/pdc_sirec_documentacion/rest/descargar/documento/446917' },
+                    { id: 446916, estado: 'Inactivo', categoria: 'DOC', nombre: 'Viejo.pdf', descarga: 'https://www.juntadeandalucia.es/haciendayadministracionpublica/apl/pdc_sirec_documentacion/rest/descargar/documento/446916' },
+                  ],
+                  anuncios: [
+                    { activo: true, referencia: '2026-0002011325', tipoAnuncio: { denominacion: 'Anuncio de licitación' }, descarga: 'https://www.juntadeandalucia.es/haciendayadministracionpublica/apl/pdc_sirec_documentacion/rest/descargar/anuncio/963485' },
+                  ],
+                },
+              }],
+            },
+          });
+        }
+        return new Response(makeAgrHtml(andUrl), { status: 200, headers: { 'content-type': 'text/html' } });
+      },
+    }
+  );
+  assert.deepEqual(andDocs.map(d => [d.id, d.name, d.docType]), [
+    ['AND-DOC-446917', 'PPT.PDF', 'PPT'],
+    ['AND-AN-963485', 'Anuncio de licitación (2026-0002011325).pdf', 'ANUNCIO'],
+  ]);
+
+  // 3. Euskadi documents
+  const euskUrl = 'https://www.contratacion.euskadi.eus/webkpe00-kpeperfi/es/contenidos/anuncio_contratacion/expek_guk24836/es_doc/index.html';
+  const euskDocs = await placspPortal.fetchPlacspPortalDocuments(
+    'https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=EUSK1',
+    {
+      fetchImpl: async href => {
+        if (String(href).includes('contratacion.euskadi.eus')) {
+          return new Response('<a onclick="descargarFichero(\'6568269\')"><i>26924836_Resolucion.pdf</i></a>', { status: 200, headers: { 'content-type': 'text/html' } });
+        }
+        return new Response(makeAgrHtml(euskUrl), { status: 200, headers: { 'content-type': 'text/html' } });
+      },
+    }
+  );
+  assert.equal(euskDocs.length, 1);
+  assert.equal(euskDocs[0].id, 'EUSK-6568269');
+  assert.equal(euskDocs[0].name, '26924836_Resolucion.pdf');
+  assert.match(euskDocs[0].url, /descargaFicheroPorIdFichero\?idFichero=6568269/);
+
+  // 4. Cataluña direct portal API documents (dades.publicacio...docs)
+  const catUrl = 'https://contractaciopublica.cat/ca/detall-publicacio/42ed8606-a277-4602-8702-182f090ff70d/300951145';
+  const catDocs = await placspPortal.fetchPlacspPortalDocuments(
+    'https://contrataciondelestado.es/wps/poc?uri=deeplink:detalle_licitacion&idEvl=CAT1',
+    {
+      fetchImpl: async href => {
+        if (String(href).includes('/portal-api/detall-publicacio-expedient/42ed8606-a277-4602-8702-182f090ff70d/300951145')) {
+          return Response.json({
+            dades: {
+              publicacio: {
+                dadesPublicacio: {
+                  plecsDeClausulesAdministratives: {
+                    docs: [{ id: 302842119, titol: 'Plec.pdf', hash: '4AC345', mida: 884700 }],
+                  },
+                },
+              },
+            },
+          });
+        }
+        return new Response(makeAgrHtml(catUrl), { status: 200, headers: { 'content-type': 'text/html' } });
+      },
+    }
+  );
+  assert.equal(catDocs.length, 1);
+  assert.equal(catDocs[0].id, 'PCAP-302842119');
+  assert.equal(catDocs[0].url, 'https://contractaciopublica.cat/portal-api/descarrega-document/302842119/4AC345');
+});

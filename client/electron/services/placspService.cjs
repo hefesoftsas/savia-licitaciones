@@ -166,14 +166,19 @@ function validatePlacspUrl(rawUrl) {
   try {
     const url = new URL(rawUrl);
     if (url.protocol !== 'https:') return '';
+    const host = url.hostname.toLowerCase();
     if (
-      url.hostname === 'contrataciondelestado.es' ||
-      url.hostname.endsWith('.contrataciondelestado.es') ||
-      url.hostname === 'contrataciondelsectorpublico.gob.es' ||
-      url.hostname.endsWith('.contrataciondelsectorpublico.gob.es') ||
-      url.hostname === 'contractaciopublica.cat' ||
-      url.hostname.endsWith('.contractaciopublica.cat') ||
-      url.hostname === 'ted.europa.eu'
+      host === 'contrataciondelestado.es' ||
+      host.endsWith('.contrataciondelestado.es') ||
+      host === 'contrataciondelsectorpublico.gob.es' ||
+      host.endsWith('.contrataciondelsectorpublico.gob.es') ||
+      host === 'contractaciopublica.cat' ||
+      host.endsWith('.contractaciopublica.cat') ||
+      host === 'contratacion.euskadi.eus' ||
+      host.endsWith('.contratacion.euskadi.eus') ||
+      ((host === 'juntadeandalucia.es' || host === 'www.juntadeandalucia.es') &&
+        url.pathname.startsWith('/haciendayadministracionpublica/apl/pdc')) ||
+      host === 'ted.europa.eu'
     ) {
       return url.toString();
     }
@@ -403,7 +408,7 @@ function mapPscpSocrataRows(rows) {
 }
 
 function extractPscpDocumentsFromPublicationJson(data) {
-  const pub = data?.publicacio?.dadesPublicacio;
+  const pub = data?.publicacio?.dadesPublicacio || data?.dades?.publicacio?.dadesPublicacio;
   if (!pub || typeof pub !== 'object') return [];
   const groups = [
     { key: 'plecsDeClausulesAdministratives', prefix: 'PCAP' },
@@ -421,7 +426,7 @@ function extractPscpDocumentsFromPublicationJson(data) {
     if (!section || typeof section !== 'object') continue;
     const lists = Array.isArray(section)
       ? [section]
-      : ['ca', 'es', 'en', 'oc'].map(lang => section[lang]).filter(Array.isArray);
+      : ['docs', 'ca', 'es', 'en', 'oc'].map(lang => section[lang]).filter(Array.isArray);
     for (const list of lists) {
       for (const item of list) {
         const docId = item?.id;
@@ -659,7 +664,21 @@ function createPlacspService({ fetchImpl = globalThis.fetch } = {}) {
     return { updated: feedUpdated, entries: [...byId.values()] };
   }
 
-  async function fetchPscpProcessDocuments(processId, { reference = '', timeoutMs = 15_000 } = {}) {
+  async function fetchPscpProcessDocuments(processId, { reference = '', url = '', timeoutMs = 15_000 } = {}) {
+    const directMatch = /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\/(\d+)(?:[/?#]|$)/i.exec(String(url || '').trim());
+    if (directMatch) {
+      const apiUrl = `https://contractaciopublica.cat/portal-api/detall-publicacio-expedient/${directMatch[1]}/${directMatch[2]}`;
+      const directRes = await fetchImpl(apiUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+        signal: AbortSignal.timeout(timeoutMs),
+      }).catch(() => null);
+      if (directRes?.ok) {
+        const directData = await directRes.json().catch(() => null);
+        const directDocs = extractPscpDocumentsFromPublicationJson(directData);
+        if (directDocs.length) return directDocs;
+      }
+    }
     const rawId = String(processId || '').replace(/^pscp:/, '').trim();
     if (!rawId && !reference) return [];
     const whereClause = rawId
