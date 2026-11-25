@@ -5,7 +5,7 @@ import { Input } from '@/shared/ui/primitives/input';
 import { SelectField } from '@/shared/ui/SelectField';
 import { useToast } from '@/shared/ui/ToastProvider';
 import { request } from './api.mjs';
-import { formatActivityEventLabel, type JobActivityEvent } from './autopilot-state.mjs';
+import { formatActivityEventLabel, getActiveJobStatusLabel, summarizeRunnerConnection, type JobActivityEvent, type RunnerInfo } from './autopilot-state.mjs';
 import { WebJobProgress } from './WebJobProgress';
 import WebRequirementSupports from './WebRequirementSupports';
 import WebWordDocument from './WebWordDocument';
@@ -166,6 +166,16 @@ function describeUnresolvedRequirement(
   };
 }
 
+function formatElapsed(startIso: string | undefined, nowMs: number): string {
+  if (!startIso) return '';
+  const startMs = Date.parse(startIso);
+  if (!Number.isFinite(startMs)) return '';
+  const totalSec = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return mins > 0 ? `${mins}m ${String(secs).padStart(2, '0')}s` : `${secs}s`;
+}
+
 function formatRevisionTimestamp(iso: string | undefined, language: Language): string {
   if (!iso) return '';
   const date = new Date(iso);
@@ -286,6 +296,12 @@ export function WebWorkflowAutopilot(props: WebWorkflowAutopilotProps) {
   const [resolvingReqId, setResolvingReqId] = useState<string | null>(null);
   const [resolveEvidence, setResolveEvidence] = useState('');
   const [savingReqId, setSavingReqId] = useState<string | null>(null);
+  const [runnerSummary, setRunnerSummary] = useState<{
+    state: 'unknown' | 'online' | 'busy' | 'offline';
+    runnerName: string | null;
+    runningJobs: number;
+  }>({ state: 'unknown', runnerName: null, runningJobs: 0 });
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   const noopDirty = useCallback(() => undefined, []);
 
@@ -548,6 +564,9 @@ export function WebWorkflowAutopilot(props: WebWorkflowAutopilotProps) {
     );
   }, [latestFixJob, generatedTechnicalJob, projectId, applyResolvedRequirements, showToast, en]);
 
+  const runningJob = activeEvalJob || activeFixJob;
+  const isWorking = autopilotBusy || Boolean(runningJob) || syncingEvaluation;
+
   useEffect(() => {
     if (!activeEvalJob && !activeFixJob) return;
     const timer = window.setInterval(() => {
@@ -555,6 +574,43 @@ export function WebWorkflowAutopilot(props: WebWorkflowAutopilotProps) {
     }, 3000);
     return () => window.clearInterval(timer);
   }, [activeEvalJob?.id, activeFixJob?.id, loadJobs]);
+
+  useEffect(() => {
+    if (!isWorking) return;
+    setNowTick(Date.now());
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [isWorking]);
+
+  useEffect(() => {
+    if (!isWorking || !runningJob) {
+      setRunnerSummary({ state: 'unknown', runnerName: null, runningJobs: 0 });
+      return;
+    }
+    let alive = true;
+    const loadRunner = async () => {
+      try {
+        const data = await request<{
+          runners?: RunnerInfo[];
+          serverTime?: string;
+        }>('/api/runners');
+        if (!alive || !mountedRef.current) return;
+        const summary = summarizeRunnerConnection(
+          data.runners || [],
+          Date.parse(data.serverTime || '') || Date.now(),
+        ) as { state: 'unknown' | 'online' | 'busy' | 'offline'; runnerName: string | null; runningJobs: number };
+        setRunnerSummary(summary);
+      } catch {
+        // Retry on next interval.
+      }
+    };
+    void loadRunner();
+    const timer = window.setInterval(() => void loadRunner(), 5000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [isWorking, runningJob?.id]);
 
   useEffect(() => {
     if (!activeFixJob) {
@@ -902,12 +958,43 @@ export function WebWorkflowAutopilot(props: WebWorkflowAutopilotProps) {
     }
   };
 
-  const runningJob = activeEvalJob || activeFixJob;
-  const isWorking = autopilotBusy || Boolean(runningJob) || syncingEvaluation;
   const completedTasks = tasks.filter(t => t.completed).length;
   const meetsCount = requirements.filter(r => r.status === 'meets').length;
   const pendingReqCount = requirements.filter(r => r.status === 'pending').length;
   const unresolvedReqCount = requirements.length - meetsCount;
+
+  const activeStartIso = runningJob?.createdAt || runningJob?.updatedAt;
+  const elapsedLabel = formatElapsed(activeStartIso, nowTick);
+  const startMs = activeStartIso ? Date.parse(activeStartIso) : NaN;
+  const queuedSec =
+    runningJob?.state === 'queued' && Number.isFinite(startMs)
+      ? Math.max(0, Math.floor((nowTick - startMs) / 1000))
+      : 0;
+  const progressMeta = runningJob
+    ? [
+        runningJob.state === 'queued'
+          ? en
+            ? 'Queued'
+            : 'En cola'
+          : en
+            ? 'Running'
+            : 'Ejecutando',
+        elapsedLabel
+          ? en
+            ? `Elapsed: ${elapsedLabel}`
+            : `Transcurrido: ${elapsedLabel}`
+          : '',
+        runnerSummary.state === 'offline'
+          ? en
+            ? 'No runner online'
+            : 'Sin runner conectado'
+          : runnerSummary.runnerName
+            ? `Runner: ${runnerSummary.runnerName}`
+            : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
 
   const fixQueuedTitles = activeFixJob?.payload?.workflowRequirements?.map(item => item.title).filter(Boolean) || [];
   const fixLogLines = useMemo(() => {
@@ -995,12 +1082,40 @@ export function WebWorkflowAutopilot(props: WebWorkflowAutopilotProps) {
                     <Loader2 size={15} className="animate-spin" aria-hidden="true" />
                     <span>{statusLine}</span>
                   </div>
-                  {runningJob && (
-                    <Button icon={Square} size="sm" variant="outline" onClick={() => void cancelActiveJob()}>
-                      {en ? 'Cancel' : 'Cancelar'}
-                    </Button>
-                  )}
+                  <div className="web-inline">
+                    {progressMeta && <span className="web-feasibility-progress-meta">{progressMeta}</span>}
+                    {runningJob && (
+                      <Button icon={Square} size="sm" variant="outline" onClick={() => void cancelActiveJob()}>
+                        {en ? 'Cancel' : 'Cancelar'}
+                      </Button>
+                    )}
+                  </div>
                 </div>
+                {runningJob?.state === 'queued' ? (
+                  runnerSummary.state === 'offline' ? (
+                    <p className="web-review-hint" role="alert">
+                      {en
+                        ? 'No local runner is currently connected. Connect Savia Connector under "Connection & AI" to run this task, or click Cancel.'
+                        : 'No hay ningún runner local conectado. Conecta tu Savia Connector en «Conexión e IA» para ejecutar esta tarea, o pulsa Cancelar.'}
+                    </p>
+                  ) : runnerSummary.state === 'busy' ? (
+                    <p className="web-review-hint">
+                      {en
+                        ? `Runner${runnerSummary.runnerName ? ` (${runnerSummary.runnerName})` : ''} is currently busy with another task and will pick this up next.`
+                        : `El runner${runnerSummary.runnerName ? ` (${runnerSummary.runnerName})` : ''} está ocupado con otra tarea y tomará esta en cuanto termine.`}
+                    </p>
+                  ) : runnerSummary.state === 'online' && queuedSec >= 20 ? (
+                    <p className="web-review-hint">
+                      {en
+                        ? 'The runner is online but has not claimed this job yet. Make sure Savia Connector is up to date and includes the Word helper (OpenXmlHelper).'
+                        : 'El runner está en línea pero aún no ha tomado esta tarea. Comprueba que Savia Connector esté actualizado y cuente con el asistente Word (OpenXmlHelper).'}
+                    </p>
+                  ) : (
+                    <p className="web-review-hint">{getActiveJobStatusLabel(runningJob, language, runnerSummary.state)}</p>
+                  )
+                ) : runningJob?.state === 'running' && !runningJob.progress ? (
+                  <p className="web-review-hint">{getActiveJobStatusLabel(runningJob, language, runnerSummary.state)}</p>
+                ) : null}
                 {runningJob && (
                   <WebJobProgress state={runningJob.state} progress={runningJob.progress} language={language} />
                 )}
