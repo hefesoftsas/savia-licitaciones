@@ -305,6 +305,11 @@ function createSecopService({ configStore, cacheDirectory } = {}) {
 
   function buildSearchParams(config, searchParams, limit, offset) {
     const whereParts = [];
+    if (config === DATASETS['secop-ii'] && searchParams.openOnly === true) {
+      const today = new Date().toISOString().slice(0, 10);
+      whereParts.push("estado_del_procedimiento = 'Publicado'");
+      whereParts.push(`fecha_de_recepcion_de >= '${today}T00:00:00.000'`);
+    }
     if (/^\d{6}$/.test(String(searchParams.classificationClass || ''))) {
       whereParts.push(orLikeClause(config.classificationFields, String(searchParams.classificationClass)));
     }
@@ -345,10 +350,20 @@ function createSecopService({ configStore, cacheDirectory } = {}) {
     const sortDirection = searchParams.sortDirection === 'asc' ? 'ASC' : 'DESC';
     // Socrata's compound signing-date sort can time out on the contracts dataset.
     const sortBySigningDate = config === DATASETS.contratos && sortField === config.orderField;
+    const nullableSortFields = new Set([config.orderField, config.publicationDateFields[0], config.deadlineFields[0], config.valueFields[0]].filter(Boolean));
+    const hasKeyword = Boolean(String(searchParams.keyword || '').trim());
+    let orderExpr = sortBySigningDate ? `${sortField} ${sortDirection}` : `${sortField} ${sortDirection}, ${config.idField} ASC`;
+    if (sortDirection === 'DESC' && nullableSortFields.has(sortField)) {
+      if (hasKeyword && !sortBySigningDate) {
+        orderExpr = `${sortField} DESC NULLS LAST, ${config.idField} ASC`;
+      } else {
+        whereParts.push(`${sortField} is not null`);
+      }
+    }
     const full = {
       $limit: limit + 1,
       $offset: offset,
-      $order: sortBySigningDate ? `${sortField} ${sortDirection}` : `${sortField} ${sortDirection}, ${config.idField} ASC`,
+      $order: orderExpr,
     };
     if (searchParams.keyword) full.$q = searchParams.keyword;
     const where = whereParts.filter(Boolean).join(' and ');

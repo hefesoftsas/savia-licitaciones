@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 
-const maxFileBytes = 50 * 1024 * 1024;
+const maxDedupFileBytes = 5 * 1024 * 1024;
 
 export function secopDocumentHeaders(accept) {
   return {
@@ -20,7 +20,7 @@ async function fingerprint(item, deadline) {
   const remaining = deadline - Date.now();
   if (remaining <= 0) return null;
   try {
-    const response = await fetch(secopFileUrl(item.id), {redirect:'manual', headers:secopDocumentHeaders(), signal:AbortSignal.timeout(Math.min(5000, remaining))});
+    const response = await fetch(secopFileUrl(item.id), {redirect:'manual', headers:secopDocumentHeaders(), signal:AbortSignal.timeout(Math.min(2500, remaining))});
     const mime = response.headers.get('content-type') || '';
     const length = response.headers.get('content-length');
     if (!response.ok || !response.body || /(?:text\/html|javascript|json)/i.test(mime) || (length && Number(length)!==item.size)) {
@@ -49,14 +49,14 @@ async function fingerprint(item, deadline) {
 export async function deduplicateSecopDocuments(items) {
   const groups = new Map();
   for (const item of items) {
-    if (!Number.isSafeInteger(item.size) || item.size<=0 || item.size>maxFileBytes) continue;
+    if (!Number.isSafeInteger(item.size) || item.size<=0 || item.size>maxDedupFileBytes) continue;
     const group = groups.get(item.size) || [];
     group.push(item);
     groups.set(item.size,group);
   }
   const candidates = [...groups.values()].filter(group=>group.length>1).flat();
   const fingerprints = new Map();
-  const deadline = Date.now() + 20000;
+  const deadline = Date.now() + 4000;
   let next = 0;
   await Promise.all(Array.from({length:Math.min(5,candidates.length)},async()=>{
     while (next<candidates.length && Date.now()<deadline) {

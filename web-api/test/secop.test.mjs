@@ -49,6 +49,16 @@ test('busca datos públicos y guarda una oportunidad aislada por usuario', async
     assert.equal(calls.length,1,'repeated query uses server cache');
     await post('/api/secop/search', { dataset:'secop-ii', keyword:'salud', department:'Bogotá', fresh:true }, alice);
     assert.equal(calls.length,2,'refresh bypasses cached results');
+    assert.match(calls.at(-1).searchParams.get('$order'), /DESC NULLS LAST/);
+    const browseDefault = await post('/api/secop/search', { dataset: 'secop-ii' }, alice);
+    assert.equal(browseDefault.status, 200);
+    assert.match(calls.at(-1).searchParams.get('$where'), /fecha_de_publicacion_del is not null/);
+    const browseOpenOnly = await post('/api/secop/search', { dataset: 'secop-ii', openOnly: true }, alice);
+    assert.equal(browseOpenOnly.status, 200);
+    const openWhere = calls.at(-1).searchParams.get('$where');
+    assert.match(openWhere, /estado_del_procedimiento = 'Publicado'/);
+    assert.match(openWhere, /fecha_de_recepcion_de >= '/);
+    assert.match(openWhere, /fecha_de_publicacion_del is not null/);
     const filtered = await post('/api/secop/search', { dataset:'secop-ii',department:['Bogotá','Antioquia'],minValue:100,sortBy:'value',sortDirection:'asc',columnFilters:{entity:'Entidad'} },alice);
     assert.equal(filtered.status,200,await filtered.clone().text());
     const where = calls.at(-1).searchParams.get('$where'); assert.match(where,/Bogotá/); assert.match(where,/Antioquia/); assert.match(where,/100/); assert.match(where,/Entidad/); assert.match(calls.at(-1).searchParams.get('$order'),/ASC/);
@@ -60,6 +70,7 @@ test('busca datos públicos y guarda una oportunidad aislada por usuario', async
       const query = calls.at(-1).searchParams;
       assert.equal(query.get('$q'), 'consultoría');
       assert.equal(query.get('$order'), 'fecha_de_firma DESC');
+      assert.match(query.get('$where'), /fecha_de_firma is not null/);
       assert.equal(query.get('$offset'), String(offset));
     }
     const timeout = await post('/api/secop/search', { ...contracts, keyword: 'consulta lenta' }, alice);
@@ -150,7 +161,12 @@ test('busca datos públicos y guarda una oportunidad aislada por usuario', async
     for(const [id,state] of [['zz-older','cancelled'],['aa-newer','failed']]) await db.prepare("INSERT INTO jobs(id,project_id,owner_id,kind,client_request_id,payload_json,state,created_at,updated_at) VALUES(?,?,?,'secop.import-zip',?,'{\"documentId\":\"44\"}',?,'9999-01-01','9999-01-01')").bind(id,project.id,owner,id,state).run();
     const sameTime=await (await req(documentsPath,{headers:{cookie:alice}})).json();assert.equal(sameTime.items[0].zipJob.id,'aa-newer');
     await db.prepare("DELETE FROM secop_search_cache WHERE cache_key LIKE 'secop-document-snapshot:%'").run();
+    const emptyCatalog = await req('/api/secop/documents?portfolioId=CO1.BDOS.9990&offset=0', { headers: { cookie: alice } });
+    assert.equal(emptyCatalog.status, 200);
+    assert.deepEqual((await emptyCatalog.json()).data.items, []);
+    assert.equal(await db.prepare("SELECT 1 FROM secop_search_cache WHERE cache_key = 'secop-document-snapshot:v1:CO1.BDOS.9990'").first(), null);
     mode = 'partial'; const partialListing = await req(documentsPath, { headers: { cookie: alice } }); assert.equal((await partialListing.json()).partial, true);
+    assert.equal(await db.prepare("SELECT 1 FROM secop_search_cache WHERE cache_key = 'secop-document-snapshot:v1:CO1.BDOS.123'").first(), null);
     const downloaded = await req(`/api/projects/${project.id}/files/${files[0].id}`, { headers: { cookie: alice } }); assert.equal(await downloaded.text(), '%PDF-1.4 fixture');
     mode='valid';
     const batchCreated=await post('/api/projects/from-secop',{process:result.data.items[0],documentIds:['42','999','44']},bob);assert.equal(batchCreated.status,201,await batchCreated.clone().text());const batchProject=(await batchCreated.json()).project;

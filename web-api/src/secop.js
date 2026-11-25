@@ -707,6 +707,7 @@ export async function searchSecop(request, env, ownerId) {
     const result = await searchTed(env, { ...params, publicationYear: input.publicationYear, openOnly: input.openOnly === true, fresh: input.fresh === true, language: input.language === 'en' ? 'en' : 'es' }, ownerId);
     return Response.json(result, { status: result.success ? 200 : 502 });
   }
+  if (input.dataset === 'secop-ii' && input.openOnly === true) params.openOnly = true;
   const key = 'search:' + await searchCacheHash([ownerId,params]);
   const result = await cached(env,key,60*60*1000,() => service(input.language).searchProcesses(params),input.fresh === true);
   return Response.json(result, { status: result.success ? 200 : result.error === 'secop_source_timeout' ? 504 : 502 });

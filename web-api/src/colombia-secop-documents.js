@@ -62,7 +62,7 @@ async function secopDocumentPage(env, api, portfolioId, offset) {
   const now = Date.now();
   const row = await env.DB.prepare('SELECT response_json FROM secop_search_cache WHERE cache_key=? AND expires_at>?').bind(key, now).first();
   let result = row ? JSON.parse(row.response_json) : await load();
-  if (!row && result.success) {
+  if (!row && result.success && !result.data.partial && result.data.items.length > 0) {
     const json = JSON.stringify(result);
     if (new TextEncoder().encode(json).byteLength < 900000) {
       const saved = await env.DB.prepare(`INSERT INTO secop_search_cache(cache_key,response_json,expires_at) VALUES(?,?,?)

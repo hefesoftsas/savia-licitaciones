@@ -23,6 +23,7 @@ type ZipJob = { id: string; state: string; result: { message?: string; imported?
 type OfficialDocument = { id: string; name: string; extension: string; imported: boolean; zipJob?: ZipJob };
 type ProjectJob = ZipJob & { kind: string };
 const opportunitySearchPolicies: Partial<Record<SecopDataset, { defaultOpenOnly: boolean }>> = {
+  'secop-ii': { defaultOpenOnly: true },
   placsp: { defaultOpenOnly: true },
   ted: { defaultOpenOnly: true },
 };
