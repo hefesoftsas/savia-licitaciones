@@ -32,7 +32,7 @@ test('omite rutas que salen del archivo y no escribe en disco', () => {
 test('el runner descarga solo de SECOP y entrega los archivos antes de confirmar', async () => {
   const { createSecopZipHandler } = await import('../secop-zip.mjs');
   const events = [], bytes = archive([['pliego.pdf', '%PDF-1.7\nprueba'], ['notas.txt', 'texto']]);
-  const handle = createSecopZipHandler({ fetchImpl: async (url, options) => { events.push('download'); assert.equal(url.origin, 'https://community.secop.gov.co'); assert.equal(url.pathname, '/Public/Archive/RetrieveFile/Index'); assert.equal(url.searchParams.get('DocumentId'), '42'); assert.equal(options.redirect, 'manual'); return new Response(bytes); } });
+  const handle = createSecopZipHandler({ fetchImpl: async (url, options) => { events.push('download'); assert.equal(url.origin, 'https://community.secop.gov.co'); assert.equal(url.pathname, '/Public/Archive/RetrieveFile/Index'); assert.equal(url.searchParams.get('DocumentId'), '42'); assert.equal(options.redirect, 'manual'); assert.match(options.headers?.['user-agent'] || '', /^Mozilla\/5\.0\b/i); return new Response(bytes); } });
   const result = await handle({ documentId: '42' }, { signal: new AbortController().signal, stageSecopFile: async (index, file) => { events.push(`stage:${index}`); assert.equal(file.name, 'pliego.pdf'); assert.equal(file.bytes.toString(), '%PDF-1.7\nprueba'); }, commitSecopFiles: async info => { events.push('commit'); assert.deepEqual(info, { count: 1, skipped: 1 }); return { imported: 1 }; } });
   assert.deepEqual(events, ['download', 'stage:0', 'commit']); assert.deepEqual(result, { imported: 1, skipped: 1 });
 });
@@ -65,6 +65,7 @@ test('descarga documentos individuales y solicita verificación humana si SECOP 
   const handle = createSecopZipHandler({
     fetchImpl: async (_url, options) => {
       attempts++;
+      assert.match(options.headers?.['user-agent'] || '', /^Mozilla\/5\.0\b/i);
       if (attempts === 1) return new Response('<html>captcha</html>', { status: 403, headers: { 'content-type': 'text/html' } });
       assert.equal(options.headers?.cookie, 'secop_session=ok');
       return new Response('%PDF-1.7\nverificado', { headers: { 'content-type': 'application/pdf' } });

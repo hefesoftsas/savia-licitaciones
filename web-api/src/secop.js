@@ -1,9 +1,6 @@
-import {deduplicateSecopDocuments, secopFileUrl} from './secop-document-dedup.js';
 import {
-  fetchPlacspPortalDocuments,
   fetchPlacspPortalTender,
   isPortalTenderId,
-  placspDocumentHeaders,
 } from './placsp-portal.js';
 import {
   PLACSP_CONTRACT_TYPE_CODES,
@@ -27,257 +24,39 @@ import {
 import {getLicitTender, isLicitTenderId, searchLicit} from './licit.js';
 import {upsertPlacspEntries} from './placsp-store.js';
 import {findRecentBoeTenders} from './placsp-boe.js';
-import {uploadSecopStream} from './secop-stream.js';
-import {cleanupDesktopUploads,uploadLeaseMs} from './desktop-file-cleanup.js';
-import secop from '../../client/electron/services/secopService.cjs';
+import {cached, projectProcess, sameOrigin} from './secop-storage.js';
+import {
+  colombiaSecopDocumentCatalog,
+  colombiaSecopManualDownloadUrl,
+  colombiaSecopProjectDocuments,
+  safeColombiaSecopUrl,
+  secopService as service,
+} from './colombia-secop-documents.js';
+import {
+  fetchPlacspDocuments,
+  officialSpainDocuments,
+  resolveTedDocuments,
+  spainDocumentCatalog,
+  spainManualDownloadUrls,
+  spainProjectDocuments,
+} from './spain-documents.js';
 import placsp from '../../client/electron/services/placspService.cjs';
 
 const sources = ['secop-ii', 'secop-i', 'contratos', 'placsp', 'ted'];
 const projectSources = ['secop-i', 'secop-ii', 'placsp', 'ted'];
 const PLACSP_SYNC_TTL_MS = 30 * 60 * 1000;
-function sameOrigin(request, env) { return request.headers.get('origin') === new URL(env.BETTER_AUTH_URL).origin; }
 async function body(request) { try { return await request.json(); } catch { return null; } }
-const maxFileBytes = 50 * 1024 * 1024;
-const fileTypes = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', doc: 'application/msword', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel' };
-function service(language) { return secop.createSecopService({ configStore: { load: () => ({ ui_language: language === 'en' ? 'en' : 'es' }) } }); }
-async function projectProcess(env, ownerId, projectId) {
-  const row = await env.DB.prepare('SELECT process_json FROM project_secop WHERE project_id = ? AND owner_id = ?').bind(projectId, ownerId).first();
-  return row ? JSON.parse(row.process_json) : null;
-}
-async function existingFile(env, projectId, documentId) {
-  return env.DB.prepare('SELECT f.id, f.name, f.content_type AS contentType, f.size, f.created_at AS createdAt FROM project_secop_files s JOIN project_files f ON f.id = s.file_id WHERE s.project_id = ? AND s.document_id = ?').bind(projectId, documentId).first();
-}
-async function hasOnlineRunner(env, ownerId) {
-  const row = await env.DB.prepare("SELECT 1 AS ok FROM runners WHERE owner_id = ? AND revoked_at IS NULL AND execution_mode = 'local' AND last_seen_at >= ? LIMIT 1").bind(ownerId, Date.now() - 120_000).first();
-  return !!row;
-}
-async function enqueueSecopRunnerJob(env, ownerId, projectId, portfolioId, doc, includeMeta = false) {
-  const documentId = doc.id;
-  const now = new Date().toISOString();
-  await env.DB.prepare("UPDATE jobs SET state='interrupted',updated_at=? WHERE owner_id=? AND project_id=? AND kind='secop.import-zip' AND state='running' AND lease_expires_at<=?").bind(now, ownerId, projectId, Date.now()).run();
-  if (await env.DB.prepare('SELECT 1 AS present FROM secop_zip_files WHERE project_id=? AND document_id=? LIMIT 1').bind(projectId, documentId).first()) return { imported: true };
-  if (await existingFile(env, projectId, documentId)) return { imported: true };
-  const id = crypto.randomUUID();
-  const payload = JSON.stringify(includeMeta ? { documentId, portfolioId, name: doc.name, extension: doc.extension } : { documentId, portfolioId });
-  const inserted = await env.DB.prepare("INSERT INTO jobs(id,project_id,owner_id,kind,client_request_id,payload_json,state,created_at,updated_at) SELECT ?,?,?,'secop.import-zip',?,?,'queued',?,? WHERE EXISTS (SELECT 1 FROM project_secop WHERE project_id=? AND owner_id=? AND source='secop-ii' AND json_extract(process_json,'$.portfolioId')=?) AND NOT EXISTS (SELECT 1 FROM project_secop_files WHERE project_id=? AND document_id=?) AND NOT EXISTS (SELECT 1 FROM secop_zip_files WHERE project_id=? AND document_id=?) AND NOT EXISTS (SELECT 1 FROM jobs WHERE owner_id=? AND project_id=? AND kind='secop.import-zip' AND json_extract(payload_json,'$.documentId')=? AND state IN ('queued','running')) RETURNING id,state").bind(id, projectId, ownerId, `secop-zip:${id}`, payload, now, now, projectId, ownerId, portfolioId, projectId, documentId, projectId, documentId, ownerId, projectId, documentId).first();
-  if (inserted) return { job: inserted, status: 201 };
-  const existingJob = await env.DB.prepare("SELECT id,state FROM jobs WHERE owner_id=? AND project_id=? AND kind='secop.import-zip' AND json_extract(payload_json,'$.documentId')=? AND state IN ('queued','running') ORDER BY created_at DESC,rowid DESC LIMIT 1").bind(ownerId, projectId, documentId).first();
-  if (existingJob) return { job: existingJob, status: 200 };
-  if (await env.DB.prepare('SELECT 1 AS present FROM secop_zip_files WHERE project_id=? AND document_id=? LIMIT 1').bind(projectId, documentId).first()) return { imported: true };
-  return { conflict: true };
-}
-function fetchPlacspDocuments(id, {url, reference} = {}) {
-  const catalanId = /^https:\/\/contractaciopublica\.cat\/[^/]+\/detall-publicacio\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\/\d+(?:[/?#]|$)/i.exec(url || '')?.[1];
-  const pscpId = id.startsWith('pscp:') ? id : catalanId && 'pscp:' + catalanId;
-  if (pscpId) return placsp.createPlacspService().fetchPscpProcessDocuments(pscpId, {reference});
-  if (url) return fetchPlacspPortalDocuments(url);
-  return Promise.resolve([]);
-}
 
-async function resolveTedDocuments(env, id, { process = {}, row = null, fresh = false, language = 'es' } = {}) {
-  const pubNum = tedPublicationNumber(id);
-  if (!pubNum) return [];
-  const fetchDocs = async () => {
-    const notice = await fetchTedNoticeById(id, { language }).catch(() => null);
-    const portalUrl = notice?.portalUrl || process.portalUrl || '';
-    const reference = notice?.reference || row?.reference || process.reference || pubNum;
-    let portalDocs = [];
-    if (portalUrl) {
-      portalDocs = await fetchPlacspDocuments(id, { url: portalUrl, reference }).catch(() => []);
-    }
-    const rowSaved = JSON.parse(row?.documents_json || '[]');
-    // Keep previously resolved attachments when the portal is temporarily unavailable.
-    if (portalUrl && !portalDocs.length) {
-      const saved = await env.DB.prepare('SELECT documents_json FROM placsp_tenders WHERE url = ? AND id <> ? AND documents_json <> ? ORDER BY synced_at DESC LIMIT 1')
-        .bind(portalUrl, id, '[]').first();
-      portalDocs = [...JSON.parse(saved?.documents_json || '[]'), ...rowSaved.filter(doc => doc.docType !== 'TED')];
-    }
-    const baseDocs = notice?.documents?.length
-      ? notice.documents
-      : rowSaved.length
-        ? rowSaved
-        : Array.isArray(process.documents) && process.documents.length
-          ? process.documents
-          : [{
-              id: `TED-${pubNum}`,
-              name: `Anuncio oficial TED ${pubNum}.pdf`,
-              extension: 'pdf',
-              docType: 'TED',
-              url: `https://ted.europa.eu/${language === 'en' ? 'en' : 'es'}/notice/${pubNum}/pdf`,
-              size: null,
-            }];
-    const merged = [];
-    const seen = new Set();
-    for (const doc of [...portalDocs, ...baseDocs]) {
-      if (!doc?.id || !doc?.url || seen.has(doc.id) || seen.has(doc.url)) continue;
-      seen.add(doc.id);
-      seen.add(doc.url);
-      merged.push(doc);
-    }
-    return merged;
-  };
-  const cachedRes = await cached(env, `ted:docs:${pubNum}`, 5 * 60 * 1000, async () => {
-    const docs = await fetchDocs();
-    return { success: true, data: docs };
-  }, fresh);
-  const docs = Array.isArray(cachedRes?.data) ? cachedRes.data : [];
-  if (docs.length && row) {
-    await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?')
-      .bind(JSON.stringify(docs), id).run();
-  }
-  return docs;
-}
-
-async function resolvePlacspDocuments(env, id, row, process = {}) {
-  const saved = !id.startsWith('licit:') && !isPortalTenderId(id) && Array.isArray(process.documents) && process.documents.length
-    ? process.documents : JSON.parse(row?.documents_json || '[]');
-  if (saved.length) return saved;
-  const docs = await fetchPlacspDocuments(id, {url:row?.url || process.url, reference:row?.reference || process.reference}).catch(() => []);
-  if (docs.length && row) {
-    await env.DB.prepare('UPDATE placsp_tenders SET documents_json = ? WHERE id = ?')
-      .bind(JSON.stringify(docs), id).run();
-  }
-  return docs;
-}
 export async function secopDocuments(request, env, ownerId, projectId, documentId) {
   const process = await projectProcess(env, ownerId, projectId);
   if (!process) return Response.json({ error: 'not_found' }, { status: 404 });
   if (process.source === 'placsp' || process.source === 'ted') {
-    const row = await env.DB.prepare('SELECT documents_json, reference, url FROM placsp_tenders WHERE id = ?').bind(process.id).first();
-    const language = new URL(request.url).searchParams.get('language') === 'en' ? 'en' : 'es';
-    const docs = process.source === 'ted'
-      ? await resolveTedDocuments(env, process.id, { process, row, language })
-      : await resolvePlacspDocuments(env, process.id, row, process);
-    if (!documentId && request.method === 'GET') {
-      const saved = await env.DB.prepare('SELECT document_id AS id FROM project_secop_files WHERE project_id = ?').bind(projectId).all();
-      const imported = new Set(saved.results.map(item => item.id));
-      return Response.json({ items: docs.map(({ url: _url, ...item }) => ({ ...item, imported: imported.has(item.id) })), truncated: false, partial: false });
-    }
-    if (!documentId || request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
-    if (!sameOrigin(request, env)) return Response.json({ error: 'invalid_origin' }, { status: 403 });
-    if (!/^[A-Za-z0-9._-]{1,100}$/.test(documentId)) return Response.json({ error: 'invalid_document' }, { status: 400 });
-    const existing = await existingFile(env, projectId, documentId);
-    if (existing) return Response.json({ file: existing });
-    const doc = docs.find(item => item.id === documentId);
-    if (!doc) return Response.json({ error: 'not_found' }, { status: 404 });
-    const safeUrl = placsp.validatePlacspUrl(doc.url);
-    if (!safeUrl) return Response.json({ error: 'invalid_document' }, { status: 400 });
-    if (!fileTypes[doc.extension]) return Response.json({ error: 'unsupported_document' }, { status: 400 });
-    let response;
-    let isTedPdfHost = false;
-    try {
-      const host = new URL(safeUrl).hostname.toLowerCase();
-      isTedPdfHost = host === 'ted.europa.eu';
-      const isPlacspPortalHost = host === 'contrataciondelestado.es' || host.endsWith('.contrataciondelestado.es') || host === 'contrataciondelsectorpublico.gob.es' || host.endsWith('.contrataciondelsectorpublico.gob.es');
-      response = await fetch(safeUrl, {
-        redirect: isPlacspPortalHost ? 'manual' : 'follow',
-        headers: isTedPdfHost ? { Accept: fileTypes[doc.extension] } : isPlacspPortalHost ? placspDocumentHeaders(fileTypes[doc.extension]) : undefined,
-        signal: AbortSignal.timeout(60_000),
-      });
-    } catch { return Response.json({ error: 'download_failed' }, { status: 502 }); }
-    if (
-      isTedPdfHost &&
-      (response.headers.get('x-amzn-waf-action') ||
-        ([403, 405].includes(response.status) && /text\/html/i.test(response.headers.get('content-type') || '')))
-    ) {
-      return Response.json({ error: 'portal_captcha_required', officialUrl: safeUrl }, { status: 502 });
-    }
-    if (!response.ok || !response.body || /text\/html/i.test(response.headers.get('content-type') || '')) return Response.json({ error: 'download_failed' }, { status: 502 });
-    if (Number(response.headers.get('content-length')) > maxFileBytes) return Response.json({ error: 'file_too_large' }, { status: 413 });
-    const name = (doc.name || `documento.${doc.extension}`).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 240) || `documento.${doc.extension}`;
-    const file = { id: crypto.randomUUID(), name, contentType: fileTypes[doc.extension], size: 0, createdAt: new Date().toISOString() }, key = `projects/${projectId}/${file.id}`, staging = crypto.randomUUID(), now = Date.now();
-    await env.DB.prepare("INSERT INTO desktop_file_staging(id,owner_id,object_key,state,lease_until,created_at) VALUES(?,?,?,'writing',?,?)").bind(staging, ownerId, key, now + uploadLeaseMs, now).run();
-    let published = false;
-    try {
-      try { file.size = (await uploadSecopStream({ body: response.body, bucket: env.FILES, key, extension: doc.extension, maxBytes: maxFileBytes })).size; }
-      catch (error) { if (error?.code === 'file_too_large') return Response.json({ error: 'file_too_large' }, { status: 413 }); if (error?.code === 'invalid_file') return Response.json({ error: 'invalid_file' }, { status: 400 }); return Response.json({ error: 'download_failed' }, { status: 502 }); }
-      await env.DB.prepare('UPDATE desktop_file_staging SET writer_done=1 WHERE id=? AND owner_id=?').bind(staging, ownerId).run();
-      try {
-        const results = await env.DB.batch([
-          env.DB.prepare("INSERT INTO project_files (id,project_id,name,content_type,object_key,size,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM projects WHERE id=? AND owner_id=?) AND EXISTS (SELECT 1 FROM desktop_file_staging WHERE id=? AND owner_id=? AND state='writing' AND lease_until>?)").bind(file.id, projectId, name, file.contentType, key, file.size, file.createdAt, projectId, ownerId, staging, ownerId, Date.now()),
-          env.DB.prepare('INSERT INTO project_secop_files (project_id,document_id,file_id) SELECT ?,?,id FROM project_files WHERE id=? AND project_id=?').bind(projectId, documentId, file.id, projectId),
-          env.DB.prepare("DELETE FROM desktop_file_staging WHERE id=? AND owner_id=? AND state='writing' AND EXISTS (SELECT 1 FROM project_files WHERE id=? AND project_id=? AND object_key=?)").bind(staging, ownerId, file.id, projectId, key),
-        ]);
-        if (!results[0].meta.changes) return Response.json({ error: 'project_conflict' }, { status: 409 });
-        published = true;
-        return Response.json({ file }, { status: 201 });
-      } catch (error) { const saved = await existingFile(env, projectId, documentId); if (saved) return Response.json({ file: saved }); throw error; }
-    } finally { if (!published) { try { await env.DB.prepare("UPDATE desktop_file_staging SET writer_done=1,state='cleanup',lease_until=0 WHERE id=? AND owner_id=? AND state IN ('writing','watching')").bind(staging, ownerId).run(); await cleanupDesktopUploads(env, ownerId); } catch { /* La limpieza se reintenta después. */ } } }
+    return spainProjectDocuments(request, env, ownerId, projectId, documentId, process);
   }
-  if (process.source !== 'secop-ii' || !/^CO1\.BDOS\.\d+$/.test(process.portfolioId || '')) return Response.json({ error: 'portfolio_unavailable' }, { status: 400 });
-  const api = service(new URL(request.url).searchParams.get('language'));
-  if (!documentId && request.method === 'GET') {
-    const rawOffset=new URL(request.url).searchParams.get('offset') || '0';
-    if (!/^\d+$/.test(rawOffset) || Number(rawOffset)>5000) return Response.json({error:'invalid_offset'},{status:400});
-    const listing = await secopDocumentPage(env,api,process.portfolioId,Number(rawOffset));
-    if (!listing.success) return Response.json({ error: 'secop_unavailable' }, { status: 502 });
-    const saved = await env.DB.prepare('SELECT document_id AS id FROM project_secop_files WHERE project_id = ? UNION SELECT document_id AS id FROM secop_zip_files WHERE project_id = ?').bind(projectId,projectId).all();
-    const jobs = await env.DB.prepare("SELECT id,state,result_json,json_extract(payload_json,'$.documentId') AS document_id FROM jobs WHERE project_id=? AND owner_id=? AND kind='secop.import-zip' ORDER BY created_at DESC,rowid DESC").bind(projectId,ownerId).all();
-    const latest=new Map();for(const job of jobs.results)if(!latest.has(job.document_id))latest.set(job.document_id,{id:job.id,state:job.state,result:job.result_json?JSON.parse(job.result_json):null});
-    const imported = new Set(saved.results.map(item => item.id));
-    return Response.json({ ...listing.data, items: listing.data.items.map(({ url: _url, ...item }) => ({ ...item, imported: imported.has(item.id),...(latest.has(item.id)?{zipJob:latest.get(item.id)}:{}) })) });
-  }
-  if (!documentId || request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
-  if (!sameOrigin(request, env)) return Response.json({ error: 'invalid_origin' }, { status: 403 });
-  if (!/^\d+$/.test(documentId)) return Response.json({ error: 'invalid_document' }, { status: 400 });
-  const existing = await existingFile(env, projectId, documentId);
-  if (existing) return Response.json({ file: existing });
-  const listing = await api.getProcessDocuments(process.portfolioId, { ids: [documentId] });
-  if (!listing.success) return Response.json({ error: 'secop_unavailable' }, { status: 502 });
-  const doc = listing.data.items.find(item => item.id === documentId);
-  if (!doc) return Response.json({ error: 'not_found' }, { status: 404 });
-  if (doc.extension === 'zip') {
-    if (doc.size > maxFileBytes) return Response.json({error:'file_too_large'},{status:413});
-    const queued = await enqueueSecopRunnerJob(env, ownerId, projectId, process.portfolioId, doc, false);
-    if (queued.imported) return Response.json({ imported: true });
-    if (queued.job) return Response.json({ job: queued.job }, { status: queued.status });
-    return Response.json({ error: 'project_conflict' }, { status: 409 });
-  }
-  if (!fileTypes[doc.extension]) return Response.json({ error: 'unsupported_document' }, { status: 400 });
-  if (doc.size > maxFileBytes) return Response.json({ error: 'file_too_large' }, { status: 413 });
-  const url = secopFileUrl(documentId);
-  const fallbackToRunner = async () => {
-    if (!await hasOnlineRunner(env, ownerId)) return Response.json({ error: 'secop_captcha_required', officialUrl: url.toString() }, { status: 502 });
-    const queued = await enqueueSecopRunnerJob(env, ownerId, projectId, process.portfolioId, doc, true);
-    if (queued.imported) return Response.json({ imported: true });
-    if (queued.job) return Response.json({ job: queued.job, fallback: 'runner' }, { status: queued.status });
-    return Response.json({ error: 'project_conflict' }, { status: 409 });
-  };
-  let response;
-  try { response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(60_000) }); } catch { return fallbackToRunner(); }
-  if (!response.ok || response.status >= 300 || !response.body || /text\/html/i.test(response.headers.get('content-type') || '')) return fallbackToRunner();
-  if (Number(response.headers.get('content-length')) > maxFileBytes) return Response.json({ error: 'file_too_large' }, { status: 413 });
-  const name = (doc.name || `documento.${doc.extension}`).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 240) || `documento.${doc.extension}`;
-  const file = { id: crypto.randomUUID(), name, contentType: fileTypes[doc.extension], size: 0, createdAt: new Date().toISOString() },key=`projects/${projectId}/${file.id}`,staging=crypto.randomUUID(),now=Date.now();
-  await env.DB.prepare("INSERT INTO desktop_file_staging(id,owner_id,object_key,state,lease_until,created_at) VALUES(?,?,?,'writing',?,?)").bind(staging,ownerId,key,now+uploadLeaseMs,now).run();let published=false;
-  try {
-    try{file.size=(await uploadSecopStream({body:response.body,bucket:env.FILES,key,extension:doc.extension,maxBytes:maxFileBytes})).size;}
-    catch(error){if(error?.code==='file_too_large')return Response.json({error:'file_too_large'},{status:413});if(error?.code==='invalid_file')return Response.json({error:'invalid_file'},{status:400});return Response.json({error:'download_failed'},{status:502});}
-    await env.DB.prepare('UPDATE desktop_file_staging SET writer_done=1 WHERE id=? AND owner_id=?').bind(staging,ownerId).run();
-    try {const results=await env.DB.batch([
-      env.DB.prepare("INSERT INTO project_files (id,project_id,name,content_type,object_key,size,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM projects WHERE id=? AND owner_id=?) AND EXISTS (SELECT 1 FROM desktop_file_staging WHERE id=? AND owner_id=? AND state='writing' AND lease_until>?)").bind(file.id,projectId,name,file.contentType,key,file.size,file.createdAt,projectId,ownerId,staging,ownerId,Date.now()),
-      env.DB.prepare('INSERT INTO project_secop_files (project_id,document_id,file_id) SELECT ?,?,id FROM project_files WHERE id=? AND project_id=?').bind(projectId,documentId,file.id,projectId),
-      env.DB.prepare("DELETE FROM desktop_file_staging WHERE id=? AND owner_id=? AND state='writing' AND EXISTS (SELECT 1 FROM project_files WHERE id=? AND project_id=? AND object_key=?)").bind(staging,ownerId,file.id,projectId,key),
-    ]);if(!results[0].meta.changes)return Response.json({error:'project_conflict'},{status:409});published=true;return Response.json({file},{status:201});
-    }catch(error){const saved=await existingFile(env,projectId,documentId);if(saved)return Response.json({file:saved});throw error;}
-  } finally {if(!published){try{await env.DB.prepare("UPDATE desktop_file_staging SET writer_done=1,state='cleanup',lease_until=0 WHERE id=? AND owner_id=? AND state IN ('writing','watching')").bind(staging,ownerId).run();await cleanupDesktopUploads(env,ownerId);}catch{/* La limpieza se reintenta después. */}}}
-
+  return colombiaSecopProjectDocuments(request, env, ownerId, projectId, documentId, process);
 }
 const categoryNames = ['department', 'modality', 'status'];
 const columnNames = ['title', 'entity', 'modality', 'status', 'value', 'publicationDate', 'deadline', 'department'];
-async function cached(env, key, ttl, load, fresh = false) {
-  const now = Date.now();
-  if (!fresh) {
-    const row = await env.DB.prepare('SELECT response_json FROM secop_search_cache WHERE cache_key=? AND expires_at>?').bind(key, now).first();
-    if (row) return JSON.parse(row.response_json);
-  }
-  const result = await load();
-  if (result.success) {
-    await env.DB.prepare('DELETE FROM secop_search_cache WHERE expires_at<=?').bind(now).run();
-    await env.DB.prepare('INSERT INTO secop_search_cache(cache_key,response_json,expires_at) VALUES(?,?,?) ON CONFLICT(cache_key) DO UPDATE SET response_json=excluded.response_json,expires_at=excluded.expires_at').bind(key, JSON.stringify(result), now + ttl).run();
-  }
-  return result;
-}
 export async function secopPreferences(request, env, ownerId) {
   if (request.method === 'GET') {
     const row = await env.DB.prepare('SELECT preferences_json FROM secop_search_preferences WHERE owner_id=?').bind(ownerId).first();
@@ -948,56 +727,15 @@ export async function secopDetail(request, env) {
   const result = await cached(env,key,5*60*1000,()=>service(url.searchParams.get('language')).getProcessDetail(id,source));
   return Response.json(result,{status:result.success?200:502});
 }
-async function secopDocumentPage(env, api, portfolioId, offset) {
-  // Build the order once, so a slow annual feed cannot shift offsets between pages.
-  const load = async () => {
-    const result = await api.getProcessDocuments(portfolioId,{catalog:true});
-    if (!result.success) return result;
-    const items = await deduplicateSecopDocuments(result.data.items);
-    return {...result,data:{items:items.slice(0,5100),partial:result.data.partial}};
-  };
-  const key = `secop-document-snapshot:v1:${portfolioId}`;
-  const now = Date.now();
-  const row = await env.DB.prepare('SELECT response_json FROM secop_search_cache WHERE cache_key=? AND expires_at>?').bind(key,now).first();
-  let result = row ? JSON.parse(row.response_json) : await load();
-  if (!row && result.success) {
-    const json = JSON.stringify(result);
-    if (new TextEncoder().encode(json).byteLength<900000) {
-      const saved = await env.DB.prepare(`INSERT INTO secop_search_cache(cache_key,response_json,expires_at) VALUES(?,?,?)
-        ON CONFLICT(cache_key) DO UPDATE SET response_json=excluded.response_json,expires_at=excluded.expires_at WHERE expires_at<=?
-        RETURNING response_json`).bind(key,json,now+5*60*1000,now).first();
-      if (!saved) {
-        const concurrent = await env.DB.prepare('SELECT response_json FROM secop_search_cache WHERE cache_key=?').bind(key).first();
-        if (concurrent) result=JSON.parse(concurrent.response_json);
-      }
-    }
-  }
-  if (!result.success) return result;
-  return {...result,data:{...result.data,items:result.data.items.slice(offset,offset+100),truncated:result.data.items.length>offset+100}};
-}
-
-export async function officialOpportunityDocuments(env, source, id, language) {
-  const row = await env.DB.prepare('SELECT documents_json, reference, url FROM placsp_tenders WHERE id = ?').bind(id).first();
-  return source === 'ted'
-    ? resolveTedDocuments(env, id, { row, language })
-    : resolvePlacspDocuments(env, id, row);
-}
+export { officialSpainDocuments as officialOpportunityDocuments };
 
 export async function secopDocumentCatalog(request, env) {
-  if (request.method !== 'GET') return new Response('Method not allowed',{status:405});
-  const url = new URL(request.url), source = url.searchParams.get('source'), id = url.searchParams.get('id') || '';
+  if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
+  const source = new URL(request.url).searchParams.get('source');
   if (source === 'placsp' || source === 'ted') {
-    if (!id.trim() || id.length > 200) return Response.json({ error: 'invalid_process' }, { status: 400 });
-    const docs = await officialOpportunityDocuments(env, source, id, url.searchParams.get('language') === 'en' ? 'en' : 'es');
-    const items = docs.map(({ url: _url, ...item }) => item);
-    return Response.json({ success: true, data: { items, truncated: false, partial: false }, message: 'ok' });
+    return spainDocumentCatalog(request, env);
   }
-  const portfolioId = url.searchParams.get('portfolioId') || '', rawOffset = url.searchParams.get('offset') || '0';
-  if (!/^CO1\.BDOS\.\d+$/.test(portfolioId) || !/^\d+$/.test(rawOffset) || Number(rawOffset)>5000) return Response.json({error:'invalid_portfolio'},{status:400});
-  const offset=Number(rawOffset);
-  const result=await secopDocumentPage(env,service(url.searchParams.get('language')),portfolioId,offset);
-  if (!result.success) return Response.json(result,{status:502});
-  return Response.json({...result,data:{...result.data,items:result.data.items.map(({url: _url,...item})=>item)}});
+  return colombiaSecopDocumentCatalog(request, env);
 }
 function placspPublication(url) {
   const safe = placsp.validatePlacspUrl(url);
@@ -1055,41 +793,29 @@ export async function createSecopProject(request, env, ownerId) {
   }
   return Response.json({ project }, { status: 201 });
 }
-function safeManualDownloadUrl(value) {
-  const placspUrl = placsp.validatePlacspUrl(value);
-  if (placspUrl) return placspUrl;
-  try {
-    const url = new URL(value || '');
-    return url.protocol === 'https:' && url.hostname.toLowerCase() === 'community.secop.gov.co' ? url.href : '';
-  } catch {
-    return '';
-  }
-}
-
 export async function secopSelectedImports(request,env,ownerId,projectId,documentId) {
   const owned=await env.DB.prepare('SELECT source, external_id, process_json FROM project_secop WHERE project_id=? AND owner_id=?').bind(projectId,ownerId).first();
   if (!owned) return Response.json({error:'not_found'},{status:404});
   if (!documentId && request.method==='GET') {
-    const [rows,savedFiles,tenderRow]=await Promise.all([
+    const isSpain = owned.source==='placsp'||owned.source==='ted';
+    const [rows,savedFiles,spainDocs]=await Promise.all([
       env.DB.prepare("SELECT s.document_id AS id,s.state, (SELECT j.state FROM jobs j WHERE j.project_id=s.project_id AND j.owner_id=? AND j.kind='secop.import-zip' AND json_extract(j.payload_json,'$.documentId')=s.document_id ORDER BY j.created_at DESC,j.rowid DESC LIMIT 1) AS job_state, EXISTS(SELECT 1 FROM secop_zip_files f WHERE f.project_id=s.project_id AND f.document_id=s.document_id) AS imported_zip FROM secop_import_selection s WHERE s.project_id=? ORDER BY s.sort_order").bind(ownerId,projectId).all(),
       env.DB.prepare('SELECT psf.document_id, pf.name FROM project_secop_files psf JOIN project_files pf ON pf.id = psf.file_id WHERE psf.project_id = ?').bind(projectId).all(),
-      (owned.source==='placsp'||owned.source==='ted') ? env.DB.prepare('SELECT documents_json FROM placsp_tenders WHERE id = ?').bind(owned.external_id).first() : Promise.resolve(null),
+      isSpain ? spainManualDownloadUrls(env, owned) : Promise.resolve(null),
     ]);
-    const nameById=new Map();
-    const urlById=new Map();
-    const recordDoc=doc=>{
-      if (!doc?.id) return;
-      if (doc.name) nameById.set(doc.id, doc.name);
-      const url=safeManualDownloadUrl(doc.url);
-      if (url) urlById.set(doc.id, url);
-    };
-    const processDocs=(() => { try { return JSON.parse(owned.process_json || '{}').documents; } catch { return null; } })();
-    for (const doc of Array.isArray(processDocs) ? processDocs : []) recordDoc(doc);
-    const tenderDocs=(() => { try { return JSON.parse(tenderRow?.documents_json || '[]'); } catch { return null; } })();
-    for (const doc of Array.isArray(tenderDocs) ? tenderDocs : []) recordDoc(doc);
+    const nameById=spainDocs ? spainDocs.nameById : new Map();
+    const urlById=spainDocs ? spainDocs.urlById : new Map();
+    if (!isSpain) {
+      const processDocs=(() => { try { return JSON.parse(owned.process_json || '{}').documents; } catch { return null; } })();
+      for (const doc of Array.isArray(processDocs) ? processDocs : []) {
+        if (!doc?.id) continue;
+        if (doc.name) nameById.set(doc.id, doc.name);
+        const url=safeColombiaSecopUrl(doc.url);
+        if (url) urlById.set(doc.id, url);
+      }
+    }
     for (const saved of savedFiles.results) { if (saved?.document_id && saved?.name) nameById.set(saved.document_id, saved.name); }
-    const fallbackSecopUrl=id=>(owned.source==='secop-ii'&&/^\d+$/.test(id))?`https://community.secop.gov.co/Public/Archive/RetrieveFile/Index?DocumentId=${encodeURIComponent(id)}&InCommunity=False&InPaymentGateway=False&DocUniqueIdentifier=`:null;
-    return Response.json({items:rows.results.map(row=>({id:row.id,name:nameById.get(row.id)||null,downloadUrl:urlById.get(row.id)||fallbackSecopUrl(row.id),state:row.state!=='queued'?row.state:row.imported_zip || row.job_state==='succeeded'?'imported':['queued','running'].includes(row.job_state)?'queued':'failed'}))});
+    return Response.json({items:rows.results.map(row=>({id:row.id,name:nameById.get(row.id)||null,downloadUrl:urlById.get(row.id)||(isSpain?null:colombiaSecopManualDownloadUrl(owned.source,row.id)),state:row.state!=='queued'?row.state:row.imported_zip || row.job_state==='succeeded'?'imported':['queued','running'].includes(row.job_state)?'queued':'failed'}))});
   }
   if (!documentId || request.method!=='POST') return new Response('Method not allowed',{status:405});
   if (!sameOrigin(request,env)) return Response.json({error:'invalid_origin'},{status:403});

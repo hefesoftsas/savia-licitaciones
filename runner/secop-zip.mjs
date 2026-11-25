@@ -39,9 +39,18 @@ export function expandSecopZip(bytes) {
   return { files, skipped };
 }
 
+const SECOP_BROWSER_HEADERS = {
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'accept': 'application/octet-stream, application/pdf, */*;q=0.8',
+  'accept-language': 'es-CO,es;q=0.9',
+};
+
 async function downloadSecopBytes(url, { fetchImpl, signal, cookieHeader }) {
-  const headers = cookieHeader ? { cookie: cookieHeader } : undefined;
-  const response = await fetchImpl(url, { redirect: 'manual', ...(headers ? { headers } : {}), signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]) });
+  const headers = {
+    ...SECOP_BROWSER_HEADERS,
+    ...(cookieHeader ? { cookie: cookieHeader } : {}),
+  };
+  const response = await fetchImpl(url, { redirect: 'manual', headers, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]) });
   if (!response.ok || response.status >= 300 || !response.body || /text\/html/i.test(response.headers.get('content-type') || '')) {
     await response.body?.cancel?.().catch(() => undefined);
     return { blocked: true, status: response.status };

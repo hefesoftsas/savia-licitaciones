@@ -5,8 +5,10 @@ import {deduplicateSecopDocuments} from '../src/secop-document-dedup.js';
 test('deduplica IDs distintos solo si coinciden los bytes y conserva la primera aparición',async()=>{
   const files = new Map([['1','%PDF-aa'],['2','%PDF-bb'],['3','%PDF-aa'],['4','<html/>'],['5','%PDF-bb']]);
   const original=globalThis.fetch, calls=[];
-  globalThis.fetch=async url=>{
+  globalThis.fetch=async (url,options)=>{
     assert.equal(url.hostname,'community.secop.gov.co');
+    assert.match(options?.headers?.['user-agent']||'',/^Mozilla\/5\.0\b/i);
+    assert.match(options?.headers?.accept||'',/application\/pdf/);
     const id=url.searchParams.get('DocumentId');
     calls.push(id);
     return new Response(files.get(id),{headers:{'content-type':id==='4'?'text/html':'application/pdf'}});

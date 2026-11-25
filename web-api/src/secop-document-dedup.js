@@ -2,6 +2,14 @@ import {createHash} from 'node:crypto';
 
 const maxFileBytes = 50 * 1024 * 1024;
 
+export function secopDocumentHeaders(accept) {
+  return {
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'accept': accept || 'application/octet-stream, application/pdf, */*;q=0.8',
+    'accept-language': 'es-CO,es;q=0.9',
+  };
+}
+
 export function secopFileUrl(id) {
   const url = new URL('https://community.secop.gov.co/Public/Archive/RetrieveFile/Index');
   url.search = new URLSearchParams({DocumentId:id, InCommunity:'False', InPaymentGateway:'False', DocUniqueIdentifier:''});
@@ -12,7 +20,7 @@ async function fingerprint(item, deadline) {
   const remaining = deadline - Date.now();
   if (remaining <= 0) return null;
   try {
-    const response = await fetch(secopFileUrl(item.id), {redirect:'manual', signal:AbortSignal.timeout(Math.min(5000, remaining))});
+    const response = await fetch(secopFileUrl(item.id), {redirect:'manual', headers:secopDocumentHeaders(), signal:AbortSignal.timeout(Math.min(5000, remaining))});
     const mime = response.headers.get('content-type') || '';
     const length = response.headers.get('content-length');
     if (!response.ok || !response.body || /(?:text\/html|javascript|json)/i.test(mime) || (length && Number(length)!==item.size)) {
