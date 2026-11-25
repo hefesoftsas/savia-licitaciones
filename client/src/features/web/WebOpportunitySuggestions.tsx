@@ -19,34 +19,155 @@ type Settings={refreshHours:number;localRunner:boolean;enabled:boolean;autoEnabl
 type Job={id:string;state:string;progress?:string|null;result:{message?:string}|null};
 type Item={id:string;process:SecopProcess;reason:string;checks:string;verdict?:'pursue'|'review'|'decline';reviewed:boolean;saved:boolean;projectId:string|null};
 type Results={jobId:string|null;items:Item[];unreadCount:number;stale:boolean;verificationUnavailable?:boolean};
+export function matchesMarketSource(source: string, market: ProcurementMarket): boolean {
+ if(market==='ES')return source==='placsp'||source==='ted';
+ if(market==='CO')return source==='secop-i'||source==='secop-ii';
+ return true;
+}
+
+export function resolveMarketResults(
+ state: { market: ProcurementMarket; data: Results } | null,
+ market: ProcurementMarket,
+): Results | null {
+ if (!state || state.market !== market) return null;
+ return {
+  ...state.data,
+  items: state.data.items.filter(item => matchesMarketSource(item.process.source, market)),
+ };
+}
+
+export function resolveMarketArchive(
+ state: { market: ProcurementMarket; items: Array<Item & { jobId: string }> } | null,
+ market: ProcurementMarket,
+): Array<Item & { jobId: string }> | null {
+ if (!state || state.market !== market) return null;
+ return state.items.filter(item => matchesMarketSource(item.process.source, market));
+}
+
+export function isCheckingOpportunityResults({
+ active,
+ latestCompleted,
+ results,
+}: {
+ active: Job | undefined;
+ latestCompleted: Job | undefined;
+ results: Results | null;
+}): boolean {
+ return !active && !!latestCompleted && results === null;
+}
+
+export function createOpportunityMarketController({
+ getMarket,
+ fetchJobs,
+ fetchResults,
+ verifyResults,
+ onJobs,
+ onResults,
+ onArchive,
+ onVerifying,
+}: {
+ getMarket: () => ProcurementMarket;
+ fetchJobs: () => Promise<{ jobs: Job[] }>;
+ fetchResults: (market: ProcurementMarket) => Promise<Results>;
+ verifyResults: (market: ProcurementMarket) => Promise<Results>;
+ onJobs: (jobs: Job[]) => void;
+ onResults: (state: { market: ProcurementMarket; data: Results } | null) => void;
+ onArchive?: (state: { market: ProcurementMarket; items: Array<Item & { jobId: string }> } | null) => void;
+ onVerifying: (value: boolean) => void;
+}) {
+ let refreshSeq = 0;
+ let marketSeq = 0;
+ let verifiedJobId: string | null = null;
+
+ const isCurrentRefresh = (seq: number, targetMarket: ProcurementMarket) =>
+  seq === refreshSeq && getMarket() === targetMarket;
+ const isCurrentMarket = (epoch: number, targetMarket: ProcurementMarket) =>
+  epoch === marketSeq && getMarket() === targetMarket;
+
+ const verifyLatest = async (jobId: string, epoch: number, targetMarket: ProcurementMarket) => {
+  if (verifiedJobId === jobId) return;
+  verifiedJobId = jobId;
+  onVerifying(true);
+  try {
+   const verified = await verifyResults(targetMarket);
+   if (!isCurrentMarket(epoch, targetMarket)) return;
+   onResults({ market: targetMarket, data: verified });
+  } catch {
+   if (isCurrentMarket(epoch, targetMarket)) verifiedJobId = null;
+  } finally {
+   if (isCurrentMarket(epoch, targetMarket)) onVerifying(false);
+  }
+ };
+
+ const refresh = async (targetMarket: ProcurementMarket = getMarket()) => {
+  const seq = ++refreshSeq;
+  const epoch = marketSeq;
+  const [, latestResults] = await Promise.all([
+   fetchJobs().then(data => { if (isCurrentRefresh(seq, targetMarket)) onJobs(data.jobs); }),
+   fetchResults(targetMarket),
+  ]);
+  if (!isCurrentRefresh(seq, targetMarket)) return;
+  onResults({ market: targetMarket, data: latestResults });
+  if (latestResults.jobId && latestResults.items.some(item => matchesMarketSource(item.process.source, targetMarket))) {
+   void verifyLatest(latestResults.jobId, epoch, targetMarket);
+  }
+ };
+
+ const resetForMarket = () => {
+  refreshSeq += 1;
+  marketSeq += 1;
+  verifiedJobId = null;
+  onArchive?.(null);
+  onResults(null);
+  onVerifying(false);
+ };
+
+ return { refresh, verifyLatest, resetForMarket };
+}
+
 export function OpportunityResultsView({language,market='ALL',items,jobId,stale,verificationUnavailable,busy,onReview,onSave,onOpen,archive,onLoadArchive}:{language:Locale;market?:ProcurementMarket;items:Item[];jobId:string|null;stale:boolean;verificationUnavailable?:boolean;busy:boolean;onReview:(jobId:string,id:string)=>void;onSave:(jobId:string,item:Item)=>void;onOpen:(id:string)=>void;archive?:Array<Item&{jobId:string}>|null;onLoadArchive?:()=>void}){
- const en=language==='en',unread=items.filter(item=>!item.reviewed);
+ const en=language==='en',filteredItems=items.filter(item=>matchesMarketSource(item.process.source,market)),unread=filteredItems.filter(item=>!item.reviewed),filteredArchive=archive?archive.filter(item=>matchesMarketSource(item.process.source,market)):archive;
  const sourceLabel=market==='CO'?'SECOP':market==='ES'?'PLACSP / TED':(en?'the official sources':'las fuentes oficiales');
  const verdictLabels=en?{pursue:'Worth pursuing',review:'Review required',decline:'Poor fit'}:{pursue:'Conviene participar',review:'Requiere revisión',decline:'No encaja'};
  const card=(item:Item,sourceJob:string|null)=> <article key={item.id}><strong>{item.process.title}</strong><p className="web-recommendation-meta"><span>{[item.process.entity,item.process.source.toUpperCase()].filter(Boolean).join(' · ')}</span>{item.process.status&&<span className="web-project-status" data-tone={secopStatusTone(item.process.status)}>{item.process.status}</span>}</p><p><strong>{item.verdict?verdictLabels[item.verdict]:(en?'Why it may fit':'Por qué puede ser relevante')}:</strong> {item.reason}</p><p><strong>{en?'Check':'Por verificar'}:</strong> {item.checks}</p><div className="web-inline">{!item.reviewed&&<Button size="sm" variant="outline" disabled={busy} onClick={()=>sourceJob&&onReview(sourceJob,item.id)}>{en?'Mark as reviewed':'Marcar como revisada'}</Button>}{item.projectId?<Button size="sm" variant="outline" onClick={()=>onOpen(item.projectId!)}>{en?'Open tender':'Abrir licitación'}</Button>:<Button size="sm" disabled={busy||item.saved} onClick={()=>sourceJob&&onSave(sourceJob,item)}>{en?'Save tender':'Guardar licitación'}</Button>}</div></article>;
- return <div className="web-secop-results"><h3>{en?'Recommendations':'Recomendaciones'}</h3>{onLoadArchive&&<details className="web-recommendation-archive" onToggle={event=>{if(event.currentTarget.open)onLoadArchive();}}><summary title={en?'Archived recommendations':'Recomendaciones archivadas'} aria-label={en?'Archived recommendations':'Recomendaciones archivadas'}><Archive size={17} aria-hidden="true"/><span className="sr-only">{en?'Archived recommendations':'Recomendaciones archivadas'}</span></summary>{archive===null||archive===undefined?<p role="status">{en?'Loading…':'Cargando…'}</p>:archive.length?archive.map(item=>card(item,item.jobId)):<p>{en?'No archived recommendations.':'No hay recomendaciones archivadas.'}</p>}</details>}{verificationUnavailable&&<p role="status">{en?`Some recommendations could not be checked with ${sourceLabel}. They will appear once their status can be verified.`:`No se pudo comprobar el estado de algunas recomendaciones en ${sourceLabel}. Aparecerán cuando podamos verificarlas.`}</p>}{stale&&<p role="status">{en?'The company sources or preferences changed since this analysis.':'Las fuentes de la empresa o las preferencias cambiaron desde este análisis.'}</p>}{!jobId?<p>{en?'No analysis yet.':'Aún no hay un análisis.'}</p>:!items.length?<p>{en?'No relevant opportunities were found in this search.':'No se encontraron oportunidades relevantes en esta búsqueda.'}</p>:!unread.length?<p>{en?'No unread recommendations.':'No hay recomendaciones pendientes.'}</p>:unread.map(item=>card(item,jobId))}</div>;
+ return <div className="web-secop-results"><h3>{en?'Recommendations':'Recomendaciones'}</h3>{onLoadArchive&&<details className="web-recommendation-archive" onToggle={event=>{if(event.currentTarget.open)onLoadArchive();}}><summary title={en?'Archived recommendations':'Recomendaciones archivadas'} aria-label={en?'Archived recommendations':'Recomendaciones archivadas'}><Archive size={17} aria-hidden="true"/><span className="sr-only">{en?'Archived recommendations':'Recomendaciones archivadas'}</span></summary>{!filteredArchive?<p role="status">{en?'Loading…':'Cargando…'}</p>:filteredArchive.length?filteredArchive.map(item=>card(item,item.jobId)):<p>{en?'No archived recommendations.':'No hay recomendaciones archivadas.'}</p>}</details>}{verificationUnavailable&&<p role="status">{en?`Some recommendations could not be checked with ${sourceLabel}. They will appear once their status can be verified.`:`No se pudo comprobar el estado de algunas recomendaciones en ${sourceLabel}. Aparecerán cuando podamos verificarlas.`}</p>}{stale&&<p role="status">{en?'The company sources or preferences changed since this analysis.':'Las fuentes de la empresa o las preferencias cambiaron desde este análisis.'}</p>}{!jobId?<p>{en?'No analysis yet.':'Aún no hay un análisis.'}</p>:!filteredItems.length?<p>{en?'No relevant opportunities were found in this search.':'No se encontraron oportunidades relevantes en esta búsqueda.'}</p>:!unread.length?<p>{en?'No unread recommendations.':'No hay recomendaciones pendientes.'}</p>:unread.map(item=>card(item,jobId))}</div>;
 }
 export function RunnerAutomaticOption({language,checked,onChange}:{language:Locale;checked:boolean;onChange:(value:boolean)=>void}){return <label className="web-consent"><input type="checkbox" checked={checked} onChange={event=>onChange(event.target.checked)}/>{language==='en'?'Search automatically with the local runner':'Buscar automáticamente con el runner local'}</label>;}
 export default function WebOpportunitySuggestions({language,market='ALL',credentials,onOpen,onSearch: _onSearch,onModel: _onModel,onPrepareProject,onCompanyProfile}:{language:Locale;market?:ProcurementMarket;credentials:Credential[];onOpen:(id:string)=>void;onSearch:()=>void;onModel:()=>void;onPrepareProject?:(projectId:string,openAutopilot:boolean)=>void;onCompanyProfile?:()=>void}){
- const en=language==='en',{showToast}=useToast(),[viewMode,setViewMode]=useState<'autopilot'|'advanced'>('autopilot'),[settings,setSettings]=useState<Settings|null>(null),[keywords,setKeywords]=useState(''),[includeRup,setIncludeRup]=useState(false),credential=credentials[0]?.id||'',[enabled,setEnabled]=useState(false),[autoEnabled,setAutoEnabled]=useState(false),[runnerAutoEnabled,setRunnerAutoEnabled]=useState(false),[refreshHours,setRefreshHours]=useState(6),[consent,setConsent]=useState(true),[jobs,setJobs]=useState<Job[]>([]),[results,setResults]=useState<Results|null>(null),[busy,setBusy]=useState(false),[loadError,setLoadError]=useState(false);
+ const en=language==='en',{showToast}=useToast(),[viewMode,setViewMode]=useState<'autopilot'|'advanced'>('autopilot'),[settings,setSettings]=useState<Settings|null>(null),[keywords,setKeywords]=useState(''),[includeRup,setIncludeRup]=useState(false),credential=credentials[0]?.id||'',[enabled,setEnabled]=useState(false),[autoEnabled,setAutoEnabled]=useState(false),[runnerAutoEnabled,setRunnerAutoEnabled]=useState(false),[refreshHours,setRefreshHours]=useState(6),[consent,setConsent]=useState(true),[jobs,setJobs]=useState<Job[]>([]),[resultsState,setResultsState]=useState<{market:ProcurementMarket;data:Results}|null>(null),[busy,setBusy]=useState(false),[loadError,setLoadError]=useState(false);
  const [setupOpen,setSetupOpen]=useState(true);
  const [searching,setSearching]=useState(false);
  const [verifyingSecop,setVerifyingSecop]=useState(false);
  const [elapsedSeconds,setElapsedSeconds]=useState(0);
+ const results=resolveMarketResults(resultsState,market);
  useEffect(()=>{if(results)setSetupOpen(!results.jobId);},[results?.jobId]);
  const pending=useRef<{snapshotId:string;key:string}|null>(null);
- const verifiedJobRef=useRef<string|null>(null);
+ const marketRef=useRef(market);
+ marketRef.current=market;
+ const controllerRef=useRef<ReturnType<typeof createOpportunityMarketController>|null>(null);
+ if(!controllerRef.current){
+  controllerRef.current=createOpportunityMarketController({
+   getMarket:()=>marketRef.current,
+   fetchJobs:()=>request<{jobs:Job[]}>('/api/opportunity-suggestions/jobs'),
+   fetchResults:targetMarket=>request<Results>(`/api/opportunity-suggestions/results?market=${encodeURIComponent(targetMarket)}`),
+   verifyResults:targetMarket=>request<Results>(`/api/opportunity-suggestions/results?verify=1&market=${encodeURIComponent(targetMarket)}`),
+   onJobs:setJobs,
+   onResults:setResultsState,
+   onArchive:value=>setArchiveState(value),
+   onVerifying:setVerifyingSecop,
+  });
+ }
  const [saveTarget,setSaveTarget]=useState<{jobId:string;item:Item}|null>(null);
- const [archive,setArchive]=useState<Array<Item&{jobId:string}>|null>(null);
- const loadArchive=async()=>{try{const value=await request<{items:Array<Item&{jobId:string}>}>(`/api/opportunity-suggestions/results?archive=1&market=${encodeURIComponent(market)}`);setArchive(value.items);}catch{showToast(en?'Could not load the archive.':'No se pudo cargar el archivo.','error');}};
+ const [archiveState,setArchiveState]=useState<{market:ProcurementMarket;items:Array<Item&{jobId:string}>}|null>(null);
+ const archive=resolveMarketArchive(archiveState,market);
+ const loadArchive=async()=>{const targetMarket=market;try{const value=await request<{items:Array<Item&{jobId:string}>}>(`/api/opportunity-suggestions/results?archive=1&market=${encodeURIComponent(targetMarket)}`);if(marketRef.current===targetMarket)setArchiveState({market:targetMarket,items:value.items});}catch{if(marketRef.current===targetMarket)showToast(en?'Could not load the archive.':'No se pudo cargar el archivo.','error');}};
  const loadSettings=useCallback(async()=>{const value=await request<Settings>('/api/opportunity-suggestions/settings');setSettings(value);setKeywords(value.keywords);setIncludeRup(value.includeRup);setEnabled(value.enabled);setAutoEnabled(value.autoEnabled);setRefreshHours(value.refreshHours??6);setRunnerAutoEnabled(value.runnerAutoEnabled);setConsent(true);},[]);
- const verifyLatestResults=useCallback(async(jobId:string)=>{if(verifiedJobRef.current===jobId)return;verifiedJobRef.current=jobId;setVerifyingSecop(true);try{const verified=await request<Results>(`/api/opportunity-suggestions/results?verify=1&market=${encodeURIComponent(market)}`);setResults(verified);}catch{verifiedJobRef.current=null;}finally{setVerifyingSecop(false);}},[market]);
- const refresh=useCallback(async()=>{const [,latestResults]=await Promise.all([request<{jobs:Job[]}>('/api/opportunity-suggestions/jobs').then(data=>setJobs(data.jobs)),request<Results>(`/api/opportunity-suggestions/results?market=${encodeURIComponent(market)}`)]);setResults(latestResults);if(latestResults.jobId&&latestResults.items.length)void verifyLatestResults(latestResults.jobId);},[market,verifyLatestResults]);
- useEffect(()=>{verifiedJobRef.current=null;pending.current=null;setArchive(null);setResults(null);},[market]);
+ const refresh=useCallback(()=>controllerRef.current!.refresh(market),[market]);
+ useEffect(()=>{pending.current=null;controllerRef.current!.resetForMarket();},[market]);
  useEffect(()=>{let live=true;void Promise.all([loadSettings(),refresh()]).catch(()=>{if(live)setLoadError(true);});return()=>{live=false;};},[loadSettings,refresh]);
  const active=jobs.find(job=>['queued','running'].includes(job.state));
  const latestCompleted=jobs.find(job=>job.state==='succeeded');
- const checkingResults=!active&&!!latestCompleted&&results?.jobId!==latestCompleted.id;
+ const checkingResults=isCheckingOpportunityResults({active,latestCompleted,results});
  const inProgress=searching||!!active||verifyingSecop;
  useEffect(()=>{if(!inProgress){setElapsedSeconds(0);return;}setElapsedSeconds(0);const startedAt=Date.now();const timer=window.setInterval(()=>setElapsedSeconds(Math.floor((Date.now()-startedAt)/1000)),1000);return()=>window.clearInterval(timer);},[inProgress,active?.id,active?.state,searching,verifyingSecop]);
  const formatElapsed=(seconds:number)=>`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
