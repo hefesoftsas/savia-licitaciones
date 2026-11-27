@@ -88,3 +88,19 @@ test('Pi desarrolla y revisa el índice mediante las etapas de escritorio con pr
     assert.equal(result.outline[0].children.length, 2); assert.ok(calls >= 4);
   } finally { await rm(temporaryRoot, { recursive: true, force: true }); }
 });
+
+test('reconcilia UUIDs transpuestos entre capítulos raíz no expandibles antes de devolver el índice', async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'savia-expand-swap-'));
+  const rootA = { id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b32e1', title: 'Garantía', description: 'Póliza', attr: '商务/资信', content_mode: 'template-fill' };
+  const rootB = { id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b32e2', title: 'Experiencia', description: 'Contratos', attr: '业绩', content_mode: 'template-fill' };
+  const rootC = { id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b32e3', title: 'Metodología', description: 'Alcance', attr: '技术', content_mode: 'ai-generate' };
+  const roots = [rootA, rootB, rootC];
+  try {
+    const handler = createOutlineExpandHandler({ temporaryRoot, createAiService: () => ({}), createRuntime: () => ({ close: async () => {} }), runTask: async input => {
+      input.checkpointTask({ status: 'success' }, { outlineData: { outline: [{ ...rootA, id: rootB.id }, { ...rootB, id: rootA.id }, { ...rootC, children: [{ id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b32e4', title: 'Sub 1', description: 'D1', content_mode: 'ai-generate' }, { id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b32e5', title: 'Sub 2', description: 'D2', content_mode: 'ai-generate' }] }] } });
+    } });
+    const result = await handler({ language: 'es', dataProcessingConsent: true, noTechnicalScore: true }, { job: { id: 'job' }, signal: new AbortController().signal, getPlanContext: async () => ({ roots, analyses: { 'project-overview': 'Resumen', 'technical-score': 'Sin puntuación', 'response-requirements': 'Estructura' } }), getCredential: async () => ({ provider: 'opencode-go', model: 'test', secret: 'key' }), askUser: async () => ({ answer: 'Sí' }) });
+    assert.deepEqual(result.outline.map(item => [item.id, item.title]), [[rootA.id, rootA.title], [rootB.id, rootB.title], [rootC.id, rootC.title]]);
+    assert.equal(result.outline[2].children.length, 2);
+  } finally { await rm(temporaryRoot, { recursive: true, force: true }); }
+});

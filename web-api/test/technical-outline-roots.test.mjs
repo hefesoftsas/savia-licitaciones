@@ -9,6 +9,7 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { runOnce } from '../../runner/work-loop.mjs';
 import { createOutlineRootsHandler } from '../../runner/technical-outline-roots.mjs';
 import { createOutlineExpandHandler } from '../../runner/technical-outline-expand.mjs';
+import { flattenExpanded } from '../src/technical-outline.js';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('selecciona raíces revisadas sin reemplazar el plan y detecta cambios de fuentes o análisis', async () => {
@@ -163,4 +164,30 @@ test('selecciona raíces revisadas sin reemplazar el plan y detecta cambios de f
   assert.equal((await post(`${outline}/apply`,{jobId:replaceExpand.id},{cookie:alice})).status,200);
   const replaced=await (await req(`${path}/technical-plan`,{headers:{cookie:alice}})).json(); assert.equal(replaced.version,2); assert.equal(replaced.outline[0].title,'Índice nuevo');
  } finally { await worker?.dispose(); await rm(build, { recursive: true, force: true }); }
+});
+
+test('flattenExpanded reconcilia UUIDs transpuestos entre raíces confirmadas y rechaza alteraciones', () => {
+  const rootA = { id: crypto.randomUUID(), title: 'Garantía de seriedad', description: 'Póliza', attr: '商务/资信', content_mode: 'template-fill' };
+  const rootB = { id: crypto.randomUUID(), title: 'Experiencia habilitante', description: 'Contratos previos', attr: '业绩', content_mode: 'template-fill' };
+  const rootC = { id: crypto.randomUUID(), title: 'Enfoque metodológico', description: 'Metodología técnica', attr: '技术', content_mode: 'ai-generate' };
+  const child1 = { id: crypto.randomUUID(), title: 'Fase diagnóstica', description: 'Diagnóstico', content_mode: 'ai-generate' };
+  const child2 = { id: crypto.randomUUID(), title: 'Fase de control', description: 'Control', content_mode: 'ai-generate' };
+
+  const swapped = [
+    { ...rootA, id: rootB.id },
+    { ...rootB, id: rootA.id },
+    { id: rootC.id, title: rootC.title, description: rootC.description, attr: rootC.attr, children: [child1, child2] },
+  ];
+  const flattened = flattenExpanded(swapped, [rootA, rootB, rootC]);
+  assert.ok(flattened);
+  assert.equal(flattened[0].id, rootA.id);
+  assert.equal(flattened[0].title, rootA.title);
+  assert.equal(flattened[1].id, rootB.id);
+  assert.equal(flattened[1].title, rootB.title);
+  assert.equal(flattened[2].id, rootC.id);
+  assert.equal(flattened[3].parent, rootC.id);
+  assert.equal(flattened[4].parent, rootC.id);
+
+  assert.equal(flattenExpanded([{ ...rootA, title: 'Título modificado' }, rootB, swapped[2]], [rootA, rootB, rootC]), null);
+  assert.equal(flattenExpanded([{ ...rootA, children: [child1, child2] }, rootB, rootC], [rootA, rootB, rootC]), null);
 });

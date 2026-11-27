@@ -8,15 +8,42 @@ const conflict = () => Response.json({ error: 'sources_or_version_conflict' }, {
 function validRoots(items) {
   return Array.isArray(items) && items.length > 0 && items.length <= 50 && new Set(items.map(item => item?.id)).size === items.length && items.every(item => item && uuid.test(item.id) && typeof item.title === 'string' && !!item.title.trim() && item.title.length <= 300 && typeof item.description === 'string' && !!item.description.trim() && item.description.length <= 2000 && attributes.includes(item.attr) && modes.includes(item.content_mode) && !item.children && (item.content_mode_note === undefined || (typeof item.content_mode_note === 'string' && item.content_mode_note.length <= 2000)));
 }
-export function flattenExpanded(items, roots) {
+function reconcileRootNodes(items, roots) {
   if (!Array.isArray(items) || !Array.isArray(roots) || items.length !== roots.length) return null;
   const byId = new Map();
   for (const item of items) {
     if (typeof item?.id !== 'string' || byId.has(item.id)) return null;
     byId.set(item.id, item);
   }
-  const ordered = roots.map(root => byId.get(root?.id));
-  if (ordered.some(node => !node)) return null;
+  const direct = roots.map(root => byId.get(root?.id));
+  if (direct.some(node => !node)) return null;
+  if (direct.every((node, index) => {
+    const root = roots[index];
+    return root && node.title === root.title && node.description === root.description && node.attr === root.attr;
+  })) {
+    return direct;
+  }
+  // Recover only a bijective UUID transposition across confirmed roots whose title, description, and attr match verbatim.
+  const used = new Set();
+  const recovered = [];
+  for (const root of roots) {
+    if (!root) return null;
+    const matchIndex = items.findIndex((item, index) => (
+      !used.has(index) &&
+      item?.title === root.title &&
+      item?.description === root.description &&
+      item?.attr === root.attr
+    ));
+    if (matchIndex === -1) return null;
+    used.add(matchIndex);
+    recovered.push({ ...items[matchIndex], id: root.id });
+  }
+  return recovered;
+}
+
+export function flattenExpanded(items, roots) {
+  const ordered = reconcileRootNodes(items, roots);
+  if (!ordered) return null;
   const flattened = [], seen = new Set();
   function visit(nodes, parentId, depth) {
     if (!Array.isArray(nodes) || !nodes.length || depth > 6) return false;

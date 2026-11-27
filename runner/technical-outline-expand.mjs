@@ -8,6 +8,44 @@ import runtimeModule from '../client/electron/services/pi/piRuntimeService.cjs';
 import outlineModule from '../client/electron/services/outlineGenerationTaskV2.cjs';
 import { TaskInputError } from './task-errors.mjs';
 
+function reconcileExpandedOutline(items, roots) {
+  if (!Array.isArray(items) || !Array.isArray(roots) || items.length !== roots.length) return null;
+  const byId = new Map();
+  for (const item of items) {
+    if (typeof item?.id !== 'string' || byId.has(item.id)) return null;
+    byId.set(item.id, item);
+  }
+  const direct = roots.map(root => byId.get(root?.id));
+  if (direct.some(node => !node)) return null;
+  const used = new Set();
+  const reconciled = [];
+  for (let index = 0; index < roots.length; index++) {
+    const root = roots[index];
+    if (!root) return null;
+    let candidate = direct[index];
+    if (candidate.title !== root.title || candidate.description !== root.description || candidate.attr !== root.attr) {
+      const matchIndex = items.findIndex((item, itemIndex) => (
+        !used.has(itemIndex) &&
+        item?.title === root.title &&
+        item?.description === root.description &&
+        item?.attr === root.attr
+      ));
+      if (matchIndex === -1) return null;
+      used.add(matchIndex);
+      candidate = items[matchIndex];
+    } else {
+      used.add(items.indexOf(candidate));
+    }
+    const normalized = { ...candidate, id: root.id };
+    if (!candidate.children?.length && root.content_mode !== 'ai-generate') {
+      normalized.content_mode = root.content_mode;
+      if (root.content_mode_note !== undefined) normalized.content_mode_note = root.content_mode_note;
+    }
+    reconciled.push(normalized);
+  }
+  return reconciled;
+}
+
 export function createOutlineExpandHandler({ temporaryRoot = tmpdir(), createAiService = aiModule.createAiService, createRuntime = runtimeModule.createPiRuntimeService, runTask = outlineModule.runOutlineGenerationTaskV2 } = {}) {
   return async (payload, context) => {
     const en = payload?.language === 'en';
@@ -39,7 +77,8 @@ export function createOutlineExpandHandler({ temporaryRoot = tmpdir(), createAiS
       context.signal?.throwIfAborted();
       await getContext();
       if (!Array.isArray(generated?.outline) || !generated.outline.length) throw new TaskInputError(en ? 'The outline was not generated.' : 'No se generó el índice.');
-      return { outline: generated.outline, warnings: snapshot.roots.some(root => root.content_mode === 'template-fill') ? [en ? 'Automatic extraction of tender templates is not yet available in the web workflow.' : 'La extracción automática de plantillas del pliego aún no está disponible en el flujo web.'] : [] };
+      const reconciledOutline = reconcileExpandedOutline(generated.outline, snapshot.roots) || generated.outline;
+      return { outline: reconciledOutline, warnings: snapshot.roots.some(root => root.content_mode === 'template-fill') ? [en ? 'Automatic extraction of tender templates is not yet available in the web workflow.' : 'La extracción automática de plantillas del pliego aún no está disponible en el flujo web.'] : [] };
     } finally { try { await runtime?.close(); } finally { await rm(directory, { recursive: true, force: true }); } }
   };
 }
