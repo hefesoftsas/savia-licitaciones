@@ -190,4 +190,14 @@ test('flattenExpanded reconcilia UUIDs transpuestos entre raíces confirmadas y 
 
   assert.equal(flattenExpanded([{ ...rootA, title: 'Título modificado' }, rootB, swapped[2]], [rootA, rootB, rootC]), null);
   assert.equal(flattenExpanded([{ ...rootA, children: [child1, child2] }, rootB, rootC], [rootA, rootB, rootC]), null);
+
+  const regenerated = [
+    { ...rootA, id: crypto.randomUUID() },
+    rootB,
+    swapped[2],
+  ];
+  const recovered = flattenExpanded(regenerated, [rootA, rootB, rootC]);
+  assert.ok(recovered);
+  assert.equal(recovered[0].id, rootA.id);
+  assert.equal(recovered[0].title, rootA.title);
 });

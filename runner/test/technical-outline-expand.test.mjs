@@ -97,7 +97,7 @@ test('reconcilia UUIDs transpuestos entre capítulos raíz no expandibles antes 
   const roots = [rootA, rootB, rootC];
   try {
     const handler = createOutlineExpandHandler({ temporaryRoot, createAiService: () => ({}), createRuntime: () => ({ close: async () => {} }), runTask: async input => {
-      input.checkpointTask({ status: 'success' }, { outlineData: { outline: [{ ...rootA, id: rootB.id }, { ...rootB, id: rootA.id }, { ...rootC, children: [{ id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b32e4', title: 'Sub 1', description: 'D1', content_mode: 'ai-generate' }, { id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b32e5', title: 'Sub 2', description: 'D2', content_mode: 'ai-generate' }] }] } });
+      input.checkpointTask({ status: 'success' }, { outlineData: { outline: [{ ...rootA, id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b3299' }, { ...rootB, id: rootA.id }, { ...rootC, children: [{ id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b32e4', title: 'Sub 1', description: 'D1', content_mode: 'ai-generate' }, { id: 'eaf26ae4-c1fa-495a-b2c0-b4ab002b32e5', title: 'Sub 2', description: 'D2', content_mode: 'ai-generate' }] }] } });
     } });
     const result = await handler({ language: 'es', dataProcessingConsent: true, noTechnicalScore: true }, { job: { id: 'job' }, signal: new AbortController().signal, getPlanContext: async () => ({ roots, analyses: { 'project-overview': 'Resumen', 'technical-score': 'Sin puntuación', 'response-requirements': 'Estructura' } }), getCredential: async () => ({ provider: 'opencode-go', model: 'test', secret: 'key' }), askUser: async () => ({ answer: 'Sí' }) });
     assert.deepEqual(result.outline.map(item => [item.id, item.title]), [[rootA.id, rootA.title], [rootB.id, rootB.title], [rootC.id, rootC.title]]);

@@ -15,15 +15,15 @@ function reconcileRootNodes(items, roots) {
     if (typeof item?.id !== 'string' || byId.has(item.id)) return null;
     byId.set(item.id, item);
   }
+  const confirmedIds = new Set(roots.map(root => root?.id));
   const direct = roots.map(root => byId.get(root?.id));
-  if (direct.some(node => !node)) return null;
   if (direct.every((node, index) => {
     const root = roots[index];
-    return root && node.title === root.title && node.description === root.description && node.attr === root.attr;
+    return node && root && node.title === root.title && node.description === root.description && node.attr === root.attr;
   })) {
     return direct;
   }
-  // Recover only a bijective UUID transposition across confirmed roots whose title, description, and attr match verbatim.
+  // Recover transposed confirmed IDs on any root, or regenerated IDs only on locked non-AI leaf roots whose title, description, and attr match verbatim.
   const used = new Set();
   const recovered = [];
   for (const root of roots) {
@@ -32,7 +32,8 @@ function reconcileRootNodes(items, roots) {
       !used.has(index) &&
       item?.title === root.title &&
       item?.description === root.description &&
-      item?.attr === root.attr
+      item?.attr === root.attr &&
+      (confirmedIds.has(item.id) || (root.content_mode !== 'ai-generate' && !item.children?.length))
     ));
     if (matchIndex === -1) return null;
     used.add(matchIndex);

@@ -16,14 +16,22 @@ function reconcileExpandedOutline(items, roots) {
     byId.set(item.id, item);
   }
   const direct = roots.map(root => byId.get(root?.id));
-  if (direct.some(node => !node)) return null;
   const used = new Set();
-  const reconciled = [];
+  const matched = new Array(roots.length);
   for (let index = 0; index < roots.length; index++) {
     const root = roots[index];
     if (!root) return null;
-    let candidate = direct[index];
-    if (candidate.title !== root.title || candidate.description !== root.description || candidate.attr !== root.attr) {
+    const candidate = direct[index];
+    if (candidate && candidate.title === root.title && candidate.description === root.description && candidate.attr === root.attr) {
+      used.add(items.indexOf(candidate));
+      matched[index] = candidate;
+    }
+  }
+  const reconciled = [];
+  for (let index = 0; index < roots.length; index++) {
+    const root = roots[index];
+    let candidate = matched[index];
+    if (!candidate) {
       const matchIndex = items.findIndex((item, itemIndex) => (
         !used.has(itemIndex) &&
         item?.title === root.title &&
@@ -33,8 +41,6 @@ function reconcileExpandedOutline(items, roots) {
       if (matchIndex === -1) return null;
       used.add(matchIndex);
       candidate = items[matchIndex];
-    } else {
-      used.add(items.indexOf(candidate));
     }
     const normalized = { ...candidate, id: root.id };
     if (!candidate.children?.length && root.content_mode !== 'ai-generate') {
